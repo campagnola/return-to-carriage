@@ -16,11 +16,10 @@ class Text(QtGui.QGraphicsTextItem):
         fm = QtGui.QFontMetrics(self.font())
         w = fm.averageCharWidth()
         h = fm.height()
-        print w, h
         self.scale(1.0/w, 1.0/h)
 
 
-class Console(Text):
+class CharGrid(Text):
     def __init__(self, shape):
         self.textshape = shape
         char_template = b'<span style="color:#FFFFFF;background:#000000">#</span>'
@@ -42,38 +41,88 @@ class Console(Text):
 
 
 class Character(Text):
-    def __init__(self, char="@"):
+    def __init__(self, char):
         Text.__init__(self)
         self.setHtml('<span style="color:#000000;background:#CCCCCC">%s</span>' % char)
         
 
+class MainWindow(QtGui.QWidget):
+    key_pressed = QtCore.Signal(object)
+    key_released = QtCore.Signal(object)
+    
+    def __init__(self):
+        QtGui.QWidget.__init__(self)
+        self._layout = QtGui.QGridLayout()
+        self.setLayout(self._layout)
+        self._layout.setContentsMargins(0, 0, 0, 0)
+        self.gw = pg.GraphicsLayoutWidget()
+        self._layout.addWidget(self.gw)
+        self.v = self.gw.addViewBox()
+        self.v.invertY()
+        self.v.setAspectLocked()
+        self.show()
+        self.resize(1200, 800)
+
+    def keyPressEvent(self, ev):
+        self.key_pressed.emit(ev)
+        
+    def keyReleaseEvent(self, ev):
+        self.key_released.emit(ev)
+
+
+class Game(QtCore.QObject):
+    def __init__(self, win):
+        QtCore.QObject.__init__(self)
+        self.win = win
+        win.key_pressed.connect(self.key_pressed)
+        win.key_released.connect(self.key_released)
+        self.view = win.v
+
+        shape = (50, 150)
+
+        self.c = CharGrid(shape)
+        self.c.setZValue(-1)
+        self.view.addItem(self.c)
+
+        self.maze = np.zeros(shape, dtype=int)
+        self.maze[0] = 1
+        self.maze[-1] = 1
+        self.maze[:,0] = 1
+        self.maze[:,-1] = 1
+        
+        chars = np.array([".", "#"])[self.maze]
+        self.c.char_array[:] = chars
+        self.c.update_all()
+        
+        self.player = Character("@")
+        self.player.setPos(3, 3)
+        self.view.addItem(self.player)
+        
+    def key_pressed(self, ev):
+        if ev.key() == QtCore.Qt.Key_Left:
+            self.move_player(-1, 0)
+        elif ev.key() == QtCore.Qt.Key_Right:
+            self.move_player(1, 0)
+        elif ev.key() == QtCore.Qt.Key_Up:
+            self.move_player(0, -1)
+        elif ev.key() == QtCore.Qt.Key_Down:
+            self.move_player(0, 1)
+
+    def key_released(self, ev):
+        #print ev
+        pass
+
+    def move_player(self, dx, dy):
+        pos = self.player.pos()
+        newpos = pos + QtCore.QPoint(dx, dy)
+        if self.maze[newpos.y(), newpos.x()] == 0:
+            self.player.setPos(newpos)
+
 
 if __name__ == '__main__':
     app = pg.mkQApp()
-    w = pg.GraphicsLayoutWidget()
-    v = w.addViewBox()
-    v.invertY()
-    v.setAspectLocked()
-    w.show()
-    w.resize(1200, 800)
-
-    shape = (50, 150)
-
-    c = Console(shape)
-    c.setZValue(-1)
-    v.addItem(c)
-
-    maze = np.zeros(shape, dtype=int)
-    maze[0] = 1
-    maze[-1] = 1
-    maze[:,0] = 1
-    maze[:,-1] = 1
     
-    chars = np.array([".", "#"])[maze]
-    c.char_array[:] = chars
-    c.update_all()
-    
-    player = Character("@")
-    player.setPos(3, 3)
-    v.addItem(player)
+    w = MainWindow()
+    g = Game(w)
+
     
