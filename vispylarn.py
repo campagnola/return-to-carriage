@@ -24,7 +24,7 @@ class SpritesVisual(vispy.visuals.Visual):
             v_sprite = sprite;
 
             gl_Position = $transform(vec4(position, 0, 1));
-            gl_PointSize = size;
+            gl_PointSize = size * 1.01;  // extra 0.01 prevents gaps
         }
     """
 
@@ -50,7 +50,7 @@ class SpritesVisual(vispy.visuals.Visual):
             }
             
             // supersample sprite value
-            const int ss = 4;
+            const int ss = 2;
             float alpha = 0;
             for (int i=0; i<ss; i++) {
                 for (int j=0; j<ss; j++) {
