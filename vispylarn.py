@@ -30,33 +30,44 @@ class SpritesVisual(vispy.visuals.Visual):
 
     fragment_shader = """
         #version 120
+        uniform float size;
         varying vec4 v_fgcolor;
         varying vec4 v_bgcolor;
         varying float v_sprite;
         
         uniform sampler2D atlas;
-        uniform vec2 atlas_size;
         uniform sampler1D atlas_map;
         uniform float n_sprites;
         uniform vec2 scale;
         
         void main()
         {
+            gl_FragColor = vec4(0, 0, 0, 0);
             vec4 atlas_coords = texture1D(atlas_map, v_sprite / n_sprites);
             vec2 pt = gl_PointCoord.xy / scale;
             if( pt.x < 0 || pt.y < 0 || pt.x > 1 || pt.y > 1 ) {
                 discard;
             }
-            vec2 tex_coords = atlas_coords.yx + pt * atlas_coords.wz;
-            vec4 tex = texture2D(atlas, tex_coords);
-            gl_FragColor = tex.g * v_fgcolor + tex.b * v_bgcolor;
+            
+            // supersample sprite value
+            const int ss = 4;
+            float alpha = 0;
+            for (int i=0; i<ss; i++) {
+                for (int j=0; j<ss; j++) {
+                    vec2 dx = vec2(i/(size*ss), j/(size*ss));
+                    vec2 tex_coords = atlas_coords.yx + (pt + dx/scale) * atlas_coords.wz;
+                    vec4 tex = texture2D(atlas, tex_coords);
+                    alpha += tex.g / (ss*ss);
+                }
+            }
+            
+            gl_FragColor = v_fgcolor * alpha + v_bgcolor * (1-alpha);
+            
             gl_FragColor.a = 1.0;
-            gl_FragColor.rgb += 0.1;
         }
     """
 
     def __init__(self, shape=(40, 120)):
-        vispy.visuals.Visual.__init__(self, self.vertex_shader, self.fragment_shader)
         
         self.size = 16
         scale = (0.6, 1)
@@ -68,8 +79,11 @@ class SpritesVisual(vispy.visuals.Visual):
         self.atlas = SpriteAtlas()
         
         self.fgcolor = np.random.normal(size=(npts, 4)).astype('float32')
-        self.bgcolor = np.random.normal(size=(npts, 4)).astype('float32')
+        #self.fgcolor[:] = (0, 1, 0, 1)
+        self.bgcolor = np.random.normal(size=(npts, 4), loc=0.2, scale=0.1).astype('float32')
+        #self.bgcolor[:] = (1, 0, 0, 1)
 
+        vispy.visuals.Visual.__init__(self, self.vertex_shader, self.fragment_shader)
         self.shared_program['position'] = self.pos
         self.shared_program['sprite'] = self.sprites
         self.shared_program['fgcolor'] = self.fgcolor
@@ -80,22 +94,24 @@ class SpritesVisual(vispy.visuals.Visual):
         self._atlas_tex = vispy.gloo.Texture2D(data=self.atlas.atlas, interpolation='nearest')
         self.shared_program['atlas'] = self._atlas_tex
 
-        self.shared_program['atlas_size'] = self._atlas_tex.shape[:2]
-
         self._atlas_map_tex = vispy.gloo.Texture1D(data=self.atlas.sprite_coords, interpolation='nearest')
         self.shared_program['atlas_map'] = self._atlas_map_tex
 
         self.shared_program['n_sprites'] = self._atlas_map_tex.shape[0]
-
 
         self._draw_mode = 'points'
         
     def _prepare_transforms(self, view):
         xform = view.transforms.get_transform()
         view.view_program.vert['transform'] = xform
-
+        
     def _prepare_draw(self, view):
-        pass
+        # set point size to match zoom
+        tr = view.transforms.get_transform('visual', 'canvas')
+        o = tr.map((0, 0))
+        x = tr.map((self.size, 0))
+        l = ((x-o)[:2]**2).sum()**0.5
+        view.view_program['size'] = l
 
     def _compute_bounds(self, axis, view):
         return self.pos[:, axis].min(), self.pos[:, axis].max()
@@ -107,7 +123,7 @@ import pyqtgraph as pg
 class SpriteAtlas(object):
     def __init__(self):
         chars = "12345"
-        self.size = 32
+        self.size = 256
         self.font = QtGui.QFont('monospace', self.size)
         fm = QtGui.QFontMetrics(self.font)
         char_shape = (int(fm.height()), int(fm.maxWidth()))
@@ -145,5 +161,6 @@ if __name__ == '__main__':
     view = canvas.central_widget.add_view()
     view.camera = 'panzoom'
     view.camera.rect = [0, 0, 200, 200]
+    view.camera.aspect = 1
     
     txt = Sprites(parent=view.scene)
