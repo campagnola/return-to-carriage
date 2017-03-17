@@ -1,0 +1,44 @@
+<html>
+<head>
+<script>
+    var canvas
+    
+    function init() {
+        canvas = document.getElementById("canvas")
+        setTimeout(update, 100);
+    }
+
+    function update() {
+        console.log("hi")
+        txt = ""
+        for( var i=0; i<40; i++ ) {
+            for( var j=0; j<120; j++ ) {
+                if( Math.random() > 0.5 ) {
+                    txt = txt + '<span style="color: #FFF; background: #000">#</span>'
+                }
+                else {
+                    txt = txt + "."
+                }
+            }
+            txt = txt + "<br>"
+        }
+        canvas.innerHTML = txt
+        setTimeout(update, 16);
+    }
+    window.onload = init
+
+
+</script>
+</head>
+
+
+
+<body>
+
+<div id="canvas" style="font-family: monospace">
+???
+</div>
+
+</body>
+
+</html>

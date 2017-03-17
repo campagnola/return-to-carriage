@@ -1,81 +1,6 @@
-import pyqtgraph as pg
-from pyqtgraph.Qt import QtGui, QtCore
-import numpy as np
-
-
-class Text(QtGui.QGraphicsTextItem):
-    def __init__(self):
-        QtGui.QGraphicsTextItem.__init__(self)
-        font = pg.QtGui.QFont('monospace')
-        self.setFont(font)
-
-    def setHtml(self, html):
-        QtGui.QGraphicsTextItem.setHtml(self, html)
-        self.resetTransform()
-        br = self.boundingRect()
-        fm = QtGui.QFontMetrics(self.font())
-        w = fm.averageCharWidth()
-        h = fm.height()
-        self.scale(1.0/w, 1.0/h)
-
-
-class CharGrid(Text):
-    def __init__(self, shape):
-        self.textshape = shape
-        char_template = b'<span style="color:#FFFFFF;background:#000000">#</span>'
-        row_template = (char_template * shape[1]) + b'<br/>\n'
-        self.html = bytearray(row_template * shape[0])
-        self.html_array = np.frombuffer(self.html, count=shape[0] * len(row_template), dtype='S1').reshape(shape[0], len(row_template))
-        self.all_chars_array = self.html_array[:, :-6].reshape(shape[0], shape[1], len(char_template))
-        self.color_array = self.all_chars_array[:, :, 20:26]
-        self.bgcolor_array = self.all_chars_array[:, :, 39:45]
-        self.char_array = self.all_chars_array[:, :, -8]
-        
-        self.color = np.ones(shape + (3,), dtype='ubyte') * 255
-        self.bgcolor = np.zeros(shape + (3,), dtype='ubyte')
-        
-        Text.__init__(self)
-        font = pg.QtGui.QFont('monospace')
-        self.setFont(font)
-        self.update_all()
-        
-    def update_all(self):
-        hex = np.array(list('0123456789ABCDEF'))
-        self.bgcolor_array[...,::2] = hex[self.bgcolor>>4]
-        self.bgcolor_array[...,1::2] = hex[self.bgcolor&0xF]
-        self.color_array[...,::2] = hex[self.color>>4]
-        self.color_array[...,1::2] = hex[self.color&0xF]
-        self.setHtml(str(self.html))
-
-
-class Character(Text):
-    def __init__(self, char):
-        Text.__init__(self)
-        self.setHtml('<span style="color:#000000;background:#5555CC">%s</span>' % char)
-        
-
-class MainWindow(QtGui.QWidget):
-    key_pressed = QtCore.Signal(object)
-    key_released = QtCore.Signal(object)
-    
-    def __init__(self):
-        QtGui.QWidget.__init__(self)
-        self._layout = QtGui.QGridLayout()
-        self.setLayout(self._layout)
-        self._layout.setContentsMargins(0, 0, 0, 0)
-        self.gw = pg.GraphicsLayoutWidget()
-        self._layout.addWidget(self.gw)
-        self.v = self.gw.addViewBox()
-        self.v.invertY()
-        #self.v.setAspectLocked()
-        self.show()
-        self.resize(1200, 800)
-
-    def keyPressEvent(self, ev):
-        self.key_pressed.emit(ev)
-        
-    def keyReleaseEvent(self, ev):
-        self.key_released.emit(ev)
+from PyQt4 import QtGui, QtCore
+from vispy import scene
+from vispy.scene.visuals import Text
 
 
 class Game(QtCore.QObject):
@@ -172,10 +97,36 @@ class Game(QtCore.QObject):
             self._update_text()
 
 
+class MainWindow(QtGui.QWidget):
+    key_pressed = QtCore.Signal(object)
+    key_released = QtCore.Signal(object)
+    
+    def __init__(self):
+        QtGui.QWidget.__init__(self)
+        self._layout = QtGui.QGridLayout()
+        self.setLayout(self._layout)
+        self._layout.setContentsMargins(0, 0, 0, 0)
+        self.canvas = scene.SceneCanvas()
+        self.view = self.canvas.central_widget.add_view()
+        self.view.camera = 'panzoom'
+        self._layout.addWidget(self.view._native)
+        self.show()
+        self.resize(1200, 800)
+
+    def keyPressEvent(self, ev):
+        self.key_pressed.emit(ev)
+        
+    def keyReleaseEvent(self, ev):
+        self.key_released.emit(ev)
+
+
+
+
 if __name__ == '__main__':
-    app = pg.mkQApp()
+    
+    vispy.app.use()
+    app = QtGui.QApplication([])
     
     w = MainWindow()
     g = Game(w)
 
-    
