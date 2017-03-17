@@ -62,28 +62,32 @@ class SpritesVisual(vispy.visuals.Visual):
             }
             
             gl_FragColor = v_fgcolor * alpha + v_bgcolor * (1-alpha);
-            
-            gl_FragColor.a = 1.0;
         }
     """
 
     def __init__(self, shape=(40, 120)):
+        self.size = 0
+        self.pos = None
+        self.sprites = None
+        self.atlas = None
+        self.fgcolor = None
+        self.bgcolor = None
+        self._atlas_tex = None
+        self._atlas_map_tex = None
         
-        self.size = 16
-        scale = (0.6, 1)
-        npts = shape[0]*shape[1]
-        self.pos = np.mgrid[0:shape[1], 0:shape[0]].transpose(1, 2, 0).reshape(npts,2) * (self.size * np.array(scale).reshape(1, 1, 2))
-        self.pos = self.pos.astype('float32')
-        self.sprites = np.random.randint(0, 5, size=shape).astype('float32').reshape(npts)
-        
-        self.atlas = SpriteAtlas()
-        
-        self.fgcolor = np.random.normal(size=(npts, 4)).astype('float32')
-        #self.fgcolor[:] = (0, 1, 0, 1)
-        self.bgcolor = np.random.normal(size=(npts, 4), loc=0.2, scale=0.1).astype('float32')
-        #self.bgcolor[:] = (1, 0, 0, 1)
-
         vispy.visuals.Visual.__init__(self, self.vertex_shader, self.fragment_shader)
+        self._draw_mode = 'points'
+       
+    def set_data(self, pos, sprites, atlas, fgcolor, bgcolor, size, scale):
+        self.size = size
+        self.pos = pos.astype('float32').reshape(np.product(pos.shape[:-1]), pos.shape[-1])
+        self.sprites = sprites.reshape(np.product(sprites.shape)).astype('float32')
+        
+        self.atlas = atlas
+        
+        self.fgcolor = fgcolor
+        self.bgcolor = bgcolor
+
         self.shared_program['position'] = self.pos
         self.shared_program['sprite'] = self.sprites
         self.shared_program['fgcolor'] = self.fgcolor
@@ -98,9 +102,7 @@ class SpritesVisual(vispy.visuals.Visual):
         self.shared_program['atlas_map'] = self._atlas_map_tex
 
         self.shared_program['n_sprites'] = self._atlas_map_tex.shape[0]
-
-        self._draw_mode = 'points'
-        
+       
     def _prepare_transforms(self, view):
         xform = view.transforms.get_transform()
         view.view_program.vert['transform'] = xform
@@ -121,9 +123,8 @@ Sprites = vispy.scene.visuals.create_visual_node(SpritesVisual)
 
 import pyqtgraph as pg
 class SpriteAtlas(object):
-    def __init__(self):
-        chars = "12345"
-        self.size = 256
+    def __init__(self, chars, size=128):
+        self.size = size
         self.font = QtGui.QFont('monospace', self.size)
         fm = QtGui.QFontMetrics(self.font)
         char_shape = (int(fm.height()), int(fm.maxWidth()))
@@ -164,3 +165,34 @@ if __name__ == '__main__':
     view.camera.aspect = 1
     
     txt = Sprites(parent=view.scene)
+
+
+    shape = (50, 120)
+    npts = shape[0]*shape[1]
+    size = 16
+    scale = (0.6, 1)
+        
+    maze = np.ones(shape, dtype=int)
+    maze[1:10, 1:10] = 0
+    maze[-10:-1, -10:-1] = 0
+    maze[20:39, 1:80] = 0
+    maze[5:30, 6] = 0
+    maze[35, 5:-5] = 0
+    
+    pos = np.mgrid[0:shape[1], 0:shape[0]].transpose(2, 1, 0).reshape(npts,2) * (size * np.array(scale).reshape(1, 1, 2))
+    colors = np.array([
+        [[0.2, 0.2, 0.2, 1.0], [0.0, 0.0, 0.0, 1.0]],  # path
+        [[0.0, 0.0, 0.0, 1.0], [0.2, 0.2, 0.2, 1.0]],  # wall
+    ], dtype='float32')
+    color = colors[maze]
+    fgcolor = color[...,0,:]
+    bgcolor = color[...,1,:]
+    
+    # randomize wall color a bit
+    rock = np.random.normal(scale=0.01, size=shape + (1,))
+    walls = maze == 1
+    n_walls = walls.sum()
+    bgcolor[...,:3][walls] += rock[walls]
+
+    atlas = SpriteAtlas('.#')
+    txt.set_data(pos, maze, atlas, fgcolor, bgcolor, size, scale)
