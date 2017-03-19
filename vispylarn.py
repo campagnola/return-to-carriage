@@ -245,10 +245,10 @@ if __name__ == '__main__':
     maze_sprites = mazedata['sprite']
     maze_sprites[:] = 1
     maze_sprites[1:10, 1:10] = 0
-    maze_sprites[-10:-1, -10:-1] = 0
+    maze_sprites[25:35, 105:115] = 0
     maze_sprites[20:39, 1:80] = 0
     maze_sprites[5:30, 6] = 0
-    maze_sprites[35, 5:-5] = 0
+    maze_sprites[35, 5:115] = 0
 
     # set positions
     pos = np.mgrid[0:shape[1], 0:shape[0]].transpose(2, 1, 0)# * (size * np.array(scale).reshape(1, 1, 2))
