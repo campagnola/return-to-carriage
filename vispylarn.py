@@ -1,3 +1,5 @@
+# ~*~ coding: utf8 ~*~
+
 import numpy as np
 from PyQt4 import QtGui, QtCore
 import vispy.visuals, vispy.scene, vispy.gloo
@@ -43,7 +45,7 @@ class SpritesVisual(vispy.visuals.Visual):
         void main()
         {
             gl_FragColor = vec4(0, 0, 0, 0);
-            vec4 atlas_coords = texture1D(atlas_map, v_sprite / n_sprites);
+            vec4 atlas_coords = texture1D(atlas_map, (v_sprite + 0.5) / n_sprites);
             vec2 pt = gl_PointCoord.xy / scale;
             if( pt.x < 0 || pt.y < 0 || pt.x > 1 || pt.y > 1 ) {
                 discard;
@@ -100,7 +102,7 @@ class SpritesVisual(vispy.visuals.Visual):
     
     def _upload_data(self):
         self.shared_program['position'] = self.data['pos']
-        self.shared_program['sprite'] = self.data['sprite']
+        self.shared_program['sprite'] = self.data['sprite'].astype('float32')
         self.shared_program['fgcolor'] = self.data['fgcolor']
         self.shared_program['bgcolor'] = self.data['bgcolor']
         self.shared_program['size'] = self.size
@@ -260,6 +262,23 @@ if __name__ == '__main__':
     walls = sprites == 1
     n_walls = walls.sum()
     mazedata['bgcolor'][...,:3][walls] += rock[walls]
+
+    # add player
+    player_sprite = atlas.add_chars('&')
+    player = txt.add_sprites(1)
+    player.data['pos'] = (100, 100)
+    player.data['sprite'] = player_sprite
+    player.data['fgcolor'] = (0, 0, 0.3, 1)
+    player.data['bgcolor'] = (0.5, 0.5, 0.5, 1)
+
+    # add scroll
+    scroll_sprite = atlas.add_chars(u'次')
+    scroll = txt.add_sprites(1)
+    scroll.data['pos'] = (50, 50)
+    scroll.data['sprite'] = scroll_sprite
+    scroll.data['fgcolor'] = (200, 0, 0, 1)
+    scroll.data['bgcolor'] = (0, 0, 0, 1)
+    
 
     txt._need_data_upload = True
     txt._need_atlas_upload = True
