@@ -71,6 +71,7 @@ class SpritesVisual(vispy.visuals.Visual):
         self.size = size
         self.scale = scale
         self.atlas = atlas
+        self.atlas.atlas_changed.connect(self._atlas_changed)
         self.position = np.empty((0,2), dtype='float32')
         self.sprite = np.empty((0,), dtype='uint32')
         self.fgcolor = np.empty((0, 4), dtype='float32')
@@ -79,7 +80,7 @@ class SpritesVisual(vispy.visuals.Visual):
         self._atlas_tex = vispy.gloo.Texture2D(shape=(1,1,4), format='rgba', interpolation='nearest')
         self._atlas_map_tex = vispy.gloo.Texture1D(shape=(1,4), format='rgba', interpolation='nearest')
         self._need_data_upload = False
-        self._need_atlas_upload = False
+        self._need_atlas_upload = True
         
         vispy.visuals.Visual.__init__(self, self.vertex_shader, self.fragment_shader)
         self._draw_mode = 'points'
@@ -116,6 +117,10 @@ class SpritesVisual(vispy.visuals.Visual):
         self.shared_program['size'] = self.size
         self.shared_program['scale'] = self.scale
         self._need_data_upload = False
+
+    def _atlas_changed(self, ev):
+        self._need_atlas_upload = True
+        self.update()
 
     def _upload_atlas(self):
         self._atlas_tex.set_data(self.atlas.atlas)
@@ -179,7 +184,7 @@ class SpriteData(object):
     def sprite(self, p):
         start, stop = self.indices
         self.sprite[:] = p
-        self.sprites.shared_program['sprite'][start:stop] = self.sprite.reshape(stop-start)
+        self.sprites.shared_program['sprite'][start:stop] = self.sprite.reshape(stop-start).astype('float32')
         self.sprites.update()
 
     @property
@@ -215,6 +220,7 @@ class CharAtlas(object):
     """Texture atlas containing rendered text characters.    
     """
     def __init__(self, size=128):
+        self.atlas_changed = vispy.util.event.EventEmitter(type='atlas_changed')
         self.size = size
         self.font = QtGui.QFont('monospace', self.size)
         self.chars = {}
@@ -249,6 +255,7 @@ class CharAtlas(object):
             self.glyphs[oldn+i] = pg.imageToArray(img)[..., :3].transpose(1, 0, 2)
         
         self._rebuild_atlas()
+        self.atlas_changed()
         return oldn
 
     def _rebuild_atlas(self):
@@ -285,57 +292,50 @@ if __name__ == '__main__':
     
     # create maze
     shape = (50, 120)
-    npts = shape[0]*shape[1]
-    maze = txt.add_sprites(shape)
+    maze = np.ones(shape, dtype='uint32')
+    maze[1:10, 1:10] = 0
+    maze[25:35, 105:115] = 0
+    maze[20:39, 1:80] = 0
+    maze[5:30, 6] = 0
+    maze[35, 5:115] = 0
     
-    # set wall/floor
-    #maze_sprites = maze.sprite.reshape(shape)
-    maze.sprite[:] = 1
-    maze.sprite[1:10, 1:10] = 0
-    maze.sprite[25:35, 105:115] = 0
-    maze.sprite[20:39, 1:80] = 0
-    maze.sprite[5:30, 6] = 0
-    maze.sprite[35, 5:115] = 0
+    maze_sprites = txt.add_sprites(shape)
+    maze_sprites.sprite = maze
 
     # set positions
     pos = np.mgrid[0:shape[1], 0:shape[0]].transpose(2, 1, 0)
-    maze.position = pos.astype('float32')
+    maze_sprites.position = pos
 
     # set colors
     sprite_colors = np.array([
         [[0.2, 0.2, 0.2, 1.0], [0.0, 0.0, 0.0, 1.0]],  # path
         [[0.0, 0.0, 0.0, 1.0], [0.2, 0.2, 0.2, 1.0]],  # wall
     ], dtype='float32')
-    color = sprite_colors[maze.sprite]
-    maze.fgcolor = color[...,0,:]
+    color = sprite_colors[maze]
+    maze_sprites.fgcolor = color[...,0,:]
     bgcolor = color[...,1,:]
     
     # randomize wall color a bit
     rock = np.random.normal(scale=0.01, size=shape + (1,))
-    walls = maze.sprite == 1
+    walls = maze == 1
     n_walls = walls.sum()
     bgcolor[...,:3][walls] += rock[walls]
-    maze.bgcolor = bgcolor
+    maze_sprites.bgcolor = bgcolor
 
     # add player
-    player_sprite = atlas.add_chars('&')
     player = txt.add_sprites((1,))
     player.position = (7, 7)
-    player.sprite = player_sprite
+    player.sprite = atlas.add_chars('&')
     player.fgcolor = (0, 0, 0.3, 1)
     player.bgcolor = (0.5, 0.5, 0.5, 1)
 
-    # add scroll
-    scroll_sprite = atlas.add_chars(u'次')
+    ## add scroll
     scroll = txt.add_sprites((1,))
     scroll.position = (5, 5)
-    scroll.sprite = scroll_sprite
+    scroll.sprite = atlas.add_chars(u'次')
     scroll.fgcolor = (0.7, 0, 0, 1)
     scroll.bgcolor = (0, 0, 0, 1)
     
-
-    txt._need_data_upload = True
-    txt._need_atlas_upload = True
 
 
     def key_pressed(ev):
@@ -354,7 +354,7 @@ if __name__ == '__main__':
         
         newpos = pos + dx
         j, i = tuple(newpos.astype('uint')[0])
-        if maze.sprite[i, j] == 0:
+        if maze[i, j] == 0:
             player.position = newpos
         
     canvas.events.key_press.connect(key_pressed)
