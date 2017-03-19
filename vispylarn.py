@@ -157,6 +157,10 @@ Sprites = vispy.scene.visuals.create_visual_node(SpritesVisual)
 
 
 class SpriteData(object):
+    """For accessing a subset of sprites from a Sprites visual.
+    
+    This is intended to be created using SpritesVisual.add_sprites(...)
+    """
     def __init__(self, sprites, start, shape):
         self.sprites = sprites
         n = np.product(shape)

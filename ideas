@@ -1,0 +1,113 @@
+
+Narrator should be snarky.
+
+"your busted-ass armor has seen better days".
+
+
+
+------------------
+
+
+Add some more realism to combat / health
+
+    - combat can damage different parts of your body in different ways. 
+    - some kinds of damage can slow you down, weaken you, decrease abilities, etc.
+    - some kinds of damage require time and rest to heal. 
+        - After a bad injury, it may be necessary to exit the dungeon and seek aid. Hopefully you don't bleed out before you get out.
+        - Would be cool if critical injuries lead to unconsciousness, but you are more likely to remain conscious as long as danger is nearby
+          (example: you lose consciousness a few paces after exiting the dungeon; wake up later in the healer's hut)
+    - need water / food / sleep
+    - poisons can differ in strength and effect
+    - would be nice if healers can give you advice about causes / treatments for your ailments.
+    - detailed blow-by-blow logging of activities that lead to health problems so we can learn from our mistakes
+    - head wounds can cause amnesia (forget parts of levels, skills, scroll effects, etc)
+    
+    
+-------------------
+
+More realism to skills / memory
+    - You can forget parts of the maze that you haven't visited recently or frequently
+    - Unused skills degrade over time (but with a realistic memory model)
+    - Spells / potions can improve your memory
+    - Magic maps
+
+
+-------------------
+
+
+Characters die permanently, but dungeons are persistent. 
+    - It is possible to leave resources behind for the next adventurer (maps, gold, treasure..)
+    - It is possible to encounter the remains of dead adventurers, but there's a good chance their corpse has already been looted.
+        (and you might find their stuff in the posession of nearby monsters)
+    - You can spin up a new dungeon, but transferring a character to another dungeon incurs a skill / gold penalty (as if you spent a lot of time and money traveling to the next dungeon)
+    
+ 
+--------------------
+
+Inventory management
+    - Avoid creating the temptation to mine / sell all items in the dungeon
+    - Resale value is very low
+    - Most corpses can be looted, but it's unlikely you'll find anything valuable. (crappy weapons, armor that doesn't fit, etc)
+    - Realistic inventory - carry as many rings / scrolls as you like, but a spare suit of armor will encumber you.
+    - Should be easy to drop pack for combat
+    - weapons / armor have realistic degradation (don't get iron wet, on't throw spears at the wall, etc)
+
+
+
+--------------------
+
+
+Detail and perception
+    - Lots of detail available if you examine everything
+    - Caracters with higher perception will notice more detail, even without manually looking
+    - features in the environment have both visibility (how likely you are to notice) and salience (how likely you are to care). 
+        whether a feature shows up in the event log depends on (visibility * perception) * salience
+    
+
+---------------------
+
+Portals
+    - Advanced characters will have rare opportunities to open rifts / portals between levels to avoid long trips in/out of the dungeon
+    - Be creative with graphics for these
+        - Shift part of the map to open cracks
+        - Dynamically open wormhole as you approach the portal
+        - Remote end of the portal is visible through the portal 
+        
+        
+---------------------
+
+Terrain
+
+    - Many types of terrain -- dungeons, caves, forest, water, etc
+    - would be cool to have large ground level + multiple entrances to underground
+    
+    
+---------------------
+
+
+Gameplay
+
+    - mixed realtime and turn-based play
+    - for multiplayer, turn-based play operates locally
+    - most parts gamepad playable
+    - Use mouse / js for ranged weapon aiming
+        skill affects accuracy
+    - combination of rougelike and interactive fiction
+        one panel gives a description of the local area
+            descriptions can be hierarchical -- terse descriptions can be expanded 
+        one panel gives description of character state
+        console for entering commands + event log
+        
+----------------------
+
+
+Graphics
+
+    Primarily text on a grid, especially early in the game
+    Dynamic lighting (torches flicker, fireballs cast moving shadows, etc)
+    particles for magic effects / explosions
+    Depth? 
+        ground level terrain can be 3D
+        some parts of levels can be transparent to level below
+    Parts of the map that are out of line-of-sight (by that you still remember) are desaturated / dimmed
+        
