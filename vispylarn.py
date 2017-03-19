@@ -88,11 +88,14 @@ class SpritesVisual(vispy.visuals.Visual):
         self.shared_program['fgcolor'] = vispy.gloo.VertexBuffer()
         self.shared_program['bgcolor'] = vispy.gloo.VertexBuffer()
     
-    def add_sprites(self, n):
-        """Expand to allow n more sprites, return a SpriteData instance.
+    def add_sprites(self, shape):
+        """Expand to allow more sprites, return a SpriteData instance with the specified shape.
         """
+        if not isinstance(shape, tuple):
+            raise TypeError("shape must be a tuple")
+        n = np.product(shape)
         i = self._resize(self.position.shape[0] + n)
-        return SpriteData(self, i, i+n)
+        return SpriteData(self, i, shape)
 
     def _resize(self, n):
         """Resize sprite array, return old size.
@@ -149,56 +152,58 @@ Sprites = vispy.scene.visuals.create_visual_node(SpritesVisual)
 
 
 class SpriteData(object):
-    def __init__(self, sprites, start, stop):
+    def __init__(self, sprites, start, shape):
         self.sprites = sprites
-        self.indices = (start, stop)
+        n = np.product(shape)
+        self.indices = (start, start+n)
+        self.shape = shape
         
     @property
     def position(self):
         start, stop = self.indices
-        return self.sprites.position[start:stop]
+        return self.sprites.position[start:stop].reshape(self.shape + (2,))
     
     @position.setter
     def position(self, p):
         start, stop = self.indices
         self.position[:] = p
-        self.sprites.shared_program['position'][start:stop] = self.position.view(dtype=[('position', 'float32', 2)])
+        self.sprites.shared_program['position'][start:stop] = self.position.view(dtype=[('position', 'float32', 2)]).reshape(stop-start)
         self.sprites.update()
         
     @property
     def sprite(self):
         start, stop = self.indices
-        return self.sprites.sprite[start:stop]
+        return self.sprites.sprite[start:stop].reshape(self.shape)
     
     @sprite.setter
     def sprite(self, p):
         start, stop = self.indices
         self.sprite[:] = p
-        self.sprites.shared_program['sprite'][start:stop] = self.sprite
+        self.sprites.shared_program['sprite'][start:stop] = self.sprite.reshape(stop-start)
         self.sprites.update()
 
     @property
     def fgcolor(self):
         start, stop = self.indices
-        return self.sprites.fgcolor[start:stop]
+        return self.sprites.fgcolor[start:stop].reshape(self.shape + (4,))
     
     @fgcolor.setter
     def fgcolor(self, p):
         start, stop = self.indices
         self.fgcolor[:] = p
-        self.sprites.shared_program['fgcolor'][start:stop] = self.fgcolor.view(dtype=[('fgcolor', 'float32', 4)])
+        self.sprites.shared_program['fgcolor'][start:stop] = self.fgcolor.view(dtype=[('fgcolor', 'float32', 4)]).reshape(stop-start)
         self.sprites.update()
         
     @property
     def bgcolor(self):
         start, stop = self.indices
-        return self.sprites.bgcolor[start:stop]
+        return self.sprites.bgcolor[start:stop].reshape(self.shape + (4,))
     
     @bgcolor.setter
     def bgcolor(self, p):
         start, stop = self.indices
         self.bgcolor[:] = p
-        self.sprites.shared_program['bgcolor'][start:stop] = self.bgcolor.view(dtype=[('bgcolor', 'float32', 4)])
+        self.sprites.shared_program['bgcolor'][start:stop] = self.bgcolor.view(dtype=[('bgcolor', 'float32', 4)]).reshape(stop-start)
         self.sprites.update()
         
 
@@ -281,40 +286,40 @@ if __name__ == '__main__':
     # create maze
     shape = (50, 120)
     npts = shape[0]*shape[1]
-    maze = txt.add_sprites(npts)
+    maze = txt.add_sprites(shape)
     
     # set wall/floor
-    maze_sprites = maze.sprite.reshape(shape)
-    maze_sprites[:] = 1
-    maze_sprites[1:10, 1:10] = 0
-    maze_sprites[25:35, 105:115] = 0
-    maze_sprites[20:39, 1:80] = 0
-    maze_sprites[5:30, 6] = 0
-    maze_sprites[35, 5:115] = 0
+    #maze_sprites = maze.sprite.reshape(shape)
+    maze.sprite[:] = 1
+    maze.sprite[1:10, 1:10] = 0
+    maze.sprite[25:35, 105:115] = 0
+    maze.sprite[20:39, 1:80] = 0
+    maze.sprite[5:30, 6] = 0
+    maze.sprite[35, 5:115] = 0
 
     # set positions
     pos = np.mgrid[0:shape[1], 0:shape[0]].transpose(2, 1, 0)
-    maze.position = pos.astype('float32').reshape(shape[0]*shape[1], 2)
+    maze.position = pos.astype('float32')
 
     # set colors
     sprite_colors = np.array([
         [[0.2, 0.2, 0.2, 1.0], [0.0, 0.0, 0.0, 1.0]],  # path
         [[0.0, 0.0, 0.0, 1.0], [0.2, 0.2, 0.2, 1.0]],  # wall
     ], dtype='float32')
-    color = sprite_colors[maze_sprites]
-    maze.fgcolor = color[...,0,:].reshape(npts, 4)
+    color = sprite_colors[maze.sprite]
+    maze.fgcolor = color[...,0,:]
     bgcolor = color[...,1,:]
     
     # randomize wall color a bit
     rock = np.random.normal(scale=0.01, size=shape + (1,))
-    walls = maze_sprites == 1
+    walls = maze.sprite == 1
     n_walls = walls.sum()
     bgcolor[...,:3][walls] += rock[walls]
-    maze.bgcolor = bgcolor.reshape(npts, 4)
+    maze.bgcolor = bgcolor
 
     # add player
     player_sprite = atlas.add_chars('&')
-    player = txt.add_sprites(1)
+    player = txt.add_sprites((1,))
     player.position = (7, 7)
     player.sprite = player_sprite
     player.fgcolor = (0, 0, 0.3, 1)
@@ -322,7 +327,7 @@ if __name__ == '__main__':
 
     # add scroll
     scroll_sprite = atlas.add_chars(u'次')
-    scroll = txt.add_sprites(1)
+    scroll = txt.add_sprites((1,))
     scroll.position = (5, 5)
     scroll.sprite = scroll_sprite
     scroll.fgcolor = (0.7, 0, 0, 1)
@@ -334,7 +339,7 @@ if __name__ == '__main__':
 
 
     def key_pressed(ev):
-        global maze_sprites
+        global maze
         pos = player.position
         if ev.key == 'Right':
             dx = (1, 0)
@@ -349,7 +354,7 @@ if __name__ == '__main__':
         
         newpos = pos + dx
         j, i = tuple(newpos.astype('uint')[0])
-        if maze_sprites[i, j] == 0:
+        if maze.sprite[i, j] == 0:
             player.position = newpos
         
     canvas.events.key_press.connect(key_pressed)
