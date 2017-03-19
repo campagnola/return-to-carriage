@@ -217,17 +217,19 @@ if __name__ == '__main__':
     
     view = canvas.central_widget.add_view()
     view.camera = 'panzoom'
-    view.camera.rect = [0, 0, 200, 200]
-    view.camera.aspect = 1
+    view.camera.rect = [0, 0, 20, 20]
+    view.camera.aspect = 0.6
     
     # generate a texture for each character we need
     atlas = CharAtlas()
     atlas.add_chars(".#")
     
     # create sprites visual
-    size = 16
+    size = 1/0.6
     scale = (0.6, 1)
     txt = Sprites(atlas, size, scale, parent=view.scene)
+    
+    
 
     # create maze
     shape = (50, 120)
@@ -245,7 +247,7 @@ if __name__ == '__main__':
     sprites[35, 5:-5] = 0
 
     # set positions
-    pos = np.mgrid[0:shape[1], 0:shape[0]].transpose(2, 1, 0) * (size * np.array(scale).reshape(1, 1, 2))
+    pos = np.mgrid[0:shape[1], 0:shape[0]].transpose(2, 1, 0)# * (size * np.array(scale).reshape(1, 1, 2))
     mazedata['pos'] = pos.astype('float32')
 
     # set colors
@@ -266,7 +268,7 @@ if __name__ == '__main__':
     # add player
     player_sprite = atlas.add_chars('&')
     player = txt.add_sprites(1)
-    player.data['pos'] = (100, 100)
+    player.data['pos'] = (7, 7)
     player.data['sprite'] = player_sprite
     player.data['fgcolor'] = (0, 0, 0.3, 1)
     player.data['bgcolor'] = (0.5, 0.5, 0.5, 1)
@@ -274,7 +276,7 @@ if __name__ == '__main__':
     # add scroll
     scroll_sprite = atlas.add_chars(u'次')
     scroll = txt.add_sprites(1)
-    scroll.data['pos'] = (50, 50)
+    scroll.data['pos'] = (5, 5)
     scroll.data['sprite'] = scroll_sprite
     scroll.data['fgcolor'] = (200, 0, 0, 1)
     scroll.data['bgcolor'] = (0, 0, 0, 1)
