@@ -71,10 +71,10 @@ class SpritesVisual(vispy.visuals.Visual):
         self.size = size
         self.scale = scale
         self.atlas = atlas
-        self.data = np.empty(1, dtype=[('pos', 'float32', 2), 
-                                       ('sprite', 'uint32'), 
-                                       ('fgcolor', 'float32', 4),
-                                       ('bgcolor', 'float32', 4)])
+        self.position = np.empty((0,2), dtype='float32')
+        self.sprite = np.empty((0,), dtype='uint32')
+        self.fgcolor = np.empty((0, 4), dtype='float32')
+        self.bgcolor = np.empty((0, 4), dtype='float32')
         
         self._atlas_tex = vispy.gloo.Texture2D(shape=(1,1,4), format='rgba', interpolation='nearest')
         self._atlas_map_tex = vispy.gloo.Texture1D(shape=(1,4), format='rgba', interpolation='nearest')
@@ -91,24 +91,25 @@ class SpritesVisual(vispy.visuals.Visual):
     def add_sprites(self, n):
         """Expand to allow n more sprites, return a SpriteData instance.
         """
-        i = self._resize(self.data.shape[0] + n)
+        i = self._resize(self.position.shape[0] + n)
         return SpriteData(self, i, i+n)
 
     def _resize(self, n):
         """Resize sprite array, return old size.
         """
-        n1 = len(self.data)
-        newdata = np.empty(n, dtype=self.data.dtype)
-        newdata[:n1] = self.data[:n]
-        self.data = newdata
-        self._need_data_upload = True
+        n1 = self.position.shape[0]        
+        self.position = np.resize(self.position, (n, 2))
+        self.sprite = np.resize(self.sprite, (n,))
+        self.fgcolor = np.resize(self.fgcolor, (n, 4))
+        self.bgcolor = np.resize(self.bgcolor, (n, 4))        
+        self._upload_data()
         return n1
     
     def _upload_data(self):
-        self.shared_program['position'].set_data(np.ascontiguousarray(self.data['pos']))
-        self.shared_program['sprite'].set_data(self.data['sprite'].astype('float32'))
-        self.shared_program['fgcolor'].set_data(np.ascontiguousarray(self.data['fgcolor']))
-        self.shared_program['bgcolor'].set_data(np.ascontiguousarray(self.data['bgcolor']))
+        self.shared_program['position'].set_data(self.position)
+        self.shared_program['sprite'].set_data(self.sprite.astype('float32'))
+        self.shared_program['fgcolor'].set_data(self.fgcolor)
+        self.shared_program['bgcolor'].set_data(self.bgcolor)
         self.shared_program['size'] = self.size
         self.shared_program['scale'] = self.scale
         self._need_data_upload = False
@@ -140,7 +141,8 @@ class SpritesVisual(vispy.visuals.Visual):
         view.view_program['size'] = l
 
     def _compute_bounds(self, axis, view):
-        return self.pos[:, axis].min(), self.pos[:, axis].max()
+        p = self.position[:, axis]
+        return p.min(), p.max()
 
         
 Sprites = vispy.scene.visuals.create_visual_node(SpritesVisual)
@@ -152,10 +154,53 @@ class SpriteData(object):
         self.indices = (start, stop)
         
     @property
-    def data(self):
+    def position(self):
         start, stop = self.indices
-        return self.sprites.data[start:stop]
+        return self.sprites.position[start:stop]
+    
+    @position.setter
+    def position(self, p):
+        start, stop = self.indices
+        self.position[:] = p
+        self.sprites.shared_program['position'][start:stop] = self.position.view(dtype=[('position', 'float32', 2)])
+        self.sprites.update()
+        
+    @property
+    def sprite(self):
+        start, stop = self.indices
+        return self.sprites.sprite[start:stop]
+    
+    @sprite.setter
+    def sprite(self, p):
+        start, stop = self.indices
+        self.sprite[:] = p
+        self.sprites.shared_program['sprite'][start:stop] = self.sprite
+        self.sprites.update()
 
+    @property
+    def fgcolor(self):
+        start, stop = self.indices
+        return self.sprites.fgcolor[start:stop]
+    
+    @fgcolor.setter
+    def fgcolor(self, p):
+        start, stop = self.indices
+        self.fgcolor[:] = p
+        self.sprites.shared_program['fgcolor'][start:stop] = self.fgcolor.view(dtype=[('fgcolor', 'float32', 4)])
+        self.sprites.update()
+        
+    @property
+    def bgcolor(self):
+        start, stop = self.indices
+        return self.sprites.bgcolor[start:stop]
+    
+    @bgcolor.setter
+    def bgcolor(self, p):
+        start, stop = self.indices
+        self.bgcolor[:] = p
+        self.sprites.shared_program['bgcolor'][start:stop] = self.bgcolor.view(dtype=[('bgcolor', 'float32', 4)])
+        self.sprites.update()
+        
 
 
 import pyqtgraph as pg
@@ -233,16 +278,13 @@ if __name__ == '__main__':
     scale = (0.6, 1)
     txt = Sprites(atlas, size, scale, parent=view.scene)
     
-    
-
     # create maze
     shape = (50, 120)
     npts = shape[0]*shape[1]
     maze = txt.add_sprites(npts)
-    mazedata = maze.data.reshape(shape)
     
     # set wall/floor
-    maze_sprites = mazedata['sprite']
+    maze_sprites = maze.sprite.reshape(shape)
     maze_sprites[:] = 1
     maze_sprites[1:10, 1:10] = 0
     maze_sprites[25:35, 105:115] = 0
@@ -251,8 +293,8 @@ if __name__ == '__main__':
     maze_sprites[35, 5:115] = 0
 
     # set positions
-    pos = np.mgrid[0:shape[1], 0:shape[0]].transpose(2, 1, 0)# * (size * np.array(scale).reshape(1, 1, 2))
-    mazedata['pos'] = pos.astype('float32')
+    pos = np.mgrid[0:shape[1], 0:shape[0]].transpose(2, 1, 0)
+    maze.position = pos.astype('float32').reshape(shape[0]*shape[1], 2)
 
     # set colors
     sprite_colors = np.array([
@@ -260,30 +302,31 @@ if __name__ == '__main__':
         [[0.0, 0.0, 0.0, 1.0], [0.2, 0.2, 0.2, 1.0]],  # wall
     ], dtype='float32')
     color = sprite_colors[maze_sprites]
-    mazedata['fgcolor'] = color[...,0,:]
-    mazedata['bgcolor'] = color[...,1,:]
+    maze.fgcolor = color[...,0,:].reshape(npts, 4)
+    bgcolor = color[...,1,:]
     
     # randomize wall color a bit
     rock = np.random.normal(scale=0.01, size=shape + (1,))
     walls = maze_sprites == 1
     n_walls = walls.sum()
-    mazedata['bgcolor'][...,:3][walls] += rock[walls]
+    bgcolor[...,:3][walls] += rock[walls]
+    maze.bgcolor = bgcolor.reshape(npts, 4)
 
     # add player
     player_sprite = atlas.add_chars('&')
     player = txt.add_sprites(1)
-    player.data['pos'] = (7, 7)
-    player.data['sprite'] = player_sprite
-    player.data['fgcolor'] = (0, 0, 0.3, 1)
-    player.data['bgcolor'] = (0.5, 0.5, 0.5, 1)
+    player.position = (7, 7)
+    player.sprite = player_sprite
+    player.fgcolor = (0, 0, 0.3, 1)
+    player.bgcolor = (0.5, 0.5, 0.5, 1)
 
     # add scroll
     scroll_sprite = atlas.add_chars(u'次')
     scroll = txt.add_sprites(1)
-    scroll.data['pos'] = (5, 5)
-    scroll.data['sprite'] = scroll_sprite
-    scroll.data['fgcolor'] = (0.7, 0, 0, 1)
-    scroll.data['bgcolor'] = (0, 0, 0, 1)
+    scroll.position = (5, 5)
+    scroll.sprite = scroll_sprite
+    scroll.fgcolor = (0.7, 0, 0, 1)
+    scroll.bgcolor = (0, 0, 0, 1)
     
 
     txt._need_data_upload = True
@@ -292,7 +335,7 @@ if __name__ == '__main__':
 
     def key_pressed(ev):
         global maze_sprites
-        pos = player.data['pos'][0]
+        pos = player.position
         if ev.key == 'Right':
             dx = (1, 0)
         elif ev.key == 'Left':
@@ -305,12 +348,9 @@ if __name__ == '__main__':
             return
         
         newpos = pos + dx
-        if maze_sprites[int(newpos[1]), int(newpos[0])] == 0:
-            player.data['pos'] = newpos
-            newpos = np.array([(tuple(newpos),)], dtype=[('pos', 'float32', 2)])
-            txt.shared_program['position'][player.indices[0]] = newpos
-            #txt._need_data_upload = True
-            txt.update()
+        j, i = tuple(newpos.astype('uint')[0])
+        if maze_sprites[i, j] == 0:
+            player.position = newpos
         
     canvas.events.key_press.connect(key_pressed)
     
