@@ -83,6 +83,10 @@ class SpritesVisual(vispy.visuals.Visual):
         
         vispy.visuals.Visual.__init__(self, self.vertex_shader, self.fragment_shader)
         self._draw_mode = 'points'
+        self.shared_program['position'] = vispy.gloo.VertexBuffer()
+        self.shared_program['sprite'] = vispy.gloo.VertexBuffer()
+        self.shared_program['fgcolor'] = vispy.gloo.VertexBuffer()
+        self.shared_program['bgcolor'] = vispy.gloo.VertexBuffer()
     
     def add_sprites(self, n):
         """Expand to allow n more sprites, return a SpriteData instance.
@@ -101,10 +105,10 @@ class SpritesVisual(vispy.visuals.Visual):
         return n1
     
     def _upload_data(self):
-        self.shared_program['position'] = np.ascontiguousarray(self.data['pos'])
-        self.shared_program['sprite'] = self.data['sprite'].astype('float32')
-        self.shared_program['fgcolor'] = np.ascontiguousarray(self.data['fgcolor'])
-        self.shared_program['bgcolor'] = np.ascontiguousarray(self.data['bgcolor'])
+        self.shared_program['position'].set_data(np.ascontiguousarray(self.data['pos']))
+        self.shared_program['sprite'].set_data(self.data['sprite'].astype('float32'))
+        self.shared_program['fgcolor'].set_data(np.ascontiguousarray(self.data['fgcolor']))
+        self.shared_program['bgcolor'].set_data(np.ascontiguousarray(self.data['bgcolor']))
         self.shared_program['size'] = self.size
         self.shared_program['scale'] = self.scale
         self._need_data_upload = False
@@ -303,7 +307,9 @@ if __name__ == '__main__':
         newpos = pos + dx
         if maze_sprites[int(newpos[1]), int(newpos[0])] == 0:
             player.data['pos'] = newpos
-            txt._need_data_upload = True
+            newpos = np.array([(tuple(newpos),)], dtype=[('pos', 'float32', 2)])
+            txt.shared_program['position'][player.indices[0]] = newpos
+            #txt._need_data_upload = True
             txt.update()
         
     canvas.events.key_press.connect(key_pressed)
