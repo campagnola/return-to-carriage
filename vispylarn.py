@@ -101,10 +101,10 @@ class SpritesVisual(vispy.visuals.Visual):
         return n1
     
     def _upload_data(self):
-        self.shared_program['position'] = self.data['pos']
+        self.shared_program['position'] = np.ascontiguousarray(self.data['pos'])
         self.shared_program['sprite'] = self.data['sprite'].astype('float32')
-        self.shared_program['fgcolor'] = self.data['fgcolor']
-        self.shared_program['bgcolor'] = self.data['bgcolor']
+        self.shared_program['fgcolor'] = np.ascontiguousarray(self.data['fgcolor'])
+        self.shared_program['bgcolor'] = np.ascontiguousarray(self.data['bgcolor'])
         self.shared_program['size'] = self.size
         self.shared_program['scale'] = self.scale
         self._need_data_upload = False
@@ -213,11 +213,11 @@ class CharAtlas(object):
 if __name__ == '__main__':
     canvas = vispy.scene.SceneCanvas()
     canvas.show()
-    canvas.size = 1400,1000
+    canvas.size = 1400,900
     
     view = canvas.central_widget.add_view()
     view.camera = 'panzoom'
-    view.camera.rect = [0, 0, 20, 20]
+    view.camera.rect = [0, -5, 120, 60]
     view.camera.aspect = 0.6
     
     # generate a texture for each character we need
@@ -238,13 +238,13 @@ if __name__ == '__main__':
     mazedata = maze.data.reshape(shape)
     
     # set wall/floor
-    sprites = mazedata['sprite']
-    sprites[:] = 1
-    sprites[1:10, 1:10] = 0
-    sprites[-10:-1, -10:-1] = 0
-    sprites[20:39, 1:80] = 0
-    sprites[5:30, 6] = 0
-    sprites[35, 5:-5] = 0
+    maze_sprites = mazedata['sprite']
+    maze_sprites[:] = 1
+    maze_sprites[1:10, 1:10] = 0
+    maze_sprites[-10:-1, -10:-1] = 0
+    maze_sprites[20:39, 1:80] = 0
+    maze_sprites[5:30, 6] = 0
+    maze_sprites[35, 5:-5] = 0
 
     # set positions
     pos = np.mgrid[0:shape[1], 0:shape[0]].transpose(2, 1, 0)# * (size * np.array(scale).reshape(1, 1, 2))
@@ -255,13 +255,13 @@ if __name__ == '__main__':
         [[0.2, 0.2, 0.2, 1.0], [0.0, 0.0, 0.0, 1.0]],  # path
         [[0.0, 0.0, 0.0, 1.0], [0.2, 0.2, 0.2, 1.0]],  # wall
     ], dtype='float32')
-    color = sprite_colors[sprites]
+    color = sprite_colors[maze_sprites]
     mazedata['fgcolor'] = color[...,0,:]
     mazedata['bgcolor'] = color[...,1,:]
     
     # randomize wall color a bit
     rock = np.random.normal(scale=0.01, size=shape + (1,))
-    walls = sprites == 1
+    walls = maze_sprites == 1
     n_walls = walls.sum()
     mazedata['bgcolor'][...,:3][walls] += rock[walls]
 
@@ -278,9 +278,33 @@ if __name__ == '__main__':
     scroll = txt.add_sprites(1)
     scroll.data['pos'] = (5, 5)
     scroll.data['sprite'] = scroll_sprite
-    scroll.data['fgcolor'] = (200, 0, 0, 1)
+    scroll.data['fgcolor'] = (0.7, 0, 0, 1)
     scroll.data['bgcolor'] = (0, 0, 0, 1)
     
 
     txt._need_data_upload = True
     txt._need_atlas_upload = True
+
+
+    def key_pressed(ev):
+        global maze_sprites
+        pos = player.data['pos'][0]
+        if ev.key == 'Right':
+            dx = (1, 0)
+        elif ev.key == 'Left':
+            dx = (-1, 0)
+        elif ev.key == 'Up':
+            dx = (0, 1)
+        elif ev.key == 'Down':
+            dx = (0, -1)
+        else:
+            return
+        
+        newpos = pos + dx
+        if maze_sprites[int(newpos[1]), int(newpos[0])] == 0:
+            player.data['pos'] = newpos
+            txt._need_data_upload = True
+            txt.update()
+        
+    canvas.events.key_press.connect(key_pressed)
+    
