@@ -277,6 +277,11 @@ class CharAtlas(object):
 
 
 
+
+
+
+
+
 if __name__ == '__main__':
     canvas = vispy.scene.SceneCanvas()
     canvas.show()
