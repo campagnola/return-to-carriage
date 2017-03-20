@@ -11,7 +11,7 @@ class SpritesVisual(vispy.visuals.Visual):
 
         uniform float size;
 
-        attribute vec2 position;
+        attribute vec3 position;
         attribute vec4 fgcolor;
         attribute vec4 bgcolor;
         attribute float sprite;
@@ -25,7 +25,7 @@ class SpritesVisual(vispy.visuals.Visual):
             v_bgcolor = bgcolor;
             v_sprite = sprite;
 
-            gl_Position = $transform(vec4(position, 0, 1));
+            gl_Position = $transform(vec4(position, 1));
             gl_PointSize = size * 1.01;  // extra 0.01 prevents gaps
         }
     """
@@ -72,7 +72,7 @@ class SpritesVisual(vispy.visuals.Visual):
         self.scale = scale
         self.atlas = atlas
         self.atlas.atlas_changed.connect(self._atlas_changed)
-        self.position = np.empty((0,2), dtype='float32')
+        self.position = np.empty((0, 3), dtype='float32')
         self.sprite = np.empty((0,), dtype='uint32')
         self.fgcolor = np.empty((0, 4), dtype='float32')
         self.bgcolor = np.empty((0, 4), dtype='float32')
@@ -88,6 +88,8 @@ class SpritesVisual(vispy.visuals.Visual):
         self.shared_program['sprite'] = vispy.gloo.VertexBuffer()
         self.shared_program['fgcolor'] = vispy.gloo.VertexBuffer()
         self.shared_program['bgcolor'] = vispy.gloo.VertexBuffer()
+        
+        self.update_gl_state(depth_test=True)
     
     def add_sprites(self, shape):
         """Expand to allow more sprites, return a SpriteData instance with the specified shape.
@@ -102,7 +104,7 @@ class SpritesVisual(vispy.visuals.Visual):
         """Resize sprite array, return old size.
         """
         n1 = self.position.shape[0]        
-        self.position = np.resize(self.position, (n, 2))
+        self.position = np.resize(self.position, (n, 3))
         self.sprite = np.resize(self.sprite, (n,))
         self.fgcolor = np.resize(self.fgcolor, (n, 4))
         self.bgcolor = np.resize(self.bgcolor, (n, 4))        
@@ -170,13 +172,13 @@ class SpriteData(object):
     @property
     def position(self):
         start, stop = self.indices
-        return self.sprites.position[start:stop].reshape(self.shape + (2,))
+        return self.sprites.position[start:stop].reshape(self.shape + (3,))
     
     @position.setter
     def position(self, p):
         start, stop = self.indices
         self.position[:] = p
-        self.sprites.shared_program['position'][start:stop] = self.position.view(dtype=[('position', 'float32', 2)]).reshape(stop-start)
+        self.sprites.shared_program['position'][start:stop] = self.position.view(dtype=[('position', 'float32', 3)]).reshape(stop-start)
         self.sprites.update()
         
     @property
@@ -307,7 +309,8 @@ if __name__ == '__main__':
     maze_sprites.sprite = maze
 
     # set positions
-    pos = np.mgrid[0:shape[1], 0:shape[0]].transpose(2, 1, 0)
+    pos = np.zeros(shape + (3,), dtype='float32')
+    pos[...,:2] = np.mgrid[0:shape[1], 0:shape[0]].transpose(2, 1, 0)
     maze_sprites.position = pos
 
     # set colors
@@ -328,14 +331,14 @@ if __name__ == '__main__':
 
     # add player
     player = txt.add_sprites((1,))
-    player.position = (7, 7)
+    player.position = (7, 7, -0.2)
     player.sprite = atlas.add_chars('&')
     player.fgcolor = (0, 0, 0.3, 1)
     player.bgcolor = (0.5, 0.5, 0.5, 1)
 
     ## add scroll
     scroll = txt.add_sprites((1,))
-    scroll.position = (5, 5)
+    scroll.position = (5, 5, -0.1)
     scroll.sprite = atlas.add_chars(u'次')
     scroll.fgcolor = (0.7, 0, 0, 1)
     scroll.bgcolor = (0, 0, 0, 1)
@@ -346,18 +349,18 @@ if __name__ == '__main__':
         global maze
         pos = player.position
         if ev.key == 'Right':
-            dx = (1, 0)
+            dx = (1, 0, 0)
         elif ev.key == 'Left':
-            dx = (-1, 0)
+            dx = (-1, 0, 0)
         elif ev.key == 'Up':
-            dx = (0, 1)
+            dx = (0, 1, 0)
         elif ev.key == 'Down':
-            dx = (0, -1)
+            dx = (0, -1, 0)
         else:
             return
         
         newpos = pos + dx
-        j, i = tuple(newpos.astype('uint')[0])
+        j, i = tuple(newpos[0,:2].astype('uint'))
         if maze[i, j] == 0:
             player.position = newpos
         
