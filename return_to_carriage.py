@@ -99,12 +99,14 @@ class Scene(object):
         tr = pos+4
         self.sight[bl[1]:tr[1], bl[0]:tr[0]] = 1
         
-        self.memory *= 0.98
-        self.memory = np.where(self.memory > self.sight, self.memory, self.sight) 
+        self.memory *= 0.998
+        #self.memory = np.where(self.memory > self.sight, self.memory, self.sight)
+        self.memory += self.sight
         
     def update_maze(self):
-        self.maze_sprites.fgcolor = self.fgcolor * self.memory[...,None]
-        self.maze_sprites.bgcolor = self.bgcolor * self.memory[...,None]
+        mem = np.clip(self.memory[...,None], 0, 1)
+        self.maze_sprites.fgcolor = self.fgcolor * mem
+        self.maze_sprites.bgcolor = self.bgcolor * mem
 
 
 if __name__ == '__main__':
