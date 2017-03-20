@@ -27,6 +27,10 @@ class Scene(object):
         self.maze[5:30, 6] = 0
         self.maze[35, 5:115] = 0
         
+        
+        self.memory = np.zeros(shape, dtype='float32')
+        self.sight = np.zeros(shape, dtype='float32')
+        
         self.maze_sprites = self.txt.add_sprites(shape)
         self.maze_sprites.sprite = self.maze
 
@@ -41,15 +45,15 @@ class Scene(object):
             [[0.0, 0.0, 0.0, 1.0], [0.2, 0.2, 0.2, 1.0]],  # wall
         ], dtype='float32')
         color = sprite_colors[self.maze]
-        self.maze_sprites.fgcolor = color[...,0,:]
-        bgcolor = color[...,1,:]
+        self.fgcolor = color[...,0,:]
+        self.bgcolor = color[...,1,:]
         
         # randomize wall color a bit
         rock = np.random.normal(scale=0.01, size=shape + (1,))
         walls = self.maze == 1
         n_walls = walls.sum()
-        bgcolor[...,:3][walls] += rock[walls]
-        self.maze_sprites.bgcolor = bgcolor
+        self.bgcolor[...,:3][walls] += rock[walls]
+
 
         # add player
         self.player = self.txt.add_sprites((1,))
@@ -64,6 +68,9 @@ class Scene(object):
         self.scroll.sprite = self.atlas.add_chars(u'次')
         self.scroll.fgcolor = (0.7, 0, 0, 1)
         self.scroll.bgcolor = (0, 0, 0, 1)
+        
+        self.update_sight()
+        self.update_maze()
         
     def key_pressed(self, ev):
         pos = self.player.position
@@ -82,8 +89,22 @@ class Scene(object):
         j, i = tuple(newpos[0,:2].astype('uint'))
         if self.maze[i, j] == 0:
             self.player.position = newpos
+            self.update_sight()
+            self.update_maze()
             
+    def update_sight(self):
+        self.sight[:] = 0
+        pos = self.player.position[0,:2]
+        bl = np.clip(pos-3, 0, self.maze.size)
+        tr = pos+4
+        self.sight[bl[1]:tr[1], bl[0]:tr[0]] = 1
         
+        self.memory *= 0.98
+        self.memory = np.where(self.memory > self.sight, self.memory, self.sight) 
+        
+    def update_maze(self):
+        self.maze_sprites.fgcolor = self.fgcolor * self.memory[...,None]
+        self.maze_sprites.bgcolor = self.bgcolor * self.memory[...,None]
 
 
 if __name__ == '__main__':
