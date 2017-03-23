@@ -2,6 +2,8 @@
 import numpy as np
 from PyQt4 import QtGui, QtCore
 import vispy.visuals, vispy.scene, vispy.gloo
+from vispy.visuals.shaders import ModularProgram, Function, Varying
+from vispy.visuals.transforms import STTransform, PolarTransform
 
 
 class SpritesVisual(vispy.visuals.Visual):
@@ -273,4 +275,209 @@ class CharAtlas(object):
         self.sprite_coords[:,3] = gs[2]
         self.sprite_coords[:,::2] /= self.atlas.shape[0]
         self.sprite_coords[:,1::2] /= self.atlas.shape[1]
+
+
+class TextureMaskFilter(object):
+    def __init__(self, texture, pos):
+        #self.vshader = Function("""
+            #void z_colormap_support() {
+                #$zval = $position.z;
+            #}
+        #""")
+        self.fshader = Function("""
+            void apply_texture_mask() {
+                vec4 mask = texture2D($texture, $pos.xy);
+                gl_FragColor = gl_FragColor * mask;
+            }
+        """)
+        self.texture = texture
+        self.fshader['texture'] = self.texture
+        self.fshader['pos'] = pos
+        #self.vshader['zval'] = Varying('v_zval', dtype='float')
+        #self.fshader['zval'] = self.vshader['zval']
+
+    def _attach(self, visual):
+        self._visual = visual
+        fhook = visual._get_hook('frag', 'post')
+        fhook.add(self.fshader(), position=3)
+
+        #self.vshader['position'] = visual.shared_program.vert['position']
+
+
+class LineOfSightFilter1(object):
+    """Measure line=of-sight for each vertex as it is drawn.
+    """
+    def __init__(self, opacity, pos):
+        self.opacity = opacity
+        self.vshader = Function("""
+            void line_of_sight() {
+                vec2 diff = $player_pos.xy - $pos.xy;
+                float dist = length(diff);
+                float s = 0.5;
+                vec2 step = s * diff / dist;
+                int steps = int(dist/s);
+                $visible = 1;
+                vec2 sample_pos = $pos.xy + step/s;
+                for( int i=1; i<steps; i++ ) {
+                    float op = texture2D($opacity, (sample_pos+0.5) / $opacity_size).r;
+                    if( op > 0 ) {
+                        $visible = 0;
+                        break;
+                    }
+                    sample_pos += step;
+                }
+            }
+        """)
+        
+        self.fshader = Function("""
+            void line_of_sight() {
+                gl_FragColor = gl_FragColor * $visible;
+                //gl_FragColor.r = $visible;
+            }
+        """)
+        
+        self.vshader['opacity'] = opacity
+        self.vshader['opacity_size'] = opacity.shape[:2][::-1]
+        self.vshader['pos'] = pos
+        self.vshader['visible'] = Varying('visible', dtype='float')
+        self.fshader['visible'] = self.vshader['visible']
+        
+    def set_player_pos(self, pos):
+        self.vshader['player_pos'] = pos
+
+    def _attach(self, visual):
+        self._visual = visual
+        fhook = visual._get_hook('frag', 'post')
+        fhook.add(self.fshader(), position=3)
+        vhook = visual._get_hook('vert', 'post')
+        vhook.add(self.vshader(), position=3)
+
+        #self.vshader['position'] = visual.shared_program.vert['position']
+
+
+class LineOfSightFilter(object):
+    def __init__(self, texture, pos):
+        self.vshader = Function("""
+            void line_of_sight() {
+                vec4 polar_pos = $transform(vec4($pos, 1));
+                vec4 c = texture2D($texture, vec2(polar_pos.x, 0.5));
+                float depth = c.r*255*255 + c.g*255 + c.b;
+                if( polar_pos.y > depth+2 ) {
+                    $mask = vec3(0, 0, 0);
+                }
+                else {
+                    $mask = vec3(1, 1, 1);
+                }
+            }
+        """)
+        self.fshader = Function("""
+            void apply_texture_mask() {
+                gl_FragColor = gl_FragColor * vec4($mask, 1);
+            }
+        """)
+        self.center = STTransform()
+        self.transform = STTransform(scale=(0.5/np.pi, 1, 0), translate=(0.5, 0, 0)) * PolarTransform().inverse * self.center 
+        
+        self.vshader['pos'] = pos
+        self.vshader['transform'] = self.transform
+        self.vshader['texture'] = texture
+        self.vshader['mask'] = Varying('mask', dtype='vec3')
+        self.fshader['mask'] = self.vshader['mask']
+
+    def set_player_pos(self, pos):
+        self.center.translate = (-pos[0], -pos[1])
+
+    def _attach(self, visual):
+        self._visual = visual
+        vhook = visual._get_hook('vert', 'post')
+        vhook.add(self.vshader(), position=3)
+        fhook = visual._get_hook('frag', 'post')
+        fhook.add(self.fshader(), position=3)
+
+
+class SightRenderer(object):
+    """For computing line of sight and shadows on GPU
+    """
+    def __init__(self, scene, opacity, size=(1, 5000)):
+        self.scene = scene
+        self.size = size
+        self.tex = vispy.gloo.Texture2D(shape=size+(4,), format='rgba', interpolation='nearest')
+        self.fbo = vispy.gloo.FrameBuffer(color=self.tex, depth=vispy.gloo.RenderBuffer(size))
+        
+        vert = """
+            #version 120
+
+            attribute vec3 position;
+            uniform float scale;
+            varying vec3 depth;
+            
+            uniform sampler2D opacity;
+            uniform vec2 opacity_size;
+            
+            void main (void) {
+                float alpha = texture2D(opacity, (position.xy+0.5) / opacity_size).r;
+                if( alpha > 0 ) {
+                    float min_theta = 10;
+                    float max_theta = -10;
+                    float avg_depth = 0;
+                    for( int i=0; i<2; i++ ) {
+                        for( int j=0; j<2; j++ ) {              
+                            vec3 dx = vec3(i-0.5, j-0.5, 0);
+                            vec4 polar_pos = $transform(vec4(position + dx, 1));
+                            avg_depth += polar_pos.y;
+                            min_theta = min(min_theta, polar_pos.x);
+                            max_theta = max(max_theta, polar_pos.x);
+                        }
+                    }
+                    avg_depth /= 4.0;
+                    if( max_theta - min_theta > 1 ) {
+                        max_theta -= 2;
+                    }
+                    
+                    gl_Position = vec4((min_theta + max_theta) / 2.0, 0, avg_depth/1000., 1);
+                    gl_PointSize = scale *  abs(max_theta - min_theta);
+                    
+                    // encode depth as rgb
+                    float r = int(avg_depth / 256.) / 255.;
+                    float g = int(avg_depth - (r*256)) / 255.;
+                    float b = avg_depth - int(avg_depth);
+                    depth = vec3(r, g, b);
+                }
+                else {
+                    gl_Position = vec4(-2, -2, -2, 1);
+                    gl_PointSize = 0;
+                }
+            }
+        """
+        
+        frag = """
+            #version 120
+            
+            varying vec3 depth;
+            
+            void main (void) {
+                gl_FragColor = vec4(depth, 1);
+            }
+        """
+        
+        self.program = ModularProgram(vert, frag)
+        self.center = STTransform()
+        self.transform = STTransform(scale=(1.0 / np.pi, 1, 1)) * PolarTransform().inverse * self.center 
+        self.program.vert['transform'] = self.transform
+        self.program['scale'] = self.size[1] / 2.0
+        self.program['opacity'] = opacity
+        self.program['opacity_size'] = opacity.shape[:2][::-1]
+        
+    def render(self, pos):
+        """Compute distance from pos to nearest object in all directions.
+        """
+        self.center.translate = (-pos[0], -pos[1])
+        self.program['position'] = self.scene.txt.shared_program['position']
+        with self.fbo:
+            vispy.gloo.clear(color=(0, 0, 0), depth=True)
+            vispy.gloo.set_state(depth_test=True)
+            vispy.gloo.set_viewport(0, 0, *self.size[::-1])
+            self.program.draw(mode='points', check_error=True)
+            vispy.gloo.set_viewport(0, 0, *self.scene.canvas.size)
+            #return self.fbo.read()
 

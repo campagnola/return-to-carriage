@@ -2,11 +2,18 @@
 from PyQt4 import QtGui, QtCore
 import vispy.scene
 import numpy as np
-from graphics import CharAtlas, Sprites
+from graphics import CharAtlas, Sprites, TextureMaskFilter, LineOfSightFilter, SightRenderer
 
 
 class Scene(object):
-    def __init__(self, view):
+    def __init__(self, canvas):
+        self.canvas = canvas
+        
+        self.view = canvas.central_widget.add_view()
+        self.view.camera = 'panzoom'
+        self.view.camera.rect = [0, -5, 120, 60]
+        self.view.camera.aspect = 0.6
+        canvas.events.key_press.connect(self.key_pressed)
         
         # generate a texture for each character we need
         self.atlas = CharAtlas()
@@ -15,7 +22,7 @@ class Scene(object):
         # create sprites visual
         size = 1/0.6
         scale = (0.6, 1)
-        self.txt = Sprites(self.atlas, size, scale, parent=view.scene)
+        self.txt = Sprites(self.atlas, size, scale, parent=self.view.scene)
         
         # create maze
         shape = (50, 120)
@@ -28,14 +35,31 @@ class Scene(object):
         self.maze[20:39, 1:80] = path
         self.maze[5:30, 6] = path
         self.maze[35, 5:115] = path
+        self.shape = shape
         self.path = path
         self.wall = wall
         
         self.memory = np.zeros(shape, dtype='float32')
         self.sight = np.zeros(shape, dtype='float32')
-        
+
         self.maze_sprites = self.txt.add_sprites(shape)
         self.maze_sprites.sprite = self.maze
+
+        # Add sight filter
+        #self.sight_tex = vispy.gloo.Texture2D(self.sight)
+        #self.sight_filter = TextureMaskFilter(self.sight_tex, pos="gl_PointCoord")
+        
+        self.opacity = (self.maze == wall).astype('float32')
+        self.opacity_tex = vispy.gloo.Texture2D(self.opacity, format='luminance', interpolation='nearest')
+        #self.sight_filter = LineOfSightFilter(self.opacity_tex, self.txt.shared_program['position'])
+        self.sight_renderer = SightRenderer(self, self.opacity_tex)
+        self.sight_filter = LineOfSightFilter(self.sight_renderer.tex, self.txt.shared_program['position'])
+        self.txt.attach(self.sight_filter)
+        
+        
+        #from vispy.visuals.transforms import PolarTransform, STTransform
+        #self.center = STTransform()
+        #self.txt.transform = STTransform(scale=(-10, 1)) * PolarTransform().inverse * self.center
 
         # set positions
         pos = np.zeros(shape + (3,), dtype='float32')
@@ -66,13 +90,13 @@ class Scene(object):
         self.items = self.txt.add_sprites((10,))
         self.items.sprite = 0
         
-        
         self.scroll = self.txt.add_sprites((1,))
         self.scroll.position = (5, 5, -0.1)
         self.scroll.sprite = self.atlas.add_chars(u'次')
         self.scroll.fgcolor = (0.7, 0, 0, 1)
         self.scroll.bgcolor = (0, 0, 0, 1)
         
+        self.move_player([7, 7])
         self.update_sight()
         self.update_maze()
         
@@ -92,25 +116,52 @@ class Scene(object):
         newpos = pos + dx
         j, i = newpos.astype('uint')
         if self.maze[i, j] == self.path:
-            self.player.position = newpos
-            self.update_sight()
-            self.update_maze()
-            
-    def update_sight(self):
-        self.sight[:] = 0
-        pos = self.player.position[:2].astype(int)
-        bl = np.clip(pos-3, 0, self.maze.size)
-        tr = pos+4
-        self.sight[bl[1]:tr[1], bl[0]:tr[0]] = 1
+            self.move_player(newpos)
+ 
+    def move_player(self, pos):
+        self.player.position = pos
+        self.update_sight()
+        self.update_maze()
+        self.sight_filter.set_player_pos(pos)
+        img = self.sight_renderer.render(pos)
+        #dist = img[img.shape[0]//2]
+        #dist = dist[...,0]*255 + dist[...,1] + dist[...,2] / 255.
         
-        self.memory *= 0.998
+        #if not hasattr(self, 'sight_plot'):
+            #import pyqtgraph as pg
+            #self.sight_plot = pg.plot()
+            #self.sight_plot.setYRange(0, 20)
+            #self.sight_img = pg.image()
+            #self.sight_img.imageItem.setBorder('w')
+        #theta = np.linspace(-np.pi, np.pi, img.shape[1])
+        #self.sight_plot.plot(theta, dist, clear=True)
+        #self.sight_img.setImage(img.transpose(1, 0, 2))
+        
+ 
+    def update_sight(self):
+        #self.sight[:] = 0
+        #pos = self.player.position[:2][::-1].astype(int)
+        #ps = self.player.sight
+        #r = ps.shape[0]//2
+        #target_bl = pos - r
+        #target_ur = pos + r
+        #adj_target_bl = np.where(target_bl < 0, 0, target_bl)
+        #src_bl = adj_target_bl - target_bl
+        #target_shape = self.sight[adj_target_bl[0]:target_ur[0], adj_target_bl[1]:target_ur[1]].shape
+        #self.sight[adj_target_bl[0]:target_ur[0], adj_target_bl[1]:target_ur[1]] = self.player.sight[src_bl[0]:src_bl[0]+target_shape[0], src_bl[1]:src_bl[1]+target_shape[1]]
+        
+        #self.sight_tex.set_data(self.sight)
+        
+        #self.memory *= 0.998
         #self.memory = np.where(self.memory > self.sight, self.memory, self.sight)
-        self.memory += self.sight
+        ##self.memory += self.sight
+        
+        self.sight_filter.set_player_pos(self.player.position[:2])
         
     def update_maze(self):
         mem = np.clip(self.memory[...,None], 0, 1)
-        self.maze_sprites.fgcolor = self.fgcolor * mem
-        self.maze_sprites.bgcolor = self.bgcolor * mem
+        self.maze_sprites.fgcolor = self.fgcolor# * mem
+        self.maze_sprites.bgcolor = self.bgcolor# * mem
 
 
 
@@ -123,6 +174,11 @@ class Player(object):
         self.sprite.fgcolor = (0, 0, 0.3, 1)
         self.sprite.bgcolor = (0.5, 0.5, 0.5, 1)
         self.position = (7, 7)
+        
+        r = 10
+        dist = ((np.mgrid[0:(1+r*2), 0:(1+r*2)] - r)**2).sum(axis=0)**0.5
+        dist[r, r] = 1
+        self.sight = 5.0 / dist
 
     @property
     def position(self):
@@ -136,16 +192,13 @@ class Player(object):
 
 
 if __name__ == '__main__':
+    import user
+    
     canvas = vispy.scene.SceneCanvas()
     canvas.show()
     canvas.size = 1400,900
     
-    view = canvas.central_widget.add_view()
-    view.camera = 'panzoom'
-    view.camera.rect = [0, -5, 120, 60]
-    view.camera.aspect = 0.6
-    
-    scene = Scene(view)
-    canvas.events.key_press.connect(scene.key_pressed)
+    scene = Scene(canvas)
 
+    
     
