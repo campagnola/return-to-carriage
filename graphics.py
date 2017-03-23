@@ -362,7 +362,7 @@ class LineOfSightFilter(object):
                 vec4 polar_pos = $transform(vec4($pos, 1));
                 vec4 c = texture2D($texture, vec2(polar_pos.x, 0.5));
                 float depth = c.r*255*255 + c.g*255 + c.b;
-                if( polar_pos.y > depth+2 ) {
+                if( polar_pos.y > depth+0.5 ) {
                     $mask = vec3(0, 0, 0);
                 }
                 else {
@@ -376,7 +376,7 @@ class LineOfSightFilter(object):
             }
         """)
         self.center = STTransform()
-        self.transform = STTransform(scale=(0.5/np.pi, 1, 0), translate=(0.5, 0, 0)) * PolarTransform().inverse * self.center 
+        self.transform = STTransform(scale=(0.5/np.pi, 1, 0), translate=(0.5, -0.001, 0)) * PolarTransform().inverse * self.center 
         
         self.vshader['pos'] = pos
         self.vshader['transform'] = self.transform
@@ -398,10 +398,10 @@ class LineOfSightFilter(object):
 class SightRenderer(object):
     """For computing line of sight and shadows on GPU
     """
-    def __init__(self, scene, opacity, size=(1, 5000)):
+    def __init__(self, scene, opacity, size=(1, 10000)):
         self.scene = scene
         self.size = size
-        self.tex = vispy.gloo.Texture2D(shape=size+(4,), format='rgba', interpolation='nearest')
+        self.tex = vispy.gloo.Texture2D(shape=size+(4,), format='rgba', interpolation='linear')
         self.fbo = vispy.gloo.FrameBuffer(color=self.tex, depth=vispy.gloo.RenderBuffer(size))
         
         vert = """
@@ -415,32 +415,38 @@ class SightRenderer(object):
             uniform vec2 opacity_size;
             
             void main (void) {
-                float alpha = texture2D(opacity, (position.xy+0.5) / opacity_size).r;
+                vec3 cpos = position;
+                float alpha = texture2D(opacity, (cpos.xy+vec2(0.5, 0.5)) / opacity_size).r;
                 if( alpha > 0 ) {
-                    float min_theta = 10;
-                    float max_theta = -10;
-                    float avg_depth = 0;
+                    vec4 center = $transform(vec4(cpos, 1));
+                    float min_theta = center.x;
+                    float max_theta = center.x;
+                    
                     for( int i=0; i<2; i++ ) {
-                        for( int j=0; j<2; j++ ) {              
-                            vec3 dx = vec3(i-0.5, j-0.5, 0);
-                            vec4 polar_pos = $transform(vec4(position + dx, 1));
-                            avg_depth += polar_pos.y;
-                            min_theta = min(min_theta, polar_pos.x);
-                            max_theta = max(max_theta, polar_pos.x);
+                        for( int j=-1; j<2; j+=2 ) {
+                            vec3 dx = vec3(0, 0, 0);
+                            dx[i] = j;
+                            vec3 pos2 = cpos + dx;
+                            float alpha2 = texture2D(opacity, (pos2.xy+vec2(0.5, 0.5)) / opacity_size).r;
+                            if( alpha2 > 0 ) {
+                                dx[i] = j/1.95;  // 1.95 gives a small amount of overlap to prevent gaps
+                                vec4 polar_pos = $transform(vec4(cpos + dx, 1));
+                                min_theta = min(min_theta, polar_pos.x);
+                                max_theta = max(max_theta, polar_pos.x);
+                            }
                         }
                     }
-                    avg_depth /= 4.0;
                     if( max_theta - min_theta > 1 ) {
                         max_theta -= 2;
                     }
                     
-                    gl_Position = vec4((min_theta + max_theta) / 2.0, 0, avg_depth/1000., 1);
+                    gl_Position = vec4((min_theta + max_theta) / 2.0, 0, center.y/1000., 1);
                     gl_PointSize = scale *  abs(max_theta - min_theta);
                     
                     // encode depth as rgb
-                    float r = int(avg_depth / 256.) / 255.;
-                    float g = int(avg_depth - (r*256)) / 255.;
-                    float b = avg_depth - int(avg_depth);
+                    float r = int(center.y / 256.) / 255.;
+                    float g = int(center.y - (r*256)) / 255.;
+                    float b = center.y - int(center.y);
                     depth = vec3(r, g, b);
                 }
                 else {

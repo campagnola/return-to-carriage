@@ -35,6 +35,9 @@ class Scene(object):
         self.maze[20:39, 1:80] = path
         self.maze[5:30, 6] = path
         self.maze[35, 5:115] = path
+        for i in range(24,36,10):
+            for j in range(15,70,15):
+                self.maze[i:i+2, j:j+2] = wall
         self.shape = shape
         self.path = path
         self.wall = wall
@@ -135,7 +138,7 @@ class Scene(object):
             #self.sight_img.imageItem.setBorder('w')
         #theta = np.linspace(-np.pi, np.pi, img.shape[1])
         #self.sight_plot.plot(theta, dist, clear=True)
-        #self.sight_img.setImage(img.transpose(1, 0, 2))
+        #self.sight_img.setImage(img.transpose(1, 0, 2), autoLevels=False)
         
  
     def update_sight(self):
