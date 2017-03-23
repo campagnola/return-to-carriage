@@ -127,15 +127,17 @@ class Scene(object):
         self.update_maze()
         self.sight_filter.set_player_pos(pos)
         img = self.sight_renderer.render(pos)
-        #dist = img[img.shape[0]//2]
-        #dist = dist[...,0]*255 + dist[...,1] + dist[...,2] / 255.
         
+        #dist = img[img.shape[0]//2]
+        #dist = dist[...,0]*255 + dist[...,1] + dist[...,2] / 255.        
         #if not hasattr(self, 'sight_plot'):
             #import pyqtgraph as pg
             #self.sight_plot = pg.plot()
             #self.sight_plot.setYRange(0, 20)
             #self.sight_img = pg.image()
             #self.sight_img.imageItem.setBorder('w')
+            #self.sight_img.resize(1200, 200)
+            #self.sight_img.setLevels(0, 10)
         #theta = np.linspace(-np.pi, np.pi, img.shape[1])
         #self.sight_plot.plot(theta, dist, clear=True)
         #self.sight_img.setImage(img.transpose(1, 0, 2), autoLevels=False)

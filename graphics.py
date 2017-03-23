@@ -360,10 +360,13 @@ class LineOfSightFilter(object):
         self.vshader = Function("""
             void line_of_sight() {
                 vec4 polar_pos = $transform(vec4($pos, 1));
+                if( polar_pos.x > 0.999 ) {
+                    polar_pos.x = 0.001;
+                }
                 vec4 c = texture2D($texture, vec2(polar_pos.x, 0.5));
                 float depth = c.r*255*255 + c.g*255 + c.b;
                 if( polar_pos.y > depth+0.5 ) {
-                    $mask = vec3(0, 0, 0);
+                    $mask = vec3(0, 0, 1);  // out-of-sight objects turn blue
                 }
                 else {
                     $mask = vec3(1, 1, 1);
@@ -372,11 +375,11 @@ class LineOfSightFilter(object):
         """)
         self.fshader = Function("""
             void apply_texture_mask() {
-                gl_FragColor = gl_FragColor * vec4($mask, 1);
+                gl_FragColor *= vec4($mask,1);
             }
         """)
         self.center = STTransform()
-        self.transform = STTransform(scale=(0.5/np.pi, 1, 0), translate=(0.5, -0.001, 0)) * PolarTransform().inverse * self.center 
+        self.transform = STTransform(scale=(0.5/np.pi, 1, 0), translate=(0.5, 0, 0)) * PolarTransform().inverse * self.center 
         
         self.vshader['pos'] = pos
         self.vshader['transform'] = self.transform
@@ -401,7 +404,7 @@ class SightRenderer(object):
     def __init__(self, scene, opacity, size=(1, 10000)):
         self.scene = scene
         self.size = size
-        self.tex = vispy.gloo.Texture2D(shape=size+(4,), format='rgba', interpolation='linear')
+        self.tex = vispy.gloo.Texture2D(shape=size+(4,), format='rgba', interpolation='linear', wrapping='repeat')
         self.fbo = vispy.gloo.FrameBuffer(color=self.tex, depth=vispy.gloo.RenderBuffer(size))
         
         vert = """
@@ -419,9 +422,12 @@ class SightRenderer(object):
                 float alpha = texture2D(opacity, (cpos.xy+vec2(0.5, 0.5)) / opacity_size).r;
                 if( alpha > 0 ) {
                     vec4 center = $transform(vec4(cpos, 1));
+                    
+                    // Determine the min/max azimuthal angle occupied by this wall
                     float min_theta = center.x;
                     float max_theta = center.x;
                     
+                    // Check for connection with adjacent walls, extend 
                     for( int i=0; i<2; i++ ) {
                         for( int j=-1; j<2; j+=2 ) {
                             vec3 dx = vec3(0, 0, 0);
@@ -450,6 +456,7 @@ class SightRenderer(object):
                     depth = vec3(r, g, b);
                 }
                 else {
+                    // Not a wall
                     gl_Position = vec4(-2, -2, -2, 1);
                     gl_PointSize = 0;
                 }
@@ -485,5 +492,5 @@ class SightRenderer(object):
             vispy.gloo.set_viewport(0, 0, *self.size[::-1])
             self.program.draw(mode='points', check_error=True)
             vispy.gloo.set_viewport(0, 0, *self.scene.canvas.size)
-            #return self.fbo.read()
+            return self.fbo.read()
 
