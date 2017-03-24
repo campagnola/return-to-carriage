@@ -364,7 +364,7 @@ class LineOfSightFilter(object):
                     polar_pos.x = 0.001;
                 }
                 vec4 c = texture2D($texture, vec2(polar_pos.x, 0.5));
-                float depth = c.r*255*255 + c.g*255 + c.b;
+                float depth = c.r;
                 if( polar_pos.y > depth+0.5 ) {
                     $mask = vec3(0, 0, 1);  // out-of-sight objects turn blue
                 }
@@ -412,6 +412,7 @@ class SightRenderer(object):
 
             attribute vec3 position;
             uniform float scale;
+            uniform float underfill;
             varying vec3 depth;
             
             uniform sampler2D opacity;
@@ -437,17 +438,28 @@ class SightRenderer(object):
                             if( alpha2 > 0 ) {
                                 dx[i] = j/1.95;  // 1.95 gives a small amount of overlap to prevent gaps
                                 vec4 polar_pos = $transform(vec4(cpos + dx, 1));
+                                if( polar_pos.x - center.x > 1 ) {
+                                    // point wraps around between -pi and +pi
+                                    polar_pos.x -= 2;
+                                }
+                                else if( center.x - polar_pos.x > 1 ) {
+                                    polar_pos.x += 2;
+                                }
                                 min_theta = min(min_theta, polar_pos.x);
                                 max_theta = max(max_theta, polar_pos.x);
                             }
                         }
                     }
-                    if( max_theta - min_theta > 1 ) {
-                        max_theta -= 2;
+                    if( min_theta < -1 ) {
+                        min_theta += 2;
+                        max_theta += 2;
+                        center.x += 2;
                     }
                     
-                    gl_Position = vec4((min_theta + max_theta) / 2.0, 0, center.y/1000., 1);
-                    gl_PointSize = scale *  abs(max_theta - min_theta);
+                    float theta = (min_theta + max_theta) / 2.0;
+                    theta = (theta + 1) * underfill - 1;  // compress theta range to avoid overflowing the right edge
+                    gl_Position = vec4(theta, 0, center.y/1000., 1);
+                    gl_PointSize = scale * underfill * abs(max_theta - min_theta);
                     
                     // encode depth as rgb
                     float r = int(center.y / 256.) / 255.;
@@ -474,10 +486,13 @@ class SightRenderer(object):
         """
         
         self.program = ModularProgram(vert, frag)
+        self.underfill = 0.9  # Need to underfill the x axis because some points straddle the border between -pi and +pi
+        self.program['underfill'] = self.underfill
         self.center = STTransform()
-        self.transform = STTransform(scale=(1.0 / np.pi, 1, 1)) * PolarTransform().inverse * self.center 
+        self.transform = STTransform(scale=(1. / np.pi, 1, 1)) * PolarTransform().inverse * self.center 
         self.program.vert['transform'] = self.transform
         self.program['scale'] = self.size[1] / 2.0
+        self.program['wrap'] = self.underfill
         self.program['opacity'] = opacity
         self.program['opacity_size'] = opacity.shape[:2][::-1]
         
@@ -492,5 +507,19 @@ class SightRenderer(object):
             vispy.gloo.set_viewport(0, 0, *self.size[::-1])
             self.program.draw(mode='points', check_error=True)
             vispy.gloo.set_viewport(0, 0, *self.scene.canvas.size)
-            return self.fbo.read()
-
+            img = self.fbo.read()
+        
+        # decode distance from rgb
+        #dist = img[img.shape[0]//2]
+        dist = img[...,0]*255 + img[...,1] + img[...,2] / 255.        
+        
+        # wrap from right side overflow back to left side
+        i = dist.shape[0] // 2
+        j = int(dist.shape[1] * self.underfill)
+        v = dist[i, j]
+        j2 = np.argwhere(dist[i, j:] != v)[0,0]
+        dist[:, :j2] = dist[:, j:j+j2]
+        
+        #dist[:,j] = 1
+        dist = dist[:, :j]
+        return dist

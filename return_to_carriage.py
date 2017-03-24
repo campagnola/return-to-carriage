@@ -56,7 +56,8 @@ class Scene(object):
         self.opacity_tex = vispy.gloo.Texture2D(self.opacity, format='luminance', interpolation='nearest')
         #self.sight_filter = LineOfSightFilter(self.opacity_tex, self.txt.shared_program['position'])
         self.sight_renderer = SightRenderer(self, self.opacity_tex)
-        self.sight_filter = LineOfSightFilter(self.sight_renderer.tex, self.txt.shared_program['position'])
+        self.sight_tex = vispy.gloo.Texture2D(shape=(1, 100), format='luminance', internalformat='r32f', interpolation='linear')
+        self.sight_filter = LineOfSightFilter(self.sight_tex, self.txt.shared_program['position'])
         self.txt.attach(self.sight_filter)
         
         
@@ -127,20 +128,19 @@ class Scene(object):
         self.update_maze()
         self.sight_filter.set_player_pos(pos)
         img = self.sight_renderer.render(pos)
-        
-        #dist = img[img.shape[0]//2]
-        #dist = dist[...,0]*255 + dist[...,1] + dist[...,2] / 255.        
-        #if not hasattr(self, 'sight_plot'):
-            #import pyqtgraph as pg
-            #self.sight_plot = pg.plot()
-            #self.sight_plot.setYRange(0, 20)
-            #self.sight_img = pg.image()
-            #self.sight_img.imageItem.setBorder('w')
-            #self.sight_img.resize(1200, 200)
-            #self.sight_img.setLevels(0, 10)
-        #theta = np.linspace(-np.pi, np.pi, img.shape[1])
-        #self.sight_plot.plot(theta, dist, clear=True)
-        #self.sight_img.setImage(img.transpose(1, 0, 2), autoLevels=False)
+
+        self.sight_tex.set_data(img.astype('float32'))
+        if not hasattr(self, 'sight_plot'):
+            import pyqtgraph as pg
+            self.sight_plot = pg.plot()
+            self.sight_plot.setYRange(0, 20)
+            self.sight_img = pg.image()
+            self.sight_img.imageItem.setBorder('w')
+            self.sight_img.resize(1200, 200)
+            self.sight_img.setLevels(0, 10)
+        theta = np.linspace(-np.pi, np.pi, img.shape[1])
+        self.sight_plot.plot(theta, img[img.shape[0]//2], clear=True)
+        self.sight_img.setImage(img.transpose(1, 0), autoLevels=False)
         
  
     def update_sight(self):
