@@ -565,7 +565,7 @@ class LOSTextureRenderer(object):
             void main(void) {
                 vec2 polar_pos = $transform(vec4(v_pos, 0, 1)).xy;
                 float los_depth = texture2D(los_tex, vec2(polar_pos.x, 0.5)).r;
-                if( polar_pos.y > los_depth ) {
+                if( polar_pos.y > los_depth+0.5 ) {
                     gl_FragColor = vec4(0, 0, 0, 1);
                 }
                 else {
@@ -587,7 +587,7 @@ class LOSTextureRenderer(object):
         self.fbo = vispy.gloo.FrameBuffer(color=self.tex, depth=vispy.gloo.RenderBuffer(size))
     
     def render(self, pos):
-        self.center.translate = (-pos[0], -pos[1])
+        self.center.translate = (-pos[0]+0.5, -pos[1]+0.5)
         with self.fbo:
             vispy.gloo.clear(color=(0, 0, 0), depth=True)
             vispy.gloo.set_state(depth_test=True)
