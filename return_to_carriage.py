@@ -3,7 +3,7 @@ from PyQt4 import QtGui, QtCore
 import vispy.scene
 import numpy as np
 from graphics import CharAtlas, Sprites, TextureMaskFilter, LineOfSightFilter, SightRenderer, LOSTextureRenderer
-
+import Image
 
 class Scene(object):
     def __init__(self, canvas):
@@ -27,21 +27,29 @@ class Scene(object):
         self.txt = Sprites(self.atlas, size, scale, parent=self.view.scene)
         
         # create maze
-        shape = (50, 120)
         path = 1
         wall = 2
-        self.maze = np.empty(shape, dtype='uint32')
-        self.maze[:] = wall
-        self.maze[1:10, 1:10] = path
-        self.maze[25:35, 105:115] = path
-        self.maze[20:39, 1:80] = path
-        self.maze[5:30, 6] = path
-        self.maze[35, 5:115] = path
-        for i in range(24,36,10):
-            for j in range(15,70,15):
-                self.maze[i:i+2, j:j+2] = wall
-        self.maze[30, 3] = wall
-        self.shape = shape
+        maze = np.array(Image.open('level1.png'))[::-1,:,0]
+        maze[maze>0] = wall
+        maze[maze==0] = path
+        #shape = (50, 120)
+        #self.maze = np.empty(shape, dtype='uint32')
+        #self.maze[:] = wall
+        #self.maze[1:10, 1:10] = path
+        #self.maze[25:35, 105:115] = path
+        #self.maze[20:39, 1:80] = path
+        #self.maze[5:30, 6] = path
+        #self.maze[35, 5:115] = path
+        #for i in range(24,36,10):
+            #for j in range(15,70,15):
+                #self.maze[i:i+2, j:j+2] = wall
+        #self.maze[30, 3] = wall
+        
+        cr = self.view.camera.rect
+        self.camera_target = np.array([cr.pos[0], cr.pos[1], cr.size[0], cr.size[1]])
+        
+        self.maze = maze
+        shape = maze.shape
         self.path = path
         self.wall = wall
         
@@ -63,7 +71,7 @@ class Scene(object):
         ms = self.maze.shape
         self.memory = np.zeros((ms[0]*ss, ms[1]*ss, 4), dtype='ubyte')
         self.memory[...,3] = 1
-        self.memory_tex = vispy.gloo.Texture2D(self.memory)
+        self.memory_tex = vispy.gloo.Texture2D(self.memory, interpolation='linear')
         self.sight_filter = TextureMaskFilter(self.memory_tex, self.txt.shared_program['position'], self.maze.shape[:2][::-1])
         self.txt.attach(self.sight_filter)
         
