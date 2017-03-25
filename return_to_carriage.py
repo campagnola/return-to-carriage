@@ -59,7 +59,7 @@ class Scene(object):
         
         self.los_tex_renderer = LOSTextureRenderer(self, self.sight_tex, self.maze.shape)
         
-        self.sight_filter = TextureMaskFilter(self.los_tex_renderer.tex, self.txt.shared_program['position'])
+        self.sight_filter = TextureMaskFilter(self.los_tex_renderer.tex, self.txt.shared_program['position'], self.maze.shape[:2][::-1])
         self.txt.attach(self.sight_filter)
         
         # set positions

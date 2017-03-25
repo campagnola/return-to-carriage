@@ -278,7 +278,7 @@ class CharAtlas(object):
 
 
 class TextureMaskFilter(object):
-    def __init__(self, texture, pos):
+    def __init__(self, texture, pos, size):
         self.vshader = Function("""
             void texture_mask() {
                 $v_pos = $position;
@@ -286,7 +286,7 @@ class TextureMaskFilter(object):
         """)
         self.fshader = Function("""
             void apply_texture_mask() {
-                vec4 mask = texture2D($texture, $v_pos.xy / $scale);
+                vec4 mask = texture2D($texture, ($v_pos.xy+0.5) / $scale);
                 gl_FragColor = gl_FragColor * mask;
             }
         """)
@@ -294,7 +294,7 @@ class TextureMaskFilter(object):
         self.vshader['v_pos'] = Varying('v_pos', dtype='vec3')
         self.fshader['texture'] = texture
         self.fshader['v_pos'] = self.vshader['v_pos']
-        self.fshader['scale'] = texture.shape[:2][::-1]
+        self.fshader['scale'] = size
 
     def _attach(self, visual):
         self._visual = visual
@@ -565,17 +565,13 @@ class LOSTextureRenderer(object):
             void main(void) {
                 vec2 polar_pos = $transform(vec4(v_pos, 0, 1)).xy;
                 float los_depth = texture2D(los_tex, vec2(polar_pos.x, 0.5)).r;
-                if( polar_pos.y > los_depth+0.5 ) {
-                    gl_FragColor = vec4(0, 0, 0, 1);
-                }
-                else {
-                    gl_FragColor = vec4(1, 1, 1, 1);
-                }            
+                float diff = 100 * (los_depth+0.5 - polar_pos.y);
+                gl_FragColor = vec4(diff, diff, diff, 1);
             }
         
         """
         self.scene = scene
-        self.size = size
+        self.size = size  #(size[0]*2, size[1]*2)
         self.vertices = np.array([[-1, -1], [1, -1], [-1, 1], [-1, 1], [1, -1], [1, 1]], dtype='float32')
         self.program = ModularProgram(vert, frag)
         self.program['pos'] = self.vertices
@@ -583,11 +579,11 @@ class LOSTextureRenderer(object):
         self.program.vert['transform'] = STTransform(scale=(size[1]/2., size[0]/2.)) * STTransform(translate=(1, 1))
         self.center = STTransform()
         self.program.frag['transform'] = STTransform(scale=(0.5 / np.pi, 1, 1), translate=(0.5, 0, 0)) * PolarTransform().inverse * self.center 
-        self.tex = vispy.gloo.Texture2D(shape=size+(4,), format='rgba')
-        self.fbo = vispy.gloo.FrameBuffer(color=self.tex, depth=vispy.gloo.RenderBuffer(size))
+        self.tex = vispy.gloo.Texture2D(shape=self.size+(4,), format='rgba', interpolation='nearest')
+        self.fbo = vispy.gloo.FrameBuffer(color=self.tex, depth=vispy.gloo.RenderBuffer(self.size))
     
     def render(self, pos):
-        self.center.translate = (-pos[0]+0.5, -pos[1]+0.5)
+        self.center.translate = (-pos[0]-0.5, -pos[1]-0.5)
         with self.fbo:
             vispy.gloo.clear(color=(0, 0, 0), depth=True)
             vispy.gloo.set_state(depth_test=True)
