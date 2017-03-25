@@ -356,6 +356,8 @@ class LineOfSightFilter1(object):
 
 
 class LineOfSightFilter(object):
+    """Mask regions based on player position and a 1D (polar) line-of-sight texture
+    """
     def __init__(self, texture, pos):
         self.vshader = Function("""
             void line_of_sight() {
@@ -366,7 +368,7 @@ class LineOfSightFilter(object):
                 vec4 c = texture2D($texture, vec2(polar_pos.x, 0.5));
                 float depth = c.r;
                 if( polar_pos.y > depth+0.5 ) {
-                    $mask = vec3(0, 0, 1);  // out-of-sight objects turn blue
+                    $mask = vec3(0.5, 0.5, 1);  // out-of-sight objects turn blue
                 }
                 else {
                     $mask = vec3(1, 1, 1);
@@ -399,7 +401,7 @@ class LineOfSightFilter(object):
 
 
 class SightRenderer(object):
-    """For computing line of sight and shadows on GPU
+    """For computing 1d (polar) line of sight and shadows on GPU
     """
     def __init__(self, scene, opacity, size=(1, 10000)):
         self.scene = scene
@@ -498,6 +500,19 @@ class SightRenderer(object):
         
     def render(self, pos):
         """Compute distance from pos to nearest object in all directions.
+        
+        Returns an array of shape (1, N), where [0,0] gives the distance to the
+        nearest object at theta=-pi, and [0,-1] gives the nearest object distance
+        at theta=+pi.
+        
+        Strategy is:
+        
+        1) draw all opaque points mapped into polar coordinates 
+           (x=theta, z=depth), with depth encoded as fragment rgb
+        2) points that straddle the +pi/-pi boundary are shifted to +pi, and
+           the texture is expanded to prevent clipping these overflow fragments
+        3) after rendering, the texture is downloaded and decoded, and overflow
+           fragments are wrapped back to the left side of the texture
         """
         self.center.translate = (-pos[0], -pos[1])
         self.program['position'] = self.scene.txt.shared_program['position']
@@ -510,7 +525,6 @@ class SightRenderer(object):
             img = self.fbo.read()
         
         # decode distance from rgb
-        #dist = img[img.shape[0]//2]
         dist = img[...,0]*255 + img[...,1] + img[...,2] / 255.        
         
         # wrap from right side overflow back to left side
@@ -520,6 +534,68 @@ class SightRenderer(object):
         j2 = np.argwhere(dist[i, j:] != v)[0,0]
         dist[:, :j2] = dist[:, j:j+j2]
         
-        #dist[:,j] = 1
         dist = dist[:, :j]
         return dist
+
+
+
+class LOSTextureRenderer(object):
+    """Converts a 1D polar line-of-sight texture into a 2D (cartesian) shadow map.
+    """
+    def __init__(self, scene, los_tex, size):
+        
+        vert = """
+            #version 120
+            
+            attribute vec2 pos;
+            varying vec2 v_pos;
+            
+            void main(void) {
+                gl_Position = vec4(pos, 0, 1);
+                v_pos = $transform(gl_Position).xy;
+            }
+        """
+
+        frag = """
+            #version 120
+            
+            varying vec2 v_pos;
+            uniform sampler2D los_tex;
+            
+            void main(void) {
+                vec2 polar_pos = $transform(vec4(v_pos, 0, 1)).xy;
+                float los_depth = texture2D(los_tex, vec2(polar_pos.x, 0.5)).r;
+                if( polar_pos.y > los_depth ) {
+                    gl_FragColor = vec4(v_pos.x/120, v_pos.y/50, 0, 1);
+                }
+                else {
+                    gl_FragColor = vec4(1, 1, 1, 1);
+                }            
+            }
+        
+        """
+        self.scene = scene
+        self.size = size
+        self.vertices = np.array([[-1, -1], [1, -1], [-1, 1], [-1, 1], [1, -1], [1, 1]], dtype='float32')
+        self.program = ModularProgram(vert, frag)
+        self.program['pos'] = self.vertices
+        self.program['los_tex'] = los_tex
+        self.program.vert['transform'] = STTransform(scale=(size[1]/2., size[0]/2.)) * STTransform(translate=(1, 1))
+        self.center = STTransform()
+        self.program.frag['transform'] = STTransform(scale=(0.5 / np.pi, 1, 1), translate=(0.5, 0, 0)) * PolarTransform().inverse * self.center 
+        self.tex = vispy.gloo.Texture2D(shape=size+(4,), format='rgba')
+        self.fbo = vispy.gloo.FrameBuffer(color=self.tex, depth=vispy.gloo.RenderBuffer(size))
+    
+    def render(self, pos):
+        self.center.translate = (-pos[0], -pos[1])
+        with self.fbo:
+            vispy.gloo.clear(color=(0, 0, 0), depth=True)
+            vispy.gloo.set_state(depth_test=True)
+            vispy.gloo.set_viewport(0, 0, *self.size[::-1])
+            self.program.draw(mode='triangles', check_error=True)
+            vispy.gloo.set_viewport(0, 0, *self.scene.canvas.size)
+            img = self.fbo.read()
+        
+        return img
+    
+    

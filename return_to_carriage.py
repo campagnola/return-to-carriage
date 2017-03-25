@@ -2,11 +2,13 @@
 from PyQt4 import QtGui, QtCore
 import vispy.scene
 import numpy as np
-from graphics import CharAtlas, Sprites, TextureMaskFilter, LineOfSightFilter, SightRenderer
+from graphics import CharAtlas, Sprites, TextureMaskFilter, LineOfSightFilter, SightRenderer, LOSTextureRenderer
 
 
 class Scene(object):
     def __init__(self, canvas):
+        self.debug_line_of_sight = False
+        self.debug_los_tex = True
         self.canvas = canvas
         
         self.view = canvas.central_widget.add_view()
@@ -48,23 +50,16 @@ class Scene(object):
         self.maze_sprites = self.txt.add_sprites(shape)
         self.maze_sprites.sprite = self.maze
 
-        # Add sight filter
-        #self.sight_tex = vispy.gloo.Texture2D(self.sight)
-        #self.sight_filter = TextureMaskFilter(self.sight_tex, pos="gl_PointCoord")
-        
+        # line-of-sight computation
         self.opacity = (self.maze == wall).astype('float32')
         self.opacity_tex = vispy.gloo.Texture2D(self.opacity, format='luminance', interpolation='nearest')
-        #self.sight_filter = LineOfSightFilter(self.opacity_tex, self.txt.shared_program['position'])
         self.sight_renderer = SightRenderer(self, self.opacity_tex)
         self.sight_tex = vispy.gloo.Texture2D(shape=(1, 100), format='luminance', internalformat='r32f', interpolation='linear')
         self.sight_filter = LineOfSightFilter(self.sight_tex, self.txt.shared_program['position'])
         self.txt.attach(self.sight_filter)
         
+        self.los_tex_renderer = LOSTextureRenderer(self, self.sight_tex, self.maze.shape)
         
-        #from vispy.visuals.transforms import PolarTransform, STTransform
-        #self.center = STTransform()
-        #self.txt.transform = STTransform(scale=(-10, 1)) * PolarTransform().inverse * self.center
-
         # set positions
         pos = np.zeros(shape + (3,), dtype='float32')
         pos[...,:2] = np.mgrid[0:shape[1], 0:shape[0]].transpose(2, 1, 0)
@@ -130,18 +125,29 @@ class Scene(object):
         img = self.sight_renderer.render(pos)
 
         self.sight_tex.set_data(img.astype('float32'))
-        if not hasattr(self, 'sight_plot'):
-            import pyqtgraph as pg
-            self.sight_plot = pg.plot()
-            self.sight_plot.setYRange(0, 20)
-            self.sight_img = pg.image()
-            self.sight_img.imageItem.setBorder('w')
-            self.sight_img.resize(1200, 200)
-            self.sight_img.setLevels(0, 10)
-        theta = np.linspace(-np.pi, np.pi, img.shape[1])
-        self.sight_plot.plot(theta, img[img.shape[0]//2], clear=True)
-        self.sight_img.setImage(img.transpose(1, 0), autoLevels=False)
         
+        if self.debug_line_of_sight:
+            if not hasattr(self, 'sight_plot'):
+                import pyqtgraph as pg
+                self.sight_plot = pg.plot()
+                self.sight_plot.setYRange(0, 20)
+                self.sight_img = pg.image()
+                self.sight_img.imageItem.setBorder('w')
+                self.sight_img.resize(1200, 200)
+                self.sight_img.setLevels(0, 10)
+            theta = np.linspace(-np.pi, np.pi, img.shape[1])
+            self.sight_plot.plot(theta, img[img.shape[0]//2], clear=True)
+            self.sight_img.setImage(img.transpose(1, 0), autoLevels=False)
+
+
+        if self.debug_los_tex:
+            if not hasattr(self, 'los_tex_imv'):
+                import pyqtgraph as pg
+                self.los_tex_imv =  pg.image()
+                self.los_tex_imv.imageItem.setBorder('w')
+            los = self.los_tex_renderer.render(pos)
+            self.los_tex_imv.setImage(los.transpose(1, 0, 2))
+            
  
     def update_sight(self):
         #self.sight[:] = 0
