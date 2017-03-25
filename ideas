@@ -83,9 +83,6 @@ Terrain
     - would be cool to have large ground level + multiple entrances to underground
  
 
-** as imagination heavy as this is e.g. cursor and char monsters, we should consider how much time we really want to spend on graphics like
-forest and water. If we're adding forest, water, portals, light-up spells, etc, maybe we should just be building a full graphical game rather than spending the time
-building the ascii representation.
     
     
 ---------------------
@@ -129,7 +126,12 @@ User- (per gamer login)
 	- Includes Adventures
 
 Adventure-
-	- Includes 1 Hero, set of Items
+	- An advnture is one reality. Heroes, maps, items, etc from one adventure have no correlation to another
+	  Like tiny universes.
+
+Dungeon-
+	- A set of maps that exist in an adventure. There can be multiple dungeons in one adventure, all 
+	 connected by a single home map.
 
 Hero-
 	- Name, HeroType, Rank, Status(dead/alive), Location
