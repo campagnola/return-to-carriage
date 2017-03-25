@@ -55,10 +55,12 @@ class Scene(object):
         self.opacity_tex = vispy.gloo.Texture2D(self.opacity, format='luminance', interpolation='nearest')
         self.sight_renderer = SightRenderer(self, self.opacity_tex)
         self.sight_tex = vispy.gloo.Texture2D(shape=(1, 100), format='luminance', internalformat='r32f', interpolation='linear')
-        self.sight_filter = LineOfSightFilter(self.sight_tex, self.txt.shared_program['position'])
-        self.txt.attach(self.sight_filter)
+        #self.sight_filter = LineOfSightFilter(self.sight_tex, self.txt.shared_program['position'])
         
         self.los_tex_renderer = LOSTextureRenderer(self, self.sight_tex, self.maze.shape)
+        
+        self.sight_filter = TextureMaskFilter(self.los_tex_renderer.tex, self.txt.shared_program['position'])
+        self.txt.attach(self.sight_filter)
         
         # set positions
         pos = np.zeros(shape + (3,), dtype='float32')
@@ -121,11 +123,12 @@ class Scene(object):
         self.player.position = pos
         self.update_sight()
         self.update_maze()
-        self.sight_filter.set_player_pos(pos)
+        #self.sight_filter.set_player_pos(pos)
         img = self.sight_renderer.render(pos)
 
         self.sight_tex.set_data(img.astype('float32'))
-        
+        los = self.los_tex_renderer.render(pos)
+    
         if self.debug_line_of_sight:
             if not hasattr(self, 'sight_plot'):
                 import pyqtgraph as pg
@@ -145,29 +148,13 @@ class Scene(object):
                 import pyqtgraph as pg
                 self.los_tex_imv =  pg.image()
                 self.los_tex_imv.imageItem.setBorder('w')
-            los = self.los_tex_renderer.render(pos)
             self.los_tex_imv.setImage(los.transpose(1, 0, 2))
             
  
     def update_sight(self):
-        #self.sight[:] = 0
-        #pos = self.player.position[:2][::-1].astype(int)
-        #ps = self.player.sight
-        #r = ps.shape[0]//2
-        #target_bl = pos - r
-        #target_ur = pos + r
-        #adj_target_bl = np.where(target_bl < 0, 0, target_bl)
-        #src_bl = adj_target_bl - target_bl
-        #target_shape = self.sight[adj_target_bl[0]:target_ur[0], adj_target_bl[1]:target_ur[1]].shape
-        #self.sight[adj_target_bl[0]:target_ur[0], adj_target_bl[1]:target_ur[1]] = self.player.sight[src_bl[0]:src_bl[0]+target_shape[0], src_bl[1]:src_bl[1]+target_shape[1]]
+        #self.sight_filter.set_player_pos(self.player.position[:2])
+        pass
         
-        #self.sight_tex.set_data(self.sight)
-        
-        #self.memory *= 0.998
-        #self.memory = np.where(self.memory > self.sight, self.memory, self.sight)
-        ##self.memory += self.sight
-        
-        self.sight_filter.set_player_pos(self.player.position[:2])
         
     def update_maze(self):
         mem = np.clip(self.memory[...,None], 0, 1)

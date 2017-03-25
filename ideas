@@ -111,3 +111,70 @@ Graphics
         some parts of levels can be transparent to level below
     Parts of the map that are out of line-of-sight (by that you still remember) are desaturated / dimmed
         
+
+-----------------------
+
+
+Magic works somewhat like crafting / potion making in other games:
+
+    - Basic magic spell components come in at least two categories:
+        - "what" spells: fire, water, ice, healing, teleportation, force, psychic, etc.
+        - "how" spells: apply to self, focus in a particular direction, 
+           focus on a location, focus on an object, time delay, slow release, etc.
+        - each component is represented by one unicode character (maybe mandarin?)
+    - To make an effective spell, you usually need to combine at least a "what" with a "how". Examples:
+        - fire spell on its own makes a poof of flame that probably harms the caster.
+        - If you combine fire with a direction, you get fireball / flame thrower
+        - Fire + shield creates a ring of fire around the caster
+        - Fire + water + direction creates a blast of steam (or hot water, depending on the ratio)
+    - Each component in a spell may be assigned a strength
+        - maximum strength is determined by a player attribute
+        - probability of success is determined by a _different_ attribute
+          (so it's possible to have a prodigy magician who can cast very strong
+           spells, but whose inexperience makes such spellcasting dangerous)
+    - More complex / specialized / focused spells can be built by combining more basic spells 
+        - but complex spells require greater ability
+    - Most of the basic spell components are readily found in books (library, magic lessons, etc), 
+        but some components may be out of reach for the average caster
+        - Some long-forgotten spell components can only be found by adventuring
+    - Player can cast any spell by entering the right "recipe"
+    - Alternatively, Player can buy / find a blank book in which spell recipes can be recorded and referenced 
+        by number / letter for quick use.
+    - Many recipes can be found in books, on scrolls, scratched into walls, etc.
+        - However, any recipe can be used regardless of whether you read it in a book
+        - A user who understands how the elements work and how they interact should be able to 
+            create new spells on their own
+        - Dungeons shall not be littered with random scrolls and spellbooks.
+        - Seriously, those items were looted 30 years ago by the original adventurers.
+        (but hey, what if the game is set in a dystopian world 30 years after a horde of adventurers came, 
+        looted all the dungeons, and then moved on to better games?)
+        - Occasional items can be found on corpses, or in well protected / hidden areas
+        - Items can also be purchased from the DND shoppe, or created custom by your local magicperson                    
+    - Elements can interact in surprising ways
+        - the order of elements can have a subtle effect
+        - some elements augment / diminish the strength / duration / reliability of others
+    - Your local magicparson can provide training (for a fee). This can increase your levels
+    - The maximum strength / duration of a spell, and the probability of 
+        casting it correctly, depend on the caster's ability.
+        - It is dangerous to cast some spells when part of the spell is likely to fail
+            (for example, don't try to cast fireball if there's a good chance the direction part of the spell will fail)
+        - If a spell is way over your level, there is a chance of successfully casting the _wrong_ spell.
+        - More complex spells will naturally require more skill, as each component has a certain probability
+            of failure
+        - To avoid making spells too dangerous to use, they should become very reliable
+            with practice and after reaching a high enough level.
+        - Player's skill is tracked for each element. Practice makes perfect.
+            
+    
+    - Scrolls are one-time use and require no particular magical ability of the user
+        - However, powerful scrolls are dangerous if you don't know how to use them properly
+          (for example, dont blast the wall next to you with a fireball; the fire will have nowhere to go)
+        - It is up to the player to be able to read the scroll and deduce its meaning.
+            - observe the effect and write it down in a spellbook
+    
+-----------------------
+
+Stores
+    - limited inventory, stock turns over randomly
+    - prices can fluctuate based on local variations in availability
+    - Items you sell can be repurchased

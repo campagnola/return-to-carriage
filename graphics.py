@@ -279,29 +279,29 @@ class CharAtlas(object):
 
 class TextureMaskFilter(object):
     def __init__(self, texture, pos):
-        #self.vshader = Function("""
-            #void z_colormap_support() {
-                #$zval = $position.z;
-            #}
-        #""")
+        self.vshader = Function("""
+            void texture_mask() {
+                $v_pos = $position;
+            }
+        """)
         self.fshader = Function("""
             void apply_texture_mask() {
-                vec4 mask = texture2D($texture, $pos.xy);
+                vec4 mask = texture2D($texture, $v_pos.xy / $scale);
                 gl_FragColor = gl_FragColor * mask;
             }
         """)
-        self.texture = texture
-        self.fshader['texture'] = self.texture
-        self.fshader['pos'] = pos
-        #self.vshader['zval'] = Varying('v_zval', dtype='float')
-        #self.fshader['zval'] = self.vshader['zval']
+        self.vshader['position'] = pos
+        self.vshader['v_pos'] = Varying('v_pos', dtype='vec3')
+        self.fshader['texture'] = texture
+        self.fshader['v_pos'] = self.vshader['v_pos']
+        self.fshader['scale'] = texture.shape[:2][::-1]
 
     def _attach(self, visual):
         self._visual = visual
         fhook = visual._get_hook('frag', 'post')
         fhook.add(self.fshader(), position=3)
-
-        #self.vshader['position'] = visual.shared_program.vert['position']
+        vhook = visual._get_hook('vert', 'post')
+        vhook.add(self.vshader(), position=3)
 
 
 class LineOfSightFilter1(object):
@@ -566,7 +566,7 @@ class LOSTextureRenderer(object):
                 vec2 polar_pos = $transform(vec4(v_pos, 0, 1)).xy;
                 float los_depth = texture2D(los_tex, vec2(polar_pos.x, 0.5)).r;
                 if( polar_pos.y > los_depth ) {
-                    gl_FragColor = vec4(v_pos.x/120, v_pos.y/50, 0, 1);
+                    gl_FragColor = vec4(0, 0, 0, 1);
                 }
                 else {
                     gl_FragColor = vec4(1, 1, 1, 1);
