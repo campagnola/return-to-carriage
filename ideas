@@ -1,8 +1,10 @@
+Random Stuff:
 
-Narrator should be snarky.
-
+- Narrator should be snarky.
 "your busted-ass armor has seen better days".
-
+- 2nd 'over' map, showing connections to different maps, be them deeper into dungeons / caves, or further across land
+- "Gauntlet" stages? Moving walls, spikes, action based play
+- Inventory page - to include current armor and weapons, with lists of inventory to one side 
 
 
 ------------------
@@ -38,9 +40,9 @@ More realism to skills / memory
 Characters die permanently, but dungeons are persistent. 
     - It is possible to leave resources behind for the next adventurer (maps, gold, treasure..)
     - It is possible to encounter the remains of dead adventurers, but there's a good chance their corpse has already been looted.
-        (and you might find their stuff in the posession of nearby monsters)
+        (and you might find their stuff in the posession of nearby monsters); items that are found with monsters or found on corpse have undergone regular wear-over-time: see ITEMS section
     - You can spin up a new dungeon, but transferring a character to another dungeon incurs a skill / gold penalty (as if you spent a lot of time and money traveling to the next dungeon)
-    
+    - It is possible to find one-time-use spells of ressurect.  
  
 --------------------
 
@@ -73,13 +75,14 @@ Portals
         - Dynamically open wormhole as you approach the portal
         - Remote end of the portal is visible through the portal 
         
-        
 ---------------------
 
 Terrain
 
     - Many types of terrain -- dungeons, caves, forest, water, etc
     - would be cool to have large ground level + multiple entrances to underground
+ 
+
     
     
 ---------------------
@@ -110,7 +113,9 @@ Graphics
         ground level terrain can be 3D
         some parts of levels can be transparent to level below
     Parts of the map that are out of line-of-sight (by that you still remember) are desaturated / dimmed
-        
+
+    Turn-based mode should be identified by boundary via colored floor area        
+
 
 -----------------------
 
@@ -178,3 +183,101 @@ Stores
     - limited inventory, stock turns over randomly
     - prices can fluctuate based on local variations in availability
     - Items you sell can be repurchased
+
+
+Classes:
+
+User- (per gamer login)
+    - Name / Login
+    - Includes Adventures
+
+Adventure-
+    - An advnture is one reality. Heroes, maps, items, etc from one adventure have no correlation to another
+      Like tiny universes.
+
+Dungeon-
+    - A set of maps that exist in an adventure. There can be multiple dungeons in one adventure, all 
+     connected by a single home map.
+
+Hero-
+    - Name, HeroType, Rank, Status(dead/alive), Location
+    - List of Items
+    - HP - Stamina, Magic - Intelligence - Cast Speed, Strength, Vision
+    - Armor, Resistances, Immunities, Damage, Advantages  
+    
+
+Monster-
+    - Name, Char, Rank [range]
+    - Spawn
+        - Frequency curve [1-5](probability that monster spawns e.g. '5' on level 10, '3' on level 9, etc)
+    - HP, Damage
+    - Armor, Resistances, Immunities, Damage, Advantages
+    - Special attacks, Special abilities
+    - Awareness (of Hero)
+    
+Item-
+    - Name, Type, Quality[high quality vs low quality], Status[good condition, rusted,etc]
+        - Type Weapon
+            - Attack Rate (in seconds, e.g. 1.4 attacks per second)
+            - Weight
+            - Material
+            - Base Damage
+            - Magic Damage
+                - ...
+            - Special Damage
+                - ...
+            - Projectile bool
+                - Physical damage (arrow, etc)
+                - Magic (projectile, area, etc)
+            - Disadvantages
+                - Range of Motion / Awkwardness (as a function of weapon type + weight + quality)
+                - Sensitivities (e.g. hard monsters / walls, etc will dull sharp blades, whereas a hammer is not affected)
+                - Rate of Decay / Rust (based on material + quality)
+            - Can Be Used? 
+                - Particular Hero types cannot use certain weapons
+            
+        - Type Armor
+            - Material
+            - Base protection
+            - Physical Resistances
+            - Magic Resistances
+            - Disadvantages
+                - Range of Motion
+                - Sensitivities
+                - Rate of Decay / Rust (based on material + quality)
+ 
+            - Article
+                - Chest
+                - Head
+                - Boots
+                - Gloves
+                - Wrists / Arms
+                - Belt
+                - ...
+            - Can Be Used? 
+                - Particular Hero types cannot use certain armor
+
+Map-
+    - Level number
+    - Type
+        - 3D
+            - Home
+        - 2D
+            - Dungeon
+            - Forest
+            - Sands
+            - Caves
+            - Mountains
+                    
+    - Configuration
+        - Larn-like
+        - Rogue-like
+        - Final Fantasy-like
+
+    - Grid
+        - x,y,material(stone, wood, dirt, tree, fixed object),pattern(stone, wood, dirt)    
+        - Density / Breakable
+        - Sensitivities e.g. burn
+
+    
+
