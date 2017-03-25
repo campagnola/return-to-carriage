@@ -545,7 +545,7 @@ class SightRenderer(object):
 class LOSTextureRenderer(object):
     """Converts a 1D polar line-of-sight texture into a 2D (cartesian) shadow map.
     """
-    def __init__(self, scene, los_tex, size):
+    def __init__(self, scene, los_tex, size, supersample=4):
         
         vert = """
             #version 120
@@ -574,8 +574,7 @@ class LOSTextureRenderer(object):
         
         """
         self.scene = scene
-        self.size = (size[0]*2, size[1]*2)
-        #self.size = size
+        self.size = (size[0]*supersample, size[1]*supersample)
         self.vertices = np.array([[-1, -1], [1, -1], [-1, 1], [-1, 1], [1, -1], [1, 1]], dtype='float32')
         self.program = ModularProgram(vert, frag)
         self.program['pos'] = self.vertices

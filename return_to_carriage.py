@@ -7,8 +7,8 @@ from graphics import CharAtlas, Sprites, TextureMaskFilter, LineOfSightFilter, S
 
 class Scene(object):
     def __init__(self, canvas):
-        self.debug_line_of_sight = True
-        self.debug_los_tex = True
+        self.debug_line_of_sight = False
+        self.debug_los_tex = False
         self.canvas = canvas
         
         self.view = canvas.central_widget.add_view()
@@ -57,10 +57,14 @@ class Scene(object):
         self.sight_renderer = SightRenderer(self, self.opacity_tex)
         self.sight_tex = vispy.gloo.Texture2D(shape=(1, 100), format='luminance', internalformat='r32f', interpolation='linear')
         #self.sight_filter = LineOfSightFilter(self.sight_tex, self.txt.shared_program['position'])
+        ss = 4
+        self.los_tex_renderer = LOSTextureRenderer(self, self.sight_tex, self.maze.shape, supersample=ss)
         
-        self.los_tex_renderer = LOSTextureRenderer(self, self.sight_tex, self.maze.shape)
-        
-        self.sight_filter = TextureMaskFilter(self.los_tex_renderer.tex, self.txt.shared_program['position'], self.maze.shape[:2][::-1])
+        ms = self.maze.shape
+        self.memory = np.zeros((ms[0]*ss, ms[1]*ss, 4), dtype='ubyte')
+        self.memory[...,3] = 1
+        self.memory_tex = vispy.gloo.Texture2D(self.memory)
+        self.sight_filter = TextureMaskFilter(self.memory_tex, self.txt.shared_program['position'], self.maze.shape[:2][::-1])
         self.txt.attach(self.sight_filter)
         
         # set positions
@@ -128,8 +132,11 @@ class Scene(object):
         img = self.sight_renderer.render(pos)
 
         self.sight_tex.set_data(img.astype('float32'))
-        los = self.los_tex_renderer.render(pos)
-    
+        los = self.los_tex_renderer.render(pos)[::-1]
+        mask = np.where(los > self.memory, los, self.memory)
+        self.memory[..., 2] = mask[..., 2]
+        self.memory_tex.set_data(mask)
+        
         if self.debug_line_of_sight:
             if not hasattr(self, 'sight_plot'):
                 import pyqtgraph as pg
