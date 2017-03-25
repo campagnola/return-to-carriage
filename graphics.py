@@ -286,7 +286,7 @@ class TextureMaskFilter(object):
         """)
         self.fshader = Function("""
             void apply_texture_mask() {
-                vec4 mask = texture2D($texture, ($v_pos.xy+0.5) / $scale);
+                vec4 mask = texture2D($texture, ($v_pos.xy+vec2(gl_PointCoord.x-0, 1-gl_PointCoord.y)) / $scale);
                 gl_FragColor = gl_FragColor * mask;
             }
         """)
@@ -403,7 +403,7 @@ class LineOfSightFilter(object):
 class SightRenderer(object):
     """For computing 1d (polar) line of sight and shadows on GPU
     """
-    def __init__(self, scene, opacity, size=(1, 10000)):
+    def __init__(self, scene, opacity, size=(100, 1000)):
         self.scene = scene
         self.size = size
         self.tex = vispy.gloo.Texture2D(shape=size+(4,), format='rgba', interpolation='linear', wrapping='repeat')
@@ -439,17 +439,20 @@ class SightRenderer(object):
                             float alpha2 = texture2D(opacity, (pos2.xy+vec2(0.5, 0.5)) / opacity_size).r;
                             if( alpha2 > 0 ) {
                                 dx[i] = j/1.95;  // 1.95 gives a small amount of overlap to prevent gaps
-                                vec4 polar_pos = $transform(vec4(cpos + dx, 1));
-                                if( polar_pos.x - center.x > 1 ) {
-                                    // point wraps around between -pi and +pi
-                                    polar_pos.x -= 2;
-                                }
-                                else if( center.x - polar_pos.x > 1 ) {
-                                    polar_pos.x += 2;
-                                }
-                                min_theta = min(min_theta, polar_pos.x);
-                                max_theta = max(max_theta, polar_pos.x);
                             }
+                            else {
+                                dx[i] = j/4.;  // unconnected walls still have some width
+                            }
+                            vec4 polar_pos = $transform(vec4(cpos + dx, 1));
+                            if( polar_pos.x - center.x > 1 ) {
+                                // point wraps around between -pi and +pi
+                                polar_pos.x -= 2;
+                            }
+                            else if( center.x - polar_pos.x > 1 ) {
+                                polar_pos.x += 2;
+                            }
+                            min_theta = min(min_theta, polar_pos.x);
+                            max_theta = max(max_theta, polar_pos.x);
                         }
                     }
                     if( min_theta < -1 ) {
@@ -565,13 +568,14 @@ class LOSTextureRenderer(object):
             void main(void) {
                 vec2 polar_pos = $transform(vec4(v_pos, 0, 1)).xy;
                 float los_depth = texture2D(los_tex, vec2(polar_pos.x, 0.5)).r;
-                float diff = 100 * (los_depth+0.5 - polar_pos.y);
+                float diff = (los_depth+1 - polar_pos.y);
                 gl_FragColor = vec4(diff, diff, diff, 1);
             }
         
         """
         self.scene = scene
-        self.size = size  #(size[0]*2, size[1]*2)
+        self.size = (size[0]*2, size[1]*2)
+        #self.size = size
         self.vertices = np.array([[-1, -1], [1, -1], [-1, 1], [-1, 1], [1, -1], [1, 1]], dtype='float32')
         self.program = ModularProgram(vert, frag)
         self.program['pos'] = self.vertices
@@ -579,7 +583,7 @@ class LOSTextureRenderer(object):
         self.program.vert['transform'] = STTransform(scale=(size[1]/2., size[0]/2.)) * STTransform(translate=(1, 1))
         self.center = STTransform()
         self.program.frag['transform'] = STTransform(scale=(0.5 / np.pi, 1, 1), translate=(0.5, 0, 0)) * PolarTransform().inverse * self.center 
-        self.tex = vispy.gloo.Texture2D(shape=self.size+(4,), format='rgba', interpolation='nearest')
+        self.tex = vispy.gloo.Texture2D(shape=self.size+(4,), format='rgba', interpolation='linear')
         self.fbo = vispy.gloo.FrameBuffer(color=self.tex, depth=vispy.gloo.RenderBuffer(self.size))
     
     def render(self, pos):

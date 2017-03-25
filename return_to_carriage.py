@@ -7,7 +7,7 @@ from graphics import CharAtlas, Sprites, TextureMaskFilter, LineOfSightFilter, S
 
 class Scene(object):
     def __init__(self, canvas):
-        self.debug_line_of_sight = False
+        self.debug_line_of_sight = True
         self.debug_los_tex = True
         self.canvas = canvas
         
@@ -40,6 +40,7 @@ class Scene(object):
         for i in range(24,36,10):
             for j in range(15,70,15):
                 self.maze[i:i+2, j:j+2] = wall
+        self.maze[30, 3] = wall
         self.shape = shape
         self.path = path
         self.wall = wall
@@ -70,7 +71,7 @@ class Scene(object):
         # set colors
         sprite_colors = np.array([
             [[0.0, 0.0, 0.0, 0.0], [0.0, 0.0, 0.0, 0.0]],  # nothing
-            [[0.2, 0.2, 0.2, 1.0], [0.0, 0.0, 0.0, 1.0]],  # path
+            [[0.2, 0.2, 0.2, 1.0], [0.05, 0.05, 0.05, 1.0]],  # path
             [[0.0, 0.0, 0.0, 1.0], [0.2, 0.2, 0.2, 1.0]],  # wall
         ], dtype='float32')
         color = sprite_colors[self.maze]
