@@ -1,9 +1,11 @@
 # ~*~ coding: utf8 ~*~
 from PyQt4 import QtGui, QtCore
-import vispy.scene
+import vispy.scene, vispy.app
 import numpy as np
 from graphics import CharAtlas, Sprites, TextureMaskFilter, LineOfSightFilter, SightRenderer, LOSTextureRenderer
-import Image
+from PIL import Image
+import vispy.util.ptime as ptime
+
 
 class Scene(object):
     def __init__(self, canvas):
@@ -16,6 +18,10 @@ class Scene(object):
         self.view.camera.rect = [0, -5, 120, 60]
         self.view.camera.aspect = 0.6
         canvas.events.key_press.connect(self.key_pressed)
+        
+        self.camera_target = self.view.camera.rect
+        self._last_camera_update = ptime.time()
+        self.scroll_timer = vispy.app.Timer(start=True, connect=self._scroll_camera, interval=0.016)
         
         # generate a texture for each character we need
         self.atlas = CharAtlas()
@@ -45,9 +51,6 @@ class Scene(object):
                 #self.maze[i:i+2, j:j+2] = wall
         #self.maze[30, 3] = wall
         
-        cr = self.view.camera.rect
-        self.camera_target = np.array([cr.pos[0], cr.pos[1], cr.size[0], cr.size[1]])
-        
         self.maze = maze
         shape = maze.shape
         self.path = path
@@ -64,7 +67,6 @@ class Scene(object):
         self.opacity_tex = vispy.gloo.Texture2D(self.opacity, format='luminance', interpolation='nearest')
         self.sight_renderer = SightRenderer(self, self.opacity_tex)
         self.sight_tex = vispy.gloo.Texture2D(shape=(1, 100), format='luminance', internalformat='r32f', interpolation='linear')
-        #self.sight_filter = LineOfSightFilter(self.sight_tex, self.txt.shared_program['position'])
         ss = 4
         self.los_tex_renderer = LOSTextureRenderer(self, self.sight_tex, self.maze.shape, supersample=ss)
         
@@ -144,6 +146,8 @@ class Scene(object):
         mask = np.where(los > self.memory, los, self.memory)
         self.memory[..., 2] = mask[..., 2]
         self.memory_tex.set_data(mask)
+
+        self._update_camera_target()
         
         if self.debug_line_of_sight:
             if not hasattr(self, 'sight_plot'):
@@ -166,6 +170,44 @@ class Scene(object):
                 self.los_tex_imv.imageItem.setBorder('w')
             self.los_tex_imv.setImage(los.transpose(1, 0, 2))
             
+    def _update_camera_target(self):
+        pp = np.array(self.player.position)
+        cr = vispy.geometry.Rect(self.view.camera.rect)
+        cc = np.array(cr.center)
+        cs = np.array(cr.size)
+        cp = np.array(cr.pos)
+        
+        dif = pp - cc
+        maxdif = 0.1 * cs  # start correcting camera at 10% width from center
+        for ax in (0, 1):
+            if dif[ax] <  -maxdif[ax]:
+                cp[ax] += dif[ax] + maxdif[ax]
+            elif dif[ax] > maxdif[ax]:
+                cp[ax] += dif[ax] - maxdif[ax]
+                
+        cr.pos = cp
+        self.camera_target = cr
+        
+    def _scroll_camera(self, ev):
+        now = ptime.time()
+        dt = now - self._last_camera_update
+        self._last_camera_update = now
+        
+        cr = vispy.geometry.Rect(self.view.camera.rect)
+        tr = self.camera_target
+        
+        crv = np.array(cr.pos + cr.size, dtype='float32')
+        trv = np.array(tr.pos + tr.size, dtype='float32')
+        
+        if not np.any(abs(trv-crv) > 1e-2):
+            return
+        
+        s = np.exp(-dt / 0.4)  # 400 ms settling time constant
+        nrv = crv * s + trv * (1.0-s)
+        
+        cr.pos = nrv[:2]
+        cr.size = nrv[2:]
+        self.view.camera.rect = cr
  
     def update_sight(self):
         #self.sight_filter.set_player_pos(self.player.position[:2])
