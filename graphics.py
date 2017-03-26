@@ -534,7 +534,10 @@ class SightRenderer(object):
         i = dist.shape[0] // 2
         j = int(dist.shape[1] * self.underfill)
         v = dist[i, j]
-        j2 = np.argwhere(dist[i, j:] != v)[0,0]
+        try:
+            j2 = np.argwhere(dist[i, j:] != v)[0,0]
+        except IndexError:
+            raise Exception("Error: overflowed line-of-sight render buffer :(")
         dist[:, :j2] = dist[:, j:j+j2]
         
         dist = dist[:, :j]

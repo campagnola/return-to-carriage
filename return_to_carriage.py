@@ -5,6 +5,7 @@ import numpy as np
 from graphics import CharAtlas, Sprites, TextureMaskFilter, LineOfSightFilter, SightRenderer, LOSTextureRenderer
 from PIL import Image
 import vispy.util.ptime as ptime
+from input import InputThread
 
 
 class Scene(object):
@@ -27,6 +28,14 @@ class Scene(object):
         self.keys = set()
         self._last_input_update = ptime.time()
         self.input_timer = vispy.app.Timer(start=True, connect=self._handle_input, interval=0.016)
+        
+        try:
+            self.input_thread = InputThread()
+            self.input_thread.new_event.connect(self._gamepad_event)
+        except Exception:
+            self.input_thread = None
+            sys.excepthook(*sys.exc_info())
+        self._gamepad_state = {}
         
         # generate a texture for each character we need
         self.atlas = CharAtlas()
@@ -201,17 +210,29 @@ class Scene(object):
         self._handle_input(None)
         
     def key_released(self, ev):
-        self.keys.remove(ev.key)
+        try:
+            self.keys.remove(ev.key)
+        except KeyError:
+            pass
         
+    def _gamepad_event(self, ev, state):
+        # gamepad input
+        self._gamepad_state = state
+        self._handle_input(None)
+ 
     def _handle_input(self, ev):
         now = ptime.time()
         dt = now - self._last_input_update
         
-        wait = 0.05 if 'Shift' in self.keys else 0.1
+        gp = self._gamepad_state
+        gp_south = gp.get('BTN_SOUTH', 0) == 1
+        wait = 0.05 if ('Shift' in self.keys or gp_south) else 0.1
         if dt < wait:
             return
 
-        dx = [0, 0]
+        gp_x = gp.get('ABS_HAT0X', 0)
+        gp_y = gp.get('ABS_HAT0Y', 0)
+        dx = [gp_x, -gp_y]
         if 'Right' in self.keys:
             dx[0] += 1
         if 'Left' in self.keys:
@@ -261,11 +282,6 @@ class Player(object):
         self.sprite.fgcolor = (0, 0, 0.3, 1)
         self.sprite.bgcolor = (0.5, 0.5, 0.5, 1)
         self.position = (7, 7)
-        
-        r = 10
-        dist = ((np.mgrid[0:(1+r*2), 0:(1+r*2)] - r)**2).sum(axis=0)**0.5
-        dist[r, r] = 1
-        self.sight = 5.0 / dist
 
     @property
     def position(self):
