@@ -18,10 +18,15 @@ class Scene(object):
         self.view.camera.rect = [0, -5, 120, 60]
         self.view.camera.aspect = 0.6
         canvas.events.key_press.connect(self.key_pressed)
+        canvas.events.key_release.connect(self.key_released)
         
         self.camera_target = self.view.camera.rect
         self._last_camera_update = ptime.time()
         self.scroll_timer = vispy.app.Timer(start=True, connect=self._scroll_camera, interval=0.016)
+
+        self.keys = set()
+        self._last_input_update = ptime.time()
+        self.input_timer = vispy.app.Timer(start=True, connect=self._handle_input, interval=0.016)
         
         # generate a texture for each character we need
         self.atlas = CharAtlas()
@@ -116,24 +121,6 @@ class Scene(object):
         self.update_sight()
         self.update_maze()
         
-    def key_pressed(self, ev):
-        pos = self.player.position
-        if ev.key == 'Right':
-            dx = (1, 0)
-        elif ev.key == 'Left':
-            dx = (-1, 0)
-        elif ev.key == 'Up':
-            dx = (0, 1)
-        elif ev.key == 'Down':
-            dx = (0, -1)
-        else:
-            return
-        
-        newpos = pos + dx
-        j, i = newpos.astype('uint')
-        if self.maze[i, j] == self.path:
-            self.move_player(newpos)
- 
     def move_player(self, pos):
         self.player.position = pos
         self.update_sight()
@@ -208,6 +195,50 @@ class Scene(object):
         cr.pos = nrv[:2]
         cr.size = nrv[2:]
         self.view.camera.rect = cr
+
+    def key_pressed(self, ev):
+        self.keys.add(ev.key)
+        self._handle_input(None)
+        
+    def key_released(self, ev):
+        self.keys.remove(ev.key)
+        
+    def _handle_input(self, ev):
+        now = ptime.time()
+        dt = now - self._last_input_update
+        
+        wait = 0.05 if 'Shift' in self.keys else 0.1
+        if dt < wait:
+            return
+
+        dx = [0, 0]
+        if 'Right' in self.keys:
+            dx[0] += 1
+        if 'Left' in self.keys:
+            dx[0] -= 1
+        if 'Up' in self.keys:
+            dx[1] += 1
+        if 'Down' in self.keys:
+            dx[1] -= 1
+        
+        if dx[0] == 0 and dx[1] == 0:
+            return
+        
+        pos = self.player.position
+        j0, i0 = pos.astype('uint')
+        newpos = pos + dx
+        j, i = newpos.astype('uint')
+        
+        if self.maze[i, j] == self.path:
+            self.move_player(newpos)
+        elif self.maze[i0, j] == self.path:
+            newpos[1] = i0
+            self.move_player(newpos)
+        elif self.maze[i, j0] == self.path:
+            newpos[0] = j0
+            self.move_player(newpos)
+        
+        self._last_input_update = now
  
     def update_sight(self):
         #self.sight_filter.set_player_pos(self.player.position[:2])
