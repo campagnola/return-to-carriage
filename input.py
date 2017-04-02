@@ -10,7 +10,11 @@ class InputThread(QtCore.QThread):
     def __init__(self, device=None):
         QtCore.QThread.__init__(self)
         if device is None:
-            self.dev = inputs.devices.gamepads[0]
+            gp = inputs.devices.gamepads
+            if len(gp) == 0:
+                print "No gamepads found."
+                return
+            self.dev = gp[0]
         else:
             self.dev = device
             

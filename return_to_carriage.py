@@ -6,6 +6,7 @@ from graphics import CharAtlas, Sprites, TextureMaskFilter, LineOfSightFilter, S
 from PIL import Image
 import vispy.util.ptime as ptime
 from input import InputThread
+import sys
 
 
 class Scene(object):
@@ -89,7 +90,7 @@ class Scene(object):
         self.memory[...,3] = 1
         self.memory_tex = vispy.gloo.Texture2D(self.memory, interpolation='linear')
         self.sight_filter = TextureMaskFilter(self.memory_tex, self.txt.shared_program['position'], self.maze.shape[:2][::-1])
-        self.txt.attach(self.sight_filter)
+        #self.txt.attach(self.sight_filter)
         
         # set positions
         pos = np.zeros(shape + (3,), dtype='float32')

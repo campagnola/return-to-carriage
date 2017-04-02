@@ -6,8 +6,12 @@ from vispy.visuals.shaders import ModularProgram, Function, Varying
 from vispy.visuals.transforms import STTransform, PolarTransform
 
 
+# load support for opengl 3 features
+vispy.gloo.gl.use_gl('gl+')
+
+
 class SpritesVisual(vispy.visuals.Visual):
-    vertex_shader = """
+    vertex_shader_2 = """
         #version 120
 
         uniform float size;
@@ -31,7 +35,7 @@ class SpritesVisual(vispy.visuals.Visual):
         }
     """
 
-    fragment_shader = """
+    fragment_shader_2 = """
         #version 120
         uniform float size;
         varying vec4 v_fgcolor;
@@ -68,7 +72,120 @@ class SpritesVisual(vispy.visuals.Visual):
         }
     """
 
-    def __init__(self, atlas, size=16, scale=1):
+    vertex_shader_3 = """
+        #version 330 compatibility
+
+        uniform float size;
+
+        in vec3 position;
+        in vec4 fgcolor;
+        in vec4 bgcolor;
+        in float sprite;
+
+        out float v_sprite;
+        out vec4 v_fgcolor;
+        out vec4 v_bgcolor;
+        out float point_size;
+
+        void main (void) {
+            v_fgcolor = fgcolor;
+            v_bgcolor = bgcolor;
+            v_sprite = sprite;
+
+            gl_Position = $transform(vec4(position, 1));
+            point_size = size * 1.01;  // extra 0.01 prevents gaps
+        }
+    """
+
+    geometry_shader_3 = """
+        #version 330 compatibility
+        
+        layout (points) in;
+        layout (triangle_strip, max_vertices=4) out;
+        
+        in float v_sprite[];
+        in vec4 v_fgcolor[];
+        in vec4 v_bgcolor[];
+        in float point_size[];
+
+        out float f_sprite;
+        out vec4 f_fgcolor;
+        out vec4 f_bgcolor;
+        out vec2 point_coord;
+        
+        uniform vec2 scale;
+
+        void main(void) {
+            f_sprite = v_sprite[0];
+            f_fgcolor = v_fgcolor[0];
+            f_bgcolor = v_bgcolor[0];
+        
+            vec4 p = gl_in[0].gl_Position;
+            vec2 dx = 0.001 * 0.5 * scale * point_size[0];
+            
+            gl_Position = p + vec4(-dx.x, -dx.y, 0, 0);
+            point_coord = vec2(0, 0);
+            EmitVertex();
+            gl_Position = p + vec4(dx.x, -dx.y, 0, 0);
+            point_coord = vec2(1, 0);
+            EmitVertex();
+            gl_Position = p + vec4(-dx.x, dx.y, 0, 0);
+            point_coord = vec2(0, 1);
+            EmitVertex();
+            gl_Position = p + vec4(dx.x, dx.y, 0, 0);
+            point_coord = vec2(1, 1);
+            EmitVertex();
+            EndPrimitive();
+        }
+    """
+
+    fragment_shader_3 = """
+        #version 330 compatibility
+        
+        uniform float size;
+        in vec4 f_fgcolor;
+        in vec4 f_bgcolor;
+        in float f_sprite;
+        in vec2 point_coord;
+        
+        uniform sampler2D atlas;
+        uniform sampler1D atlas_map;
+        uniform float n_sprites;
+        uniform vec2 scale;
+        
+        void main()
+        {
+            gl_FragColor = vec4(0, 0, 0, 0);
+            vec4 atlas_coords = texture1D(atlas_map, (f_sprite + 0.5) / n_sprites);
+            vec2 pt = point_coord;
+            
+            // supersample sprite value
+            const int ss = 2;
+            float alpha = 0;
+            for (int i=0; i<ss; i++) {
+                for (int j=0; j<ss; j++) {
+                    vec2 dx = vec2(i/(size*ss), j/(size*ss));
+                    vec2 tex_coords = atlas_coords.yx + (pt + dx/scale) * atlas_coords.wz;
+                    vec4 tex = texture2D(atlas, tex_coords);
+                    alpha += tex.g / (ss*ss);
+                }
+            }
+            
+            gl_FragColor = f_fgcolor * alpha + f_bgcolor * (1-alpha);
+            gl_FragColor.r = 1;
+            gl_FragColor.a = 1;
+        }
+    """
+    
+    def __init__(self, atlas, size=16, scale=1, method=None):
+        if method is None:
+            if 'GL_GEOMETRY_SHADER' in vispy.gloo.gl.__dict__:
+                method = 'geometry'
+            else:
+                method = 'point_sprite'
+
+        self.method = method
+        
         self.size = size
         self.scale = scale
         self.atlas = atlas
@@ -83,7 +200,14 @@ class SpritesVisual(vispy.visuals.Visual):
         self._need_data_upload = False
         self._need_atlas_upload = True
         
-        vispy.visuals.Visual.__init__(self, self.vertex_shader, self.fragment_shader)
+        if method == 'point_sprite':
+            shaders = self.vertex_shader_2, self.fragment_shader_2
+        elif method == 'geometry':
+            shaders = self.vertex_shader_3, self.fragment_shader_3, self.geometry_shader_3
+        else:
+            raise ValueError('method must be "point_sprite" or "geometry"')
+        vispy.visuals.Visual.__init__(self, *shaders)
+
         self._draw_mode = 'points'
         self.shared_program['position'] = vispy.gloo.VertexBuffer()
         self.shared_program['sprite'] = vispy.gloo.VertexBuffer()
@@ -135,7 +259,7 @@ class SpritesVisual(vispy.visuals.Visual):
     
     def _prepare_transforms(self, view):
         xform = view.transforms.get_transform()
-        view.view_program.vert['transform'] = xform
+        view.view_program.vert['transform'] = xform.simplified
         
     def _prepare_draw(self, view):
         if self._need_data_upload:
