@@ -3,66 +3,106 @@ import numpy as np
 from PyQt4 import QtGui, QtCore
 import vispy.visuals, vispy.scene, vispy.gloo
 from vispy.visuals.shaders import ModularProgram, Function, Varying
-from vispy.visuals.transforms import STTransform, PolarTransform
+from vispy.visuals.transforms import STTransform, PolarTransform, NullTransform
 
 
 # load support for opengl 3 features
-vispy.gloo.gl.use_gl('gl+')
+#vispy.gloo.gl.use_gl('gl+')
 
 
 class SpritesVisual(vispy.visuals.Visual):
+    """
+    2 basic ways we might want to draw sprites:
+    
+        - Size / anchor offset measured in visual coordinates
+        - Size / anchor offset measured in canvas coordinates
+    
+    And 2 methods:
+    
+        - GLSL 120 drawing point_sprites
+            map to sprite cs, set corners -> map to canvas, set point size -> map to render
+        - GLSL 150+ with geometry shader converting points into quads
+    
+    
+    
+    """
+    
+    
+    
     vertex_shader_2 = """
         #version 120
 
-        uniform float size;
-
         attribute vec3 position;
+        attribute float sprite;
         attribute vec4 fgcolor;
         attribute vec4 bgcolor;
-        attribute float sprite;
 
         varying float v_sprite;
         varying vec4 v_fgcolor;
         varying vec4 v_bgcolor;
+        varying vec2 v_point_coord_scale;
+        varying vec2 v_point_size;
 
         void main (void) {
             v_fgcolor = fgcolor;
             v_bgcolor = bgcolor;
             v_sprite = sprite;
 
-            gl_Position = $transform(vec4(position, 1));
-            gl_PointSize = size * 1.01;  // extra 0.01 prevents gaps
+            // Map sprite location to the coordinate system where the size of
+            // the sprite is specified
+            vec4 anchor_pos = $visual_to_sprite(vec4(position, 1));
+            anchor_pos /= anchor_pos.w;
+            
+            // Find corners of sprite and map to pixel coordinates
+            vec4 bl = $sprite_to_px(anchor_pos - vec4($sprite_size, 0, 0) / 2.);
+            vec4 tr = $sprite_to_px(anchor_pos + vec4($sprite_size, 0, 0) / 2.);
+            bl /= bl.w;
+            tr /= tr.w;
+            
+            // Measure pixel size of sprite
+            vec2 size = abs(tr.xy - bl.xy);
+            float ps = max(size.x, size.y) * 1.05;  // extra 0.01 prevents gaps
+            gl_PointSize = ps;
+            
+            // points must be square; give scale factors to the fragment shader
+            // to allow rectangular clipping.
+            v_point_coord_scale = ps / size;
+            v_point_size = size;
+            
+            // Map center of sprite to render coordinates
+            vec4 center = (bl + tr) / 2.0;
+            gl_Position = $px_to_render(center);
         }
     """
 
     fragment_shader_2 = """
         #version 120
-        uniform float size;
         varying vec4 v_fgcolor;
         varying vec4 v_bgcolor;
         varying float v_sprite;
+        varying vec2 v_point_coord_scale;
+        varying vec2 v_point_size;
         
         uniform sampler2D atlas;
         uniform sampler1D atlas_map;
         uniform float n_sprites;
-        uniform vec2 scale;
         
         void main()
         {
             gl_FragColor = vec4(0, 0, 0, 0);
             vec4 atlas_coords = texture1D(atlas_map, (v_sprite + 0.5) / n_sprites);
-            vec2 pt = gl_PointCoord.xy / scale;
+            vec2 pt = gl_PointCoord.xy * v_point_coord_scale;
             if( pt.x < 0 || pt.y < 0 || pt.x > 1 || pt.y > 1 ) {
                 discard;
             }
             
             // supersample sprite value
-            const int ss = 2;
+            const float ss = 4;
             float alpha = 0;
             for (int i=0; i<ss; i++) {
                 for (int j=0; j<ss; j++) {
-                    vec2 dx = vec2(i/(size*ss), j/(size*ss));
-                    vec2 tex_coords = atlas_coords.yx + (pt + dx/scale) * atlas_coords.wz;
+                    vec2 dx = vec2(i/ss, j/ss) / v_point_size;
+                    vec2 tex_coords = atlas_coords.yx + (pt + dx) * atlas_coords.wz;
                     vec4 tex = texture2D(atlas, tex_coords);
                     alpha += tex.g / (ss*ss);
                 }
@@ -78,9 +118,6 @@ class SpritesVisual(vispy.visuals.Visual):
         uniform float size;
 
         in vec3 position;
-        in vec4 fgcolor;
-        in vec4 bgcolor;
-        in float sprite;
 
         out float v_sprite;
         out vec4 v_fgcolor;
@@ -88,9 +125,9 @@ class SpritesVisual(vispy.visuals.Visual):
         out float point_size;
 
         void main (void) {
-            v_fgcolor = fgcolor;
-            v_bgcolor = bgcolor;
-            v_sprite = sprite;
+            v_fgcolor = $fgcolor;
+            v_bgcolor = $bgcolor;
+            v_sprite = $sprite;
 
             gl_Position = $transform(vec4(position, 1));
             point_size = size * 1.01;  // extra 0.01 prevents gaps
@@ -177,21 +214,22 @@ class SpritesVisual(vispy.visuals.Visual):
         }
     """
     
-    def __init__(self, atlas, size=16, scale=1, method=None):
+    def __init__(self, atlas, sprite_size=(16, 16), point_cs='pixel', method=None):
         if method is None:
             if 'GL_GEOMETRY_SHADER' in vispy.gloo.gl.__dict__:
                 method = 'geometry'
             else:
                 method = 'point_sprite'
 
+        print method
         self.method = method
+        self.point_cs = point_cs
         
-        self.size = size
-        self.scale = scale
         self.atlas = atlas
         self.atlas.atlas_changed.connect(self._atlas_changed)
         self.position = np.empty((0, 3), dtype='float32')
         self.sprite = np.empty((0,), dtype='uint32')
+        self.sprite_size = sprite_size
         self.fgcolor = np.empty((0, 4), dtype='float32')
         self.bgcolor = np.empty((0, 4), dtype='float32')
         
@@ -199,6 +237,8 @@ class SpritesVisual(vispy.visuals.Visual):
         self._atlas_map_tex = vispy.gloo.Texture1D(shape=(1,4), format='rgba', interpolation='nearest')
         self._need_data_upload = False
         self._need_atlas_upload = True
+        
+        self._null_transform = NullTransform()
         
         if method == 'point_sprite':
             shaders = self.vertex_shader_2, self.fragment_shader_2
@@ -241,8 +281,7 @@ class SpritesVisual(vispy.visuals.Visual):
         self.shared_program['sprite'].set_data(self.sprite.astype('float32'))
         self.shared_program['fgcolor'].set_data(self.fgcolor)
         self.shared_program['bgcolor'].set_data(self.bgcolor)
-        self.shared_program['size'] = self.size
-        self.shared_program['scale'] = self.scale
+        self.shared_program.vert['sprite_size'] = tuple(self.sprite_size)
         self._need_data_upload = False
 
     def _atlas_changed(self, ev):
@@ -258,8 +297,23 @@ class SpritesVisual(vispy.visuals.Visual):
         self._need_atlas_upload = False
     
     def _prepare_transforms(self, view):
-        xform = view.transforms.get_transform()
-        view.view_program.vert['transform'] = xform.simplified
+        trs = view.transforms
+        if self.method == 'point_sprite':
+            if self.point_cs == 'pixel':
+                vis_to_sprite = trs.get_transform('visual', 'document').simplified
+                sprite_to_px = self._null_transform
+                px_to_render = trs.get_transform('document', 'render').simplified
+            elif self.point_cs == 'visual':
+                vis_to_sprite = self._null_transform
+                sprite_to_px = trs.get_transform('visual', 'document').simplified
+                px_to_render = trs.get_transform('document', 'render').simplified
+            else:
+                raise ValueError('Invalid point coordinate system "%s"' % self.point_cs)
+        else:
+            raise ValueError('Invalid draw method "%s"' % self.method)
+        view.view_program.vert['visual_to_sprite'] = vis_to_sprite
+        view.view_program.vert['sprite_to_px'] = sprite_to_px
+        view.view_program.vert['px_to_render'] = px_to_render
         
     def _prepare_draw(self, view):
         if self._need_data_upload:
@@ -269,11 +323,11 @@ class SpritesVisual(vispy.visuals.Visual):
             self._upload_atlas()
         
         # set point size to match zoom
-        tr = view.transforms.get_transform('visual', 'canvas')
-        o = tr.map((0, 0))
-        x = tr.map((self.size, 0))
-        l = ((x-o)[:2]**2).sum()**0.5
-        view.view_program['size'] = l
+        #tr = view.transforms.get_transform('visual', 'canvas')
+        #o = tr.map((0, 0))
+        #x = tr.map((self.size, 0))
+        #l = ((x-o)[:2]**2).sum()**0.5
+        view.view_program.vert['sprite_size'] = tuple(self.sprite_size)
 
     def _compute_bounds(self, axis, view):
         p = self.position[:, axis]

@@ -45,7 +45,7 @@ class Scene(object):
         # create sprites visual
         size = 1/0.6
         scale = (0.6, 1)
-        self.txt = Sprites(self.atlas, size, scale, parent=self.view.scene)
+        self.txt = Sprites(self.atlas, sprite_size=(1, 1), point_cs='visual', parent=self.view.scene)
         
         # create maze
         path = 1
@@ -207,6 +207,9 @@ class Scene(object):
         self.view.camera.rect = cr
 
     def key_pressed(self, ev):
+        if ev.key == 'Escape':
+            self.canvas.close()
+        
         self.keys.add(ev.key)
         self._handle_input(None)
         
