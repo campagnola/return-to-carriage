@@ -2,7 +2,7 @@
 from PyQt4 import QtGui, QtCore
 import vispy.scene, vispy.app
 import numpy as np
-from graphics import CharAtlas, Sprites, TextureMaskFilter, LineOfSightFilter, SightRenderer, LOSTextureRenderer
+from graphics import CharAtlas, Sprites, TextureMaskFilter, LineOfSightFilter, SightRenderer, LOSTextureRenderer, Console
 from PIL import Image
 import vispy.util.ptime as ptime
 from input import InputThread
@@ -130,6 +130,11 @@ class Scene(object):
         self.move_player([7, 7])
         self.update_sight()
         self.update_maze()
+        
+        self.console = Console()
+        self.console.view.parent = self.canvas.scene
+        self.console.view.rect = vispy.geometry.Rect(100, 100, 200, 200)
+        
         
     def move_player(self, pos):
         self.player.position = pos

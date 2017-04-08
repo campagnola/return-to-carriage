@@ -812,4 +812,24 @@ class LOSTextureRenderer(object):
         
         return img
     
-    
+
+
+
+class Console(object):
+    def __init__(self):
+        self.view = vispy.scene.widgets.ViewBox(border_color=(1, 1, 1, 0.2), bgcolor=(0, 0, 0, 0.4))
+        self.view.camera = 'panzoom'
+        self.view.camera.rect = vispy.geometry.Rect(0, 0, 100, 100)
+        
+        # generate a texture for each character we need
+        self.atlas = CharAtlas()
+        self.atlas.add_chars("abcdefg")
+        
+        # create sprites visual
+        self.txt = Sprites(self.atlas, sprite_size=(1, 1), point_cs='visual', parent=self.view.scene)
+        
+        self.txt_sprites = self.txt.add_sprites((100,))
+        self.txt_sprites.sprite = 2
+        self.txt_sprites.pos = np.vstack([np.arange(100), np.zeros(100)])
+        self.txt_sprites.fgcolor = np.ones((100, 4))
+        self.txt_sprites.bgcolor = np.zeros((100, 4))
