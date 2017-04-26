@@ -431,7 +431,7 @@ class CharAtlas(object):
         self.font = QtGui.QFont('monospace', self.size)
         self.chars = {}
         self._fm = QtGui.QFontMetrics(self.font)
-        char_shape = (int(self._fm.height()), int(self._fm.maxWidth()))
+        char_shape = (int(self._fm.height()), int(self._fm.width('x')))
         self.glyphs = np.empty((0,) + char_shape + (3,), dtype='ubyte')
         self._rebuild_atlas()
 
@@ -490,7 +490,7 @@ class TextureMaskFilter(object):
         """)
         self.fshader = Function("""
             void apply_texture_mask() {
-                vec4 mask = texture2D($texture, ($f_pos.xy+vec2(gl_PointCoord.x-0, 1-gl_PointCoord.y)) / $scale);
+                vec4 mask = texture2D($texture, ($f_pos.xy + vec2(0.5, 0.5)) / $scale);
                 gl_FragColor = gl_FragColor * mask;
             }
         """)
@@ -812,6 +812,97 @@ class LOSTextureRenderer(object):
         
         return img
     
+
+
+class ShadowRenderer(object):
+    """For computing 2D shadows
+    """
+    def __init__(self, scene, opacity, supersample=1):
+        self.scene = scene
+        self.size = (opacity.shape[0] * supersample, opacity.shape[1] * supersample)
+        self.fbo = vispy.gloo.FrameBuffer(color=vispy.gloo.RenderBuffer(self.size), 
+                                          depth=vispy.gloo.RenderBuffer(self.size))
+        
+        vert = """
+            #version 330 compatibility
+
+            in vec2 ij;
+            
+            void main (void) {
+                gl_Position = vec4(ij, 0, 1);
+            }
+        """
+        
+        geom = """
+            #version 330 compatibility
+        
+            layout (points) in;
+            layout (triangle_strip, max_vertices=10) out;
+
+            uniform sampler2D opacity;
+            uniform vec2 opacity_size;
+            uniform vec2 center;
+            
+            void main (void) {
+                vec4 pos = gl_in[0].gl_Position;
+                vec2 uv = (vec2(pos.x + 0.5, pos.y + 0.5)) / opacity_size;
+                float opaque = texture2D(opacity, uv).r;
+                vec2 dij[5];
+                dij[0] = vec2(0, 0);
+                dij[1] = vec2(1, 0);
+                dij[2] = vec2(1, 1);
+                dij[3] = vec2(0, 1);
+                dij[4] = vec2(0, 0);
+                
+                vec4 pos2;
+                if( opaque >= 1 ) {
+                    for( int n=0; n<5; n++ ) {
+                        pos2 = (pos + vec4(dij[n], 0, 0));
+                        vec2 dx = normalize(pos2.xy - (center + 0.5));
+                        //pos2 += vec4(dx * .1, 0, 0);
+                        gl_Position = pos2 * 2 / vec4(opacity_size, 1, 1) - 1;
+                        EmitVertex();
+                        pos2 += vec4(dx * 1000, 0, 0);
+                        //pos2 = pos + vec4(0.5, 0.5, 0, 0);
+                        gl_Position = pos2 * 2 / vec4(opacity_size, 1, 1) - 1;
+                        EmitVertex();
+                    }
+                    EndPrimitive();
+                }
+                    
+            }
+        """
+        
+        frag = """
+            #version 330 compatibility
+            
+            void main (void) {
+                gl_FragColor = vec4(0, 0, 0, 1);
+            }
+        """
+        
+        self.program = ModularProgram(vert, frag, gcode=geom)
+        self.program['opacity'] = vispy.gloo.Texture2D(opacity, format='luminance', interpolation='nearest')
+        self.program['opacity_size'] = opacity.shape[:2][::-1]
+        
+        self.program['ij'] = np.mgrid[0:opacity.shape[1], 0:opacity.shape[0]].astype('float32').transpose(1, 2, 0)
+        
+        
+    def render(self, pos):
+        """
+        """
+        self.program['center'] = pos
+        with self.fbo:
+            vispy.gloo.clear(color=(1, 1, 1))
+            vispy.gloo.set_viewport(0, 0, *self.size[::-1])
+            vispy.gloo.set_state(cull_face=True)
+            self.program.draw(mode='points', check_error=True)
+            vispy.gloo.set_viewport(0, 0, *self.scene.canvas.size)
+            img = self.fbo.read()
+        
+        return img[::-1]
+
+
 
 
 

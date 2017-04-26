@@ -1,8 +1,11 @@
 # ~*~ coding: utf8 ~*~
+import faulthandler
+faulthandler.enable()
+
 from PyQt4 import QtGui, QtCore
 import vispy.scene, vispy.app
 import numpy as np
-from graphics import CharAtlas, Sprites, TextureMaskFilter, LineOfSightFilter, SightRenderer, LOSTextureRenderer, Console
+from graphics import CharAtlas, Sprites, TextureMaskFilter, ShadowRenderer, Console
 from PIL import Image
 import vispy.util.ptime as ptime
 from input import InputThread
@@ -71,19 +74,17 @@ class Scene(object):
         self.path = path
         self.wall = wall
         
-        self.memory = np.zeros(shape, dtype='float32')
-        self.sight = np.zeros(shape, dtype='float32')
-
         self.maze_sprites = self.txt.add_sprites(shape)
         self.maze_sprites.sprite = self.maze
 
         # line-of-sight computation
         self.opacity = (self.maze == wall).astype('float32')
-        self.opacity_tex = vispy.gloo.Texture2D(self.opacity, format='luminance', interpolation='nearest')
-        self.sight_renderer = SightRenderer(self, self.opacity_tex)
-        self.sight_tex = vispy.gloo.Texture2D(shape=(1, 100), format='luminance', internalformat='r32f', interpolation='linear')
-        ss = 4
-        self.los_tex_renderer = LOSTextureRenderer(self, self.sight_tex, self.maze.shape, supersample=ss)
+        #self.opacity_tex = vispy.gloo.Texture2D(self.opacity, format='luminance', interpolation='nearest')
+        #self.sight_renderer = SightRenderer(self, self.opacity_tex)
+        #self.sight_tex = vispy.gloo.Texture2D(shape=(1, 100), format='luminance', internalformat='r32f', interpolation='linear')
+        ss = 1
+        #self.los_tex_renderer = LOSTextureRenderer(self, self.sight_tex, self.maze.shape, supersample=ss)
+        self.los_renderer = ShadowRenderer(self, self.opacity, supersample=ss)
         
         ms = self.maze.shape
         self.memory = np.zeros((ms[0]*ss, ms[1]*ss, 4), dtype='ubyte')
@@ -141,10 +142,11 @@ class Scene(object):
         self.update_sight()
         self.update_maze()
         #self.sight_filter.set_player_pos(pos)
-        img = self.sight_renderer.render(pos)
+        #img = self.sight_renderer.render(pos)
 
-        self.sight_tex.set_data(img.astype('float32'))
-        los = self.los_tex_renderer.render(pos)[::-1]
+        #self.sight_tex.set_data(img.astype('float32'))
+        #los = self.los_tex_renderer.render(pos)[::-1]
+        los = self.los_renderer.render(pos)
         mask = np.where(los > self.memory, los, self.memory)
         self.memory[..., 2] = mask[..., 2]
         self.memory_tex.set_data(mask)
@@ -154,14 +156,15 @@ class Scene(object):
         if self.debug_line_of_sight:
             if not hasattr(self, 'sight_plot'):
                 import pyqtgraph as pg
-                self.sight_plot = pg.plot()
-                self.sight_plot.setYRange(0, 20)
+                #self.sight_plot = pg.plot()
+                #self.sight_plot.setYRange(0, 20)
                 self.sight_img = pg.image()
                 self.sight_img.imageItem.setBorder('w')
-                self.sight_img.resize(1200, 200)
-                self.sight_img.setLevels(0, 10)
-            theta = np.linspace(-np.pi, np.pi, img.shape[1])
-            self.sight_plot.plot(theta, img[img.shape[0]//2], clear=True)
+                #self.sight_img.resize(1200, 200)
+                #self.sight_img.setLevels(0, 10)
+            #theta = np.linspace(-np.pi, np.pi, img.shape[1])
+            #self.sight_plot.plot(theta, img[img.shape[0]//2], clear=True)
+            #self.sight_img.setImage(img.transpose(1, 0), autoLevels=False)
             self.sight_img.setImage(img.transpose(1, 0), autoLevels=False)
 
 
