@@ -89,8 +89,9 @@ class Scene(object):
         ms = self.maze.shape
         self.memory = np.zeros((ms[0]*ss, ms[1]*ss, 4), dtype='ubyte')
         self.memory[...,3] = 1
-        self.memory_tex = vispy.gloo.Texture2D(self.memory, interpolation='linear')
-        self.sight_filter = TextureMaskFilter(self.memory_tex, self.txt.shared_program['position'], self.maze.shape[:2][::-1])
+        self.memory_tex = vispy.gloo.Texture2D(self.memory, interpolation='nearest')
+        tr = self.txt.transforms.get_transform('framebuffer', 'visual')
+        self.sight_filter = TextureMaskFilter(self.memory_tex, tr)
         self.txt.attach(self.sight_filter)
         
         # set positions

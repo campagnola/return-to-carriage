@@ -477,43 +477,23 @@ class CharAtlas(object):
 
 
 class TextureMaskFilter(object):
-    def __init__(self, texture, pos, size):
-        self.vshader = Function("""
-            void texture_mask() {
-                $v_pos = $position;
-            }
-        """)
-        self.gshader = Function("""
-            void copy_texture_mask_pos() {
-                $f_pos = $v_pos[0];
-            }
-        """)
+    def __init__(self, texture, transform):
         self.fshader = Function("""
             void apply_texture_mask() {
-                vec4 mask = texture2D($texture, ($f_pos.xy + vec2(0.5, 0.5)) / $scale);
+                vec4 tex_pos = $transform(gl_FragCoord);
+                tex_pos /= tex_pos.w;
+                vec4 mask = texture2D($texture, tex_pos.xy);
                 gl_FragColor = gl_FragColor * mask;
             }
         """)
-        self.vshader['position'] = pos
         self.fshader['texture'] = texture
-        self.fshader['scale'] = size
-
+        self.scale_tr = STTransform(scale=(1.0/texture.shape[1], 1.0/texture.shape[0])) * STTransform(translate=(0.5, 0.5))
+        self.fshader['transform'] = self.scale_tr * transform
+        
     def _attach(self, visual):
         self._visual = visual        
         fhook = visual._get_hook('frag', 'post')
         fhook.add(self.fshader(), position=3)
-        vhook = visual._get_hook('vert', 'post')
-        vhook.add(self.vshader(), position=3)
-        if visual.method == 'geometry':
-            ghook = visual._get_hook('geom', 'pre')
-            ghook.add(self.gshader(), position=3)
-            self.vshader['v_pos'] = Varying('v_pos', dtype='vec3')
-            self.gshader['v_pos'] = self.vshader['v_pos'].invar(array=True)
-            self.gshader['f_pos'] = Varying('f_pos', dtype='vec3')
-            self.fshader['f_pos'] = self.gshader['f_pos'].invar()
-        else:
-            self.vshader['v_pos'] = Varying('v_pos', dtype='vec3')
-            self.fshader['f_pos'] = self.vshader['v_pos']
 
 
 class LineOfSightFilter1(object):
@@ -895,7 +875,7 @@ class ShadowRenderer(object):
         with self.fbo:
             vispy.gloo.clear(color=(1, 1, 1))
             vispy.gloo.set_viewport(0, 0, *self.size[::-1])
-            vispy.gloo.set_state(cull_face=True)
+            #vispy.gloo.set_state(cull_face=True)
             self.program.draw(mode='points', check_error=True)
             vispy.gloo.set_viewport(0, 0, *self.scene.canvas.size)
             img = self.fbo.read()
