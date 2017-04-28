@@ -1,6 +1,9 @@
 # ~*~ coding: utf8 ~*~
-import faulthandler
-faulthandler.enable()
+try:
+    import faulthandler
+    faulthandler.enable()
+except ImportError:
+    pass
 
 from PyQt4 import QtGui, QtCore
 import vispy.scene, vispy.app
