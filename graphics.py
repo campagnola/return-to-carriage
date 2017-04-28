@@ -477,7 +477,7 @@ class CharAtlas(object):
 
 
 class TextureMaskFilter(object):
-    def __init__(self, texture, transform):
+    def __init__(self, texture, transform, scale):
         self.fshader = Function("""
             void apply_texture_mask() {
                 vec4 tex_pos = $transform(gl_FragCoord);
@@ -487,7 +487,7 @@ class TextureMaskFilter(object):
             }
         """)
         self.fshader['texture'] = texture
-        self.scale_tr = STTransform(scale=(1.0/texture.shape[1], 1.0/texture.shape[0])) * STTransform(translate=(0.5, 0.5))
+        self.scale_tr = STTransform(scale=scale) * STTransform(translate=(0.5, 0.5))
         self.fshader['transform'] = self.scale_tr * transform
         
     def _attach(self, visual):
@@ -825,21 +825,56 @@ class ShadowRenderer(object):
             
             void main (void) {
                 vec4 pos = gl_in[0].gl_Position;
-                vec2 uv = (vec2(pos.x + 0.5, pos.y + 0.5)) / opacity_size;
-                float opaque = texture2D(opacity, uv).r;
+                
+                // first get opacity of this block and its neighbors
+                float opaque[5];
                 vec2 dij[5];
                 dij[0] = vec2(0, 0);
-                dij[1] = vec2(1, 0);
-                dij[2] = vec2(1, 1);
-                dij[3] = vec2(0, 1);
-                dij[4] = vec2(0, 0);
+                dij[1] = vec2(-1, 0);
+                dij[2] = vec2(1, 0);
+                dij[3] = vec2(0, -1);
+                dij[4] = vec2(0, 1);
+                
+                vec2 uv;
+                for( int i=0; i<5; i++ ) {
+                    uv = (pos.xy + 0.5 + dij[i]) / opacity_size;
+                    opaque[i] = texture2D(opacity, uv).r;
+                }
+                    
+                // now construct shadows
+                float w = 2./3.;
+                dij[0] = vec2(w, w);
+                dij[1] = vec2(1-w, w);
+                dij[2] = vec2(1-w, 1-w);
+                dij[3] = vec2(w, 1-w);
+                dij[4] = vec2(w, w);
+                
+                // decide based on opacity of neighbors whether to join walls
+                if( opaque[1] > 0.5 ) {
+                    dij[0].x = 0;
+                    dij[3].x = 0;
+                    dij[4].x = 0;
+                }
+                if( opaque[2] > 0.5 ) {
+                    dij[1].x = 1;
+                    dij[2].x = 1;
+                }
+                if( opaque[3] > 0.5 ) {
+                    dij[0].y = 0;
+                    dij[1].y = 0;
+                    dij[4].y = 0;
+                }
+                if( opaque[4] > 0.5 ) {
+                    dij[2].y = 1;
+                    dij[3].y = 1;
+                }
                 
                 vec4 pos2;
-                if( opaque >= 1 ) {
+                if( opaque[0] >= 1 ) {
                     for( int n=0; n<5; n++ ) {
                         pos2 = (pos + vec4(dij[n], 0, 0));
                         vec2 dx = normalize(pos2.xy - (center + 0.5));
-                        //pos2 += vec4(dx * .1, 0, 0);
+                        //pos2 += vec4(dx * .5, 0, 0);
                         gl_Position = pos2 * 2 / vec4(opacity_size, 1, 1) - 1;
                         EmitVertex();
                         pos2 += vec4(dx * 1000, 0, 0);

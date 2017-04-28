@@ -82,16 +82,16 @@ class Scene(object):
         #self.opacity_tex = vispy.gloo.Texture2D(self.opacity, format='luminance', interpolation='nearest')
         #self.sight_renderer = SightRenderer(self, self.opacity_tex)
         #self.sight_tex = vispy.gloo.Texture2D(shape=(1, 100), format='luminance', internalformat='r32f', interpolation='linear')
-        ss = 1
+        ss = 4
         #self.los_tex_renderer = LOSTextureRenderer(self, self.sight_tex, self.maze.shape, supersample=ss)
         self.los_renderer = ShadowRenderer(self, self.opacity, supersample=ss)
         
         ms = self.maze.shape
         self.memory = np.zeros((ms[0]*ss, ms[1]*ss, 4), dtype='ubyte')
         self.memory[...,3] = 1
-        self.memory_tex = vispy.gloo.Texture2D(self.memory, interpolation='nearest')
+        self.memory_tex = vispy.gloo.Texture2D(self.memory, interpolation='linear')
         tr = self.txt.transforms.get_transform('framebuffer', 'visual')
-        self.sight_filter = TextureMaskFilter(self.memory_tex, tr)
+        self.sight_filter = TextureMaskFilter(self.memory_tex, tr, scale=(1./ms[1], 1./ms[0]))
         self.txt.attach(self.sight_filter)
         
         # set positions
