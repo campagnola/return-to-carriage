@@ -838,7 +838,7 @@ class ShadowRenderer(object):
                 vec2 uv;
                 for( int i=0; i<5; i++ ) {
                     uv = (pos.xy + 0.5 + dij[i]) / opacity_size;
-                    opaque[i] = texture2D(opacity, uv).r;
+                    opaque[i] = texture(opacity, uv).r;
                 }
                     
                 // now construct shadows
