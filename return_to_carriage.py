@@ -1,10 +1,18 @@
 # ~*~ coding: utf8 ~*~
+try:
+    import faulthandler
+    faulthandler.enable()
+except ImportError:
+    pass
+
 from PyQt4 import QtGui, QtCore
 import vispy.scene, vispy.app
 import numpy as np
-from graphics import CharAtlas, Sprites, TextureMaskFilter, LineOfSightFilter, SightRenderer, LOSTextureRenderer
+from graphics import CharAtlas, Sprites, TextureMaskFilter, ShadowRenderer, Console
 from PIL import Image
 import vispy.util.ptime as ptime
+from input import InputThread
+import sys
 
 
 class Scene(object):
@@ -18,10 +26,23 @@ class Scene(object):
         self.view.camera.rect = [0, -5, 120, 60]
         self.view.camera.aspect = 0.6
         canvas.events.key_press.connect(self.key_pressed)
+        canvas.events.key_release.connect(self.key_released)
         
         self.camera_target = self.view.camera.rect
         self._last_camera_update = ptime.time()
         self.scroll_timer = vispy.app.Timer(start=True, connect=self._scroll_camera, interval=0.016)
+
+        self.keys = set()
+        self._last_input_update = ptime.time()
+        self.input_timer = vispy.app.Timer(start=True, connect=self._handle_input, interval=0.016)
+        
+        try:
+            self.input_thread = InputThread()
+            self.input_thread.new_event.connect(self._gamepad_event)
+        except Exception:
+            self.input_thread = None
+            sys.excepthook(*sys.exc_info())
+        self._gamepad_state = {}
         
         # generate a texture for each character we need
         self.atlas = CharAtlas()
@@ -30,7 +51,7 @@ class Scene(object):
         # create sprites visual
         size = 1/0.6
         scale = (0.6, 1)
-        self.txt = Sprites(self.atlas, size, scale, parent=self.view.scene)
+        self.txt = Sprites(self.atlas, sprite_size=(1, 1), point_cs='visual', parent=self.view.scene)
         
         # create maze
         path = 1
@@ -56,25 +77,24 @@ class Scene(object):
         self.path = path
         self.wall = wall
         
-        self.memory = np.zeros(shape, dtype='float32')
-        self.sight = np.zeros(shape, dtype='float32')
-
         self.maze_sprites = self.txt.add_sprites(shape)
         self.maze_sprites.sprite = self.maze
 
         # line-of-sight computation
         self.opacity = (self.maze == wall).astype('float32')
-        self.opacity_tex = vispy.gloo.Texture2D(self.opacity, format='luminance', interpolation='nearest')
-        self.sight_renderer = SightRenderer(self, self.opacity_tex)
-        self.sight_tex = vispy.gloo.Texture2D(shape=(1, 100), format='luminance', internalformat='r32f', interpolation='linear')
+        #self.opacity_tex = vispy.gloo.Texture2D(self.opacity, format='luminance', interpolation='nearest')
+        #self.sight_renderer = SightRenderer(self, self.opacity_tex)
+        #self.sight_tex = vispy.gloo.Texture2D(shape=(1, 100), format='luminance', internalformat='r32f', interpolation='linear')
         ss = 4
-        self.los_tex_renderer = LOSTextureRenderer(self, self.sight_tex, self.maze.shape, supersample=ss)
+        #self.los_tex_renderer = LOSTextureRenderer(self, self.sight_tex, self.maze.shape, supersample=ss)
+        self.los_renderer = ShadowRenderer(self, self.opacity, supersample=ss)
         
         ms = self.maze.shape
         self.memory = np.zeros((ms[0]*ss, ms[1]*ss, 4), dtype='ubyte')
         self.memory[...,3] = 1
         self.memory_tex = vispy.gloo.Texture2D(self.memory, interpolation='linear')
-        self.sight_filter = TextureMaskFilter(self.memory_tex, self.txt.shared_program['position'], self.maze.shape[:2][::-1])
+        tr = self.txt.transforms.get_transform('framebuffer', 'visual')
+        self.sight_filter = TextureMaskFilter(self.memory_tex, tr, scale=(1./ms[1], 1./ms[0]))
         self.txt.attach(self.sight_filter)
         
         # set positions
@@ -102,6 +122,12 @@ class Scene(object):
         # add player
         self.player = Player(self)
 
+        # Monsters!
+        # need to add shortest path logic to replace the udpate_monster follow-player logic
+        self.monsters = []
+        self.monsters.append(Monster(self,(3,3),'M'))
+        self.monsters.append(Monster(self,(13,3),'R'))
+
         ## add items
         self.items = self.txt.add_sprites((10,))
         self.items.sprite = 0
@@ -112,37 +138,62 @@ class Scene(object):
         self.scroll.fgcolor = (0.7, 0, 0, 1)
         self.scroll.bgcolor = (0, 0, 0, 1)
         
-        self.move_player([7, 7])
+        self.player.position = ([7,7])
         self.update_sight()
         self.update_maze()
         
-    def key_pressed(self, ev):
-        pos = self.player.position
-        if ev.key == 'Right':
-            dx = (1, 0)
-        elif ev.key == 'Left':
-            dx = (-1, 0)
-        elif ev.key == 'Up':
-            dx = (0, 1)
-        elif ev.key == 'Down':
-            dx = (0, -1)
-        else:
-            return
+        self.console = Console()
+        self.console.view.parent = self.canvas.scene
+        self.console.view.rect = vispy.geometry.Rect(100, 100, 200, 200)
         
+    def update_monster(self, m):
+        diff_x = self.player.position[0] - m.position[0]
+        diff_y = self.player.position[1] - m.position[1]
+
+        dx = [0, 0]
+        if np.sqrt(diff_x**2 + diff_y**2) <= 6:
+            if diff_x < 0:
+                dx[0] = -1
+            elif diff_x > 0:
+                dx[0] = 1
+            if diff_y < 0:
+                dx[1] = -1
+            elif diff_y > 0:
+                dx[1] = 1
+        else:
+            return 0
+
+        newpos = m.position + dx
+        pos = m.position
+
+        if newpos[0] == self.player.position[0] and newpos[1] == self.player.position[1]:
+            return 0
+        for mt in self.monsters:
+            if newpos[0] == m.position[0] and newpos[1] == m.position[1]:
+                return 0
+        j0, i0 = pos.astype('uint')
         newpos = pos + dx
         j, i = newpos.astype('uint')
         if self.maze[i, j] == self.path:
-            self.move_player(newpos)
- 
+            m.position = newpos
+        elif self.maze[i0, j] == self.path:
+            newpos[1] = i0
+            m.position = m.position[1], newpos[1]
+        elif self.maze[i, j0] == self.path:
+            newpos[0] = j0
+            m.position = m.position[0], newpos[0]
+        
+
     def move_player(self, pos):
         self.player.position = pos
         self.update_sight()
         self.update_maze()
         #self.sight_filter.set_player_pos(pos)
-        img = self.sight_renderer.render(pos)
+        #img = self.sight_renderer.render(pos)
 
-        self.sight_tex.set_data(img.astype('float32'))
-        los = self.los_tex_renderer.render(pos)[::-1]
+        #self.sight_tex.set_data(img.astype('float32'))
+        #los = self.los_tex_renderer.render(pos)[::-1]
+        los = self.los_renderer.render(pos)
         mask = np.where(los > self.memory, los, self.memory)
         self.memory[..., 2] = mask[..., 2]
         self.memory_tex.set_data(mask)
@@ -152,14 +203,15 @@ class Scene(object):
         if self.debug_line_of_sight:
             if not hasattr(self, 'sight_plot'):
                 import pyqtgraph as pg
-                self.sight_plot = pg.plot()
-                self.sight_plot.setYRange(0, 20)
+                #self.sight_plot = pg.plot()
+                #self.sight_plot.setYRange(0, 20)
                 self.sight_img = pg.image()
                 self.sight_img.imageItem.setBorder('w')
-                self.sight_img.resize(1200, 200)
-                self.sight_img.setLevels(0, 10)
-            theta = np.linspace(-np.pi, np.pi, img.shape[1])
-            self.sight_plot.plot(theta, img[img.shape[0]//2], clear=True)
+                #self.sight_img.resize(1200, 200)
+                #self.sight_img.setLevels(0, 10)
+            #theta = np.linspace(-np.pi, np.pi, img.shape[1])
+            #self.sight_plot.plot(theta, img[img.shape[0]//2], clear=True)
+            #self.sight_img.setImage(img.transpose(1, 0), autoLevels=False)
             self.sight_img.setImage(img.transpose(1, 0), autoLevels=False)
 
 
@@ -208,6 +260,72 @@ class Scene(object):
         cr.pos = nrv[:2]
         cr.size = nrv[2:]
         self.view.camera.rect = cr
+
+    def key_pressed(self, ev):
+        if ev.key == 'Escape':
+            self.canvas.close()
+        
+        self.keys.add(ev.key)
+        self._handle_input(None)
+        
+    def key_released(self, ev):
+        try:
+            self.keys.remove(ev.key)
+        except KeyError:
+            pass
+        
+    def _gamepad_event(self, ev, state):
+        # gamepad input
+        self._gamepad_state = state
+        self._handle_input(None)
+ 
+    def _handle_input(self, ev):
+        now = ptime.time()
+        dt = now - self._last_input_update
+        
+        gp = self._gamepad_state
+        gp_south = gp.get('BTN_SOUTH', 0) == 1
+        wait = 0.05 if ('Shift' in self.keys or gp_south) else 0.1
+        if dt < wait:
+            return
+
+        gp_x = gp.get('ABS_HAT0X', 0)
+        gp_y = gp.get('ABS_HAT0Y', 0)
+        dx = [gp_x, -gp_y]
+        if 'Right' in self.keys:
+            dx[0] += 1
+        if 'Left' in self.keys:
+            dx[0] -= 1
+        if 'Up' in self.keys:
+            dx[1] += 1
+        if 'Down' in self.keys:
+            dx[1] -= 1
+        
+        if dx[0] == 0 and dx[1] == 0:
+            return
+        
+        pos = self.player.position
+        j0, i0 = pos.astype('uint')
+        newpos = pos + dx
+        j, i = newpos.astype('uint')
+        
+        if self.maze[i, j] == self.path:
+            self.move_player(newpos)
+        elif self.maze[i0, j] == self.path:
+            newpos[1] = i0
+            self.move_player(newpos)
+        elif self.maze[i, j0] == self.path:
+            newpos[0] = j0
+            self.move_player(newpos)
+
+        for m in self.monsters:
+            if newpos[0] == m.position[0] and newpos[1] == m.position[1]:
+                m.position = m.origin
+            else:
+                self.update_monster(m)
+
+        self._last_input_update = now
+
  
     def update_sight(self):
         #self.sight_filter.set_player_pos(self.player.position[:2])
@@ -220,7 +338,6 @@ class Scene(object):
         self.maze_sprites.bgcolor = self.bgcolor# * mem
 
 
-
 class Player(object):
     def __init__(self, scene):
         self.scene = scene
@@ -230,11 +347,27 @@ class Player(object):
         self.sprite.fgcolor = (0, 0, 0.3, 1)
         self.sprite.bgcolor = (0.5, 0.5, 0.5, 1)
         self.position = (7, 7)
-        
-        r = 10
-        dist = ((np.mgrid[0:(1+r*2), 0:(1+r*2)] - r)**2).sum(axis=0)**0.5
-        dist[r, r] = 1
-        self.sight = 5.0 / dist
+
+    @property
+    def position(self):
+        return np.array(self._pos)
+    
+    @position.setter
+    def position(self, p):
+        self._pos = p
+        self.sprite.position = tuple(p) + (self.zval,)
+
+
+class Monster(object):
+    def __init__(self, scene, pos, char):
+        self.scene = scene
+        self.zval = -0.2
+        self.sprite = self.scene.txt.add_sprites((1,))
+        self.sprite.sprite = self.scene.atlas.add_chars(char)
+        self.sprite.fgcolor = (0, 0, 0.3, 1)
+        self.sprite.bgcolor = (0.7, 0.5, 0.5, 1)
+        self.origin = pos
+        self.position = pos
 
     @property
     def position(self):
