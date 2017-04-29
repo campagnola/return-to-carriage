@@ -122,6 +122,12 @@ class Scene(object):
         # add player
         self.player = Player(self)
 
+        # Monsters!
+        # need to add shortest path logic to replace the udpate_monster follow-player logic
+        self.monsters = []
+        self.monsters.append(Monster(self,(3,3),'M'))
+        self.monsters.append(Monster(self,(13,3),'R'))
+
         ## add items
         self.items = self.txt.add_sprites((10,))
         self.items.sprite = 0
@@ -132,7 +138,7 @@ class Scene(object):
         self.scroll.fgcolor = (0.7, 0, 0, 1)
         self.scroll.bgcolor = (0, 0, 0, 1)
         
-        self.move_player([7, 7])
+        self.player.position = ([7,7])
         self.update_sight()
         self.update_maze()
         
@@ -140,7 +146,44 @@ class Scene(object):
         self.console.view.parent = self.canvas.scene
         self.console.view.rect = vispy.geometry.Rect(100, 100, 200, 200)
         
+    def update_monster(self, m):
+        diff_x = self.player.position[0] - m.position[0]
+        diff_y = self.player.position[1] - m.position[1]
+
+        dx = [0, 0]
+        if np.sqrt(diff_x**2 + diff_y**2) <= 6:
+            if diff_x < 0:
+                dx[0] = -1
+            elif diff_x > 0:
+                dx[0] = 1
+            if diff_y < 0:
+                dx[1] = -1
+            elif diff_y > 0:
+                dx[1] = 1
+        else:
+            return 0
+
+        newpos = m.position + dx
+        pos = m.position
+
+        if newpos[0] == self.player.position[0] and newpos[1] == self.player.position[1]:
+            return 0
+        for mt in monsters:
+            if newpos[0] == m.position[0] and newpos[1] == m.position[1]:
+                return 0
+        j0, i0 = pos.astype('uint')
+        newpos = pos + dx
+        j, i = newpos.astype('uint')
+        if self.maze[i, j] == self.path:
+            m.position = newpos
+        elif self.maze[i0, j] == self.path:
+            newpos[1] = i0
+            m.position = m.position[1], newpos[1]
+        elif self.maze[i, j0] == self.path:
+            newpos[0] = j0
+            m.position = m.position[0], newpos[0]
         
+
     def move_player(self, pos):
         self.player.position = pos
         self.update_sight()
@@ -274,8 +317,15 @@ class Scene(object):
         elif self.maze[i, j0] == self.path:
             newpos[0] = j0
             self.move_player(newpos)
-        
+
+        for m in self.monsters:
+            if newpos[0] == m.position[0] and newpos[1] == m.position[1]:
+                m.position = m.origin
+            else:
+                self.update_monster(m)
+
         self._last_input_update = now
+
  
     def update_sight(self):
         #self.sight_filter.set_player_pos(self.player.position[:2])
@@ -288,7 +338,6 @@ class Scene(object):
         self.maze_sprites.bgcolor = self.bgcolor# * mem
 
 
-
 class Player(object):
     def __init__(self, scene):
         self.scene = scene
@@ -298,6 +347,27 @@ class Player(object):
         self.sprite.fgcolor = (0, 0, 0.3, 1)
         self.sprite.bgcolor = (0.5, 0.5, 0.5, 1)
         self.position = (7, 7)
+
+    @property
+    def position(self):
+        return np.array(self._pos)
+    
+    @position.setter
+    def position(self, p):
+        self._pos = p
+        self.sprite.position = tuple(p) + (self.zval,)
+
+
+class Monster(object):
+    def __init__(self, scene, pos, char):
+        self.scene = scene
+        self.zval = -0.2
+        self.sprite = self.scene.txt.add_sprites((1,))
+        self.sprite.sprite = self.scene.atlas.add_chars(char)
+        self.sprite.fgcolor = (0, 0, 0.3, 1)
+        self.sprite.bgcolor = (0.7, 0.5, 0.5, 1)
+        self.origin = pos
+        self.position = pos
 
     @property
     def position(self):
