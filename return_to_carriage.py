@@ -168,7 +168,7 @@ class Scene(object):
 
         if newpos[0] == self.player.position[0] and newpos[1] == self.player.position[1]:
             return 0
-        for mt in monsters:
+        for mt in self.monsters:
             if newpos[0] == m.position[0] and newpos[1] == m.position[1]:
                 return 0
         j0, i0 = pos.astype('uint')
