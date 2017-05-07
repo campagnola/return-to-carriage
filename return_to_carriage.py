@@ -136,10 +136,14 @@ class Scene(object):
         self.update_sight()
         self.update_maze()
         
-        self.console = Console()
+        self.console = Console((10, 100))
         self.console.view.parent = self.canvas.scene
-        self.console.view.rect = vispy.geometry.Rect(100, 100, 200, 200)
+        self.console.view.rect = vispy.geometry.Rect(30, 620, 1350, 250)
+        self.console.transform = vispy.visuals.transforms.STTransform((0, 0, 0.1))
+        self.console.view.camera.aspect = 0.6
         
+        self.console.write('Hello?')
+        self.console.write('Is anybody\n    there?')
         
     def move_player(self, pos):
         self.player.position = pos

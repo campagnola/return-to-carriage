@@ -428,6 +428,7 @@ class CharAtlas(object):
     def __init__(self, size=128):
         self.atlas_changed = vispy.util.event.EventEmitter(type='atlas_changed')
         self.size = size
+        self.columns = 8000 // size
         self.font = QtGui.QFont('monospace', self.size)
         self.chars = {}
         self._fm = QtGui.QFontMetrics(self.font)
@@ -466,15 +467,26 @@ class CharAtlas(object):
 
     def _rebuild_atlas(self):
         gs = self.glyphs.shape
-        self.atlas = self.glyphs.reshape((gs[0]*gs[1], gs[2], gs[3]))
-        self.sprite_coords = np.empty((gs[0], 4), dtype='float32')
-        self.sprite_coords[:,0] = np.arange(0, gs[0]*gs[1], gs[1])
-        self.sprite_coords[:,1] = 0
+        n_glyphs = gs[0]
+        atlas_rows = int(np.ceil(float(n_glyphs) / self.columns))
+        self.atlas = np.empty((atlas_rows * gs[1], self.columns*gs[2], 3), dtype=self.glyphs.dtype)
+        
+        self.sprite_coords = np.empty((n_glyphs, 4), dtype='float32')
         self.sprite_coords[:,2] = gs[1]
         self.sprite_coords[:,3] = gs[2]
+        for i in range(atlas_rows):
+            for j in range(self.columns):
+                glyph = i * self.columns + j
+                if glyph >= n_glyphs:
+                    break
+                x = i * gs[1]
+                y = j * gs[2]
+                self.sprite_coords[glyph, 0:2] = x, y
+                self.atlas[x:x+gs[1], y:y+gs[2]] = self.glyphs[glyph]
+        
         self.sprite_coords[:,::2] /= self.atlas.shape[0]
         self.sprite_coords[:,1::2] /= self.atlas.shape[1]
-
+        
 
 class TextureMaskFilter(object):
     def __init__(self, texture, transform, scale):
@@ -922,20 +934,43 @@ class ShadowRenderer(object):
 
 
 class Console(object):
-    def __init__(self):
+    def __init__(self, shape):
+        self.shape = shape
+        
         self.view = vispy.scene.widgets.ViewBox(border_color=(1, 1, 1, 0.2), bgcolor=(0, 0, 0, 0.4))
         self.view.camera = 'panzoom'
-        self.view.camera.rect = vispy.geometry.Rect(0, 0, 100, 100)
+        self.view.camera.rect = vispy.geometry.Rect(0, 0, shape[1], shape[0])
         
         # generate a texture for each character we need
-        self.atlas = CharAtlas()
-        self.atlas.add_chars("abcdefg")
+        self.atlas = CharAtlas(size=128)
+        ascii_chars = [chr(i) for i in range(128)]
+        self.atlas.add_chars(ascii_chars)
         
         # create sprites visual
         self.txt = Sprites(self.atlas, sprite_size=(1, 1), point_cs='visual', parent=self.view.scene)
         
-        self.txt_sprites = self.txt.add_sprites((100,))
-        self.txt_sprites.sprite = 2
-        self.txt_sprites.pos = np.vstack([np.arange(100), np.zeros(100)])
-        self.txt_sprites.fgcolor = np.ones((100, 4))
-        self.txt_sprites.bgcolor = np.zeros((100, 4))
+        self.txt_sprites = self.txt.add_sprites(shape)
+        self.txt_sprites.sprite = 0
+        
+        pos = np.zeros(shape + (3,), dtype='float32')
+        pos[...,:2] = np.mgrid[0:shape[1], 0:shape[0]].transpose(2, 1, 0)
+        self.txt_sprites.position = pos
+        
+        self.txt_sprites.fgcolor = np.ones(shape + (4,), dtype='float32')
+        bgcolor = np.zeros(shape + (4,), dtype='float32')
+        bgcolor[:,3] = 1
+        self.txt_sprites.bgcolor = bgcolor
+        
+        self.lines = []
+
+    def write(self, txt):
+        self.lines.extend(txt.split('\n'))
+        self.update_text()
+        
+    def update_text(self):
+        sprites = np.zeros(self.shape, dtype='uint8')
+        for i in range(min(self.shape[0], len(self.lines))):
+            line = np.fromstring(self.lines[-i-1].encode('ascii'), dtype='ubyte')
+            sprites[i, :len(line)] = line
+        self.txt_sprites.sprite = sprites
+        
