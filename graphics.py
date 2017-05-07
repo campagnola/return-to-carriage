@@ -215,7 +215,7 @@ class SpritesVisual(vispy.visuals.Visual):
             vec2 pt = point_coord;
             
             // supersample sprite value
-            const int ss = 2;
+            const int ss = 1;
             float alpha = 0;
             for (int i=0; i<ss; i++) {
                 for (int j=0; j<ss; j++) {
@@ -248,7 +248,7 @@ class SpritesVisual(vispy.visuals.Visual):
         self.fgcolor = np.empty((0, 4), dtype='float32')
         self.bgcolor = np.empty((0, 4), dtype='float32')
         
-        self._atlas_tex = vispy.gloo.Texture2D(shape=(1,1,4), format='rgba', interpolation='nearest')
+        self._atlas_tex = vispy.gloo.Texture2D(shape=(1,1,4), format='rgba', interpolation='linear')
         self._atlas_map_tex = vispy.gloo.Texture1D(shape=(1,4), format='rgba', interpolation='nearest')
         self._need_data_upload = False
         self._need_atlas_upload = True
@@ -469,14 +469,19 @@ class CharAtlas(object):
         gs = self.glyphs.shape
         n_glyphs = gs[0]
         atlas_rows = int(np.ceil(float(n_glyphs) / self.columns))
-        self.atlas = np.empty((atlas_rows * gs[1], self.columns*gs[2], 3), dtype=self.glyphs.dtype)
+        if atlas_rows == 1:
+            columns = n_glyphs
+        else:
+            columns = self.columns
+            
+        self.atlas = np.empty((atlas_rows * gs[1], columns*gs[2], 3), dtype=self.glyphs.dtype)
         
         self.sprite_coords = np.empty((n_glyphs, 4), dtype='float32')
         self.sprite_coords[:,2] = gs[1]
         self.sprite_coords[:,3] = gs[2]
         for i in range(atlas_rows):
-            for j in range(self.columns):
-                glyph = i * self.columns + j
+            for j in range(columns):
+                glyph = i * columns + j
                 if glyph >= n_glyphs:
                     break
                 x = i * gs[1]
@@ -942,12 +947,13 @@ class Console(object):
         self.view.camera.rect = vispy.geometry.Rect(0, 0, shape[1], shape[0])
         
         # generate a texture for each character we need
-        self.atlas = CharAtlas(size=128)
-        ascii_chars = [chr(i) for i in range(128)]
+        self.atlas = CharAtlas(size=30)
+        ascii_chars = [chr(i) for i in range(0x20, 128)]
         self.atlas.add_chars(ascii_chars)
         
         # create sprites visual
         self.txt = Sprites(self.atlas, sprite_size=(1, 1), point_cs='visual', parent=self.view.scene)
+        self.txt.update_gl_state(depth_test=False)
         
         self.txt_sprites = self.txt.add_sprites(shape)
         self.txt_sprites.sprite = 0
@@ -958,7 +964,9 @@ class Console(object):
         
         self.txt_sprites.fgcolor = np.ones(shape + (4,), dtype='float32')
         bgcolor = np.zeros(shape + (4,), dtype='float32')
-        bgcolor[:,3] = 1
+        bgcolor[..., 3] = 1
+        bgcolor[::2, ::2, :3] = 0.2
+        bgcolor[1::2, 1::2, :3] = 0.2
         self.txt_sprites.bgcolor = bgcolor
         
         self.lines = []
@@ -969,8 +977,9 @@ class Console(object):
         
     def update_text(self):
         sprites = np.zeros(self.shape, dtype='uint8')
+        sprites[:] = ord(' ')
         for i in range(min(self.shape[0], len(self.lines))):
             line = np.fromstring(self.lines[-i-1].encode('ascii'), dtype='ubyte')
-            sprites[i, :len(line)] = line
-        self.txt_sprites.sprite = sprites
+            sprites[i, :len(line)] = line[:self.shape[1]]
+        self.txt_sprites.sprite = sprites - 0x20
         
