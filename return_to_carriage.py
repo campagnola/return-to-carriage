@@ -139,11 +139,13 @@ class Scene(object):
         self.console = Console((10, 100))
         self.console.view.parent = self.canvas.scene
         self.console.view.rect = vispy.geometry.Rect(30, 620, 1350, 250)
-        self.console.transform = vispy.visuals.transforms.STTransform((0, 0, 0.1))
-        self.console.view.camera.aspect = 0.6
-        
+        self.console.transform = vispy.visuals.transforms.STTransform((0, 0, -0.5))
+        #self.console.view.camera.aspect = 0.6
+
         self.console.write('Hello?')
         self.console.write('Is anybody\n    there?')
+        self.console.write(''.join([chr(i) for i in range(0x20,128)]))        
+        #self.console.view.camera.rect = [-1, -1, 30, 3]
         
     def move_player(self, pos):
         self.player.position = pos

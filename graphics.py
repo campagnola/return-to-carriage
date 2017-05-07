@@ -213,14 +213,15 @@ class SpritesVisual(vispy.visuals.Visual):
             gl_FragColor = vec4(0, 0, 0, 0);
             vec4 atlas_coords = texture1D(atlas_map, (f_sprite + 0.5) / n_sprites);
             vec2 pt = point_coord;
+            vec2 tex_coords;
             
             // supersample sprite value
             const int ss = 1;
             float alpha = 0;
             for (int i=0; i<ss; i++) {
                 for (int j=0; j<ss; j++) {
-                    vec2 dx = vec2(i, j) / (point_size*ss);
-                    vec2 tex_coords = atlas_coords.yx + (pt + dx) * atlas_coords.wz;
+                    vec2 dx = vec2(0, 0); //vec2(i, j) / (point_size*ss);
+                    tex_coords = vec2(0.00001, 0.00001) + atlas_coords.yx + (pt + dx) * atlas_coords.wz;
                     vec4 tex = texture2D(atlas, tex_coords);
                     alpha += tex.g / (ss*ss);
                 }
@@ -248,8 +249,8 @@ class SpritesVisual(vispy.visuals.Visual):
         self.fgcolor = np.empty((0, 4), dtype='float32')
         self.bgcolor = np.empty((0, 4), dtype='float32')
         
-        self._atlas_tex = vispy.gloo.Texture2D(shape=(1,1,4), format='rgba', interpolation='linear')
-        self._atlas_map_tex = vispy.gloo.Texture1D(shape=(1,4), format='rgba', interpolation='nearest')
+        self._atlas_tex = vispy.gloo.Texture2D(shape=(1,1,4), format='rgba', interpolation='nearest')
+        self._atlas_map_tex = vispy.gloo.Texture1D(shape=(1,4), format='rgba', internalformat='rgba32f', interpolation='nearest')
         self._need_data_upload = False
         self._need_atlas_upload = True
         
@@ -944,10 +945,10 @@ class Console(object):
         
         self.view = vispy.scene.widgets.ViewBox(border_color=(1, 1, 1, 0.2), bgcolor=(0, 0, 0, 0.4))
         self.view.camera = 'panzoom'
-        self.view.camera.rect = vispy.geometry.Rect(0, 0, shape[1], shape[0])
+        self.view.camera.rect = vispy.geometry.Rect(-0.5, -0.5, shape[1], shape[0])
         
         # generate a texture for each character we need
-        self.atlas = CharAtlas(size=30)
+        self.atlas = CharAtlas(size=32)
         ascii_chars = [chr(i) for i in range(0x20, 128)]
         self.atlas.add_chars(ascii_chars)
         
@@ -962,11 +963,12 @@ class Console(object):
         pos[...,:2] = np.mgrid[0:shape[1], 0:shape[0]].transpose(2, 1, 0)
         self.txt_sprites.position = pos
         
-        self.txt_sprites.fgcolor = np.ones(shape + (4,), dtype='float32')
+        fgcolor = np.ones(shape + (4,), dtype='float32')
+        fgcolor[...,3] = 0.5
+        self.txt_sprites.fgcolor = fgcolor
+        
         bgcolor = np.zeros(shape + (4,), dtype='float32')
-        bgcolor[..., 3] = 1
-        bgcolor[::2, ::2, :3] = 0.2
-        bgcolor[1::2, 1::2, :3] = 0.2
+        bgcolor[..., 3] = 0.5
         self.txt_sprites.bgcolor = bgcolor
         
         self.lines = []
