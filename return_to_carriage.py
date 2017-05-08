@@ -136,11 +136,31 @@ class Scene(object):
         self.update_sight()
         self.update_maze()
         
-        self.console = Console((10, 100))
-        self.console.view.parent = self.canvas.scene
+        
+        self.console_grid = self.canvas.central_widget.add_grid()
+
+        self.stats_box = Console((2, 160))
+        self.console_grid.add_widget(self.stats_box.view, 1, 0, 1, 2)
+        self.stats_box.write("HP:17/33   Food:56%  Water:34%  Sleep:65%   Weight:207(45)    Level:3  Int:12  Str:9  Wis:11  Cha:2")
+        self.stats_box.view.height_max = 30
+        self.stats_box.view.stretch = (1, 10)
+        
+
+        self.info_box = Console((15, 80))
+        self.console_grid.add_widget(self.info_box.view, 2, 0)
+        self.info_box.write("There is a scroll of infinite recursion here.")
+        self.info_box.view.height_max = 200
+        self.stats_box.view.stretch = (1, 1)
+        
+        self.console = Console((15, 80))
+        self.console_grid.add_widget(self.console.view, 2, 1)
+        self.console.view.stretch = (1, 10)
+        #self.console.view.parent = self.canvas.scene
         self.console.view.rect = vispy.geometry.Rect(30, 620, 1350, 250)
         self.console.transform = vispy.visuals.transforms.STTransform((0, 0, -0.5))
         #self.console.view.camera.aspect = 0.6
+        
+        self.console.view.height_max = 200
 
         self.console.write('Hello?')
         self.console.write('Is anybody\n    there?')

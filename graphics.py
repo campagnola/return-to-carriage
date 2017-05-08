@@ -216,11 +216,11 @@ class SpritesVisual(vispy.visuals.Visual):
             vec2 tex_coords;
             
             // supersample sprite value
-            const int ss = 1;
+            const int ss = 3;
             float alpha = 0;
             for (int i=0; i<ss; i++) {
                 for (int j=0; j<ss; j++) {
-                    vec2 dx = vec2(0, 0); //vec2(i, j) / (point_size*ss);
+                    vec2 dx = vec2(i, j) / (point_size*ss);
                     tex_coords = vec2(0.00001, 0.00001) + atlas_coords.yx + (pt + dx) * atlas_coords.wz;
                     vec4 tex = texture2D(atlas, tex_coords);
                     alpha += tex.g / (ss*ss);
@@ -945,10 +945,12 @@ class Console(object):
         
         self.view = vispy.scene.widgets.ViewBox(border_color=(1, 1, 1, 0.2), bgcolor=(0, 0, 0, 0.4))
         self.view.camera = 'panzoom'
-        self.view.camera.rect = vispy.geometry.Rect(-0.5, -0.5, shape[1], shape[0])
+        self.view.camera.rect = vispy.geometry.Rect(-0.7, -0.7, shape[1], shape[0])
+        self.view.padding = 0
+        self.view.margin = 1
         
         # generate a texture for each character we need
-        self.atlas = CharAtlas(size=32)
+        self.atlas = CharAtlas(size=12)
         ascii_chars = [chr(i) for i in range(0x20, 128)]
         self.atlas.add_chars(ascii_chars)
         
@@ -967,8 +969,8 @@ class Console(object):
         fgcolor[...,3] = 0.5
         self.txt_sprites.fgcolor = fgcolor
         
-        bgcolor = np.zeros(shape + (4,), dtype='float32')
-        bgcolor[..., 3] = 0.5
+        bgcolor = np.ones(shape + (4,), dtype='float32')
+        bgcolor[..., 3] = 0
         self.txt_sprites.bgcolor = bgcolor
         
         self.lines = []
