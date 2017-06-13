@@ -818,8 +818,15 @@ class ShadowRenderer(object):
     def __init__(self, scene, opacity, supersample=1):
         self.scene = scene
         self.size = (opacity.shape[0] * supersample, opacity.shape[1] * supersample)
-        self.fbo = vispy.gloo.FrameBuffer(color=vispy.gloo.RenderBuffer(self.size), 
+        
+        # for render to texture
+        self.texture = vispy.gloo.Texture2D(shape=self.size+(4,), format='rgba', interpolation='linear', wrapping='repeat')
+        self.fbo = vispy.gloo.FrameBuffer(color=self.texture, 
                                           depth=vispy.gloo.RenderBuffer(self.size))
+        
+        # For render / read to CPU
+        #self.fbo = vispy.gloo.FrameBuffer(color=vispy.gloo.RenderBuffer(self.size), 
+                                          #depth=vispy.gloo.RenderBuffer(self.size))
         
         vert = """
             #version 330 compatibility
@@ -921,7 +928,57 @@ class ShadowRenderer(object):
         self.program['ij'] = np.mgrid[0:opacity.shape[1], 0:opacity.shape[0]].astype('float32').transpose(1, 2, 0)
         
         
-    def render(self, pos):
+    def render(self, pos, read=False):
+        """
+        """
+        self.program['center'] = pos
+        img = None
+        with self.fbo:
+            vispy.gloo.clear(color=(1, 1, 1))
+            vispy.gloo.set_viewport(0, 0, *self.size[::-1])
+            #vispy.gloo.set_state(cull_face=True)
+            self.program.draw(mode='points', check_error=True)
+            vispy.gloo.set_viewport(0, 0, *self.scene.canvas.size)
+            if read:
+                img = self.fbo.read()[::-1]
+        
+        return img
+
+
+class MemoryRenderer(object):
+    def __init__(self, sight_texture):
+        self.sight_tex = sight_texture
+        self.size = sight_texture.shape[:2]
+        self.memory_tex = vispy.gloo.Texture2D(shape=self.size+(4,), format='rgba', interpolation='linear', wrapping='repeat')
+        self.fbo = vispy.gloo.FrameBuffer(color=self.texture, 
+                                          depth=vispy.gloo.RenderBuffer(self.size))
+        
+        vert = """
+            #version 330 compatibility
+
+            in vec2 ij;
+            
+            void main (void) {
+                gl_Position = vec4(ij, 0, 1);
+            }
+        """
+        
+        frag = """
+            #version 330 compatibility
+            
+            void main (void) {
+                gl_FragColor = vec4(0, 0, 1, 1);
+            }
+        """
+        
+        self.program = ModularProgram(vert, frag, gcode=geom)
+        self.program['opacity'] = vispy.gloo.Texture2D(opacity, format='luminance', interpolation='nearest')
+        self.program['opacity_size'] = opacity.shape[:2][::-1]
+        
+        self.program['ij'] = np.mgrid[0:opacity.shape[1], 0:opacity.shape[0]].astype('float32').transpose(1, 2, 0)
+        
+        
+    def render(self, pos, read=False):
         """
         """
         self.program['center'] = pos
@@ -931,9 +988,11 @@ class ShadowRenderer(object):
             #vispy.gloo.set_state(cull_face=True)
             self.program.draw(mode='points', check_error=True)
             vispy.gloo.set_viewport(0, 0, *self.scene.canvas.size)
-            img = self.fbo.read()
+            if read:
+                img = self.fbo.read()
         
-        return img[::-1]
+        if read:
+            return img[::-1]
 
 
 

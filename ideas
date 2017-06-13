@@ -116,6 +116,13 @@ Graphics
 
     Turn-based mode should be identified by boundary via colored floor area        
 
+    Use unicode to represent many different items.
+        - mandarin for scrolls / spells
+        - kanji for weapons
+        - cyrilic for monsters
+        If we can work this out such that we start learning other languages, that would
+        be fantastic (for example, phonetic symbols always have the same sound
+        as the first letter of the english name)
 
 -----------------------
 

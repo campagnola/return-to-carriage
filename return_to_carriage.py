@@ -59,18 +59,6 @@ class Scene(object):
         maze = np.array(Image.open('level1.png'))[::-1,:,0]
         maze[maze>0] = wall
         maze[maze==0] = path
-        #shape = (50, 120)
-        #self.maze = np.empty(shape, dtype='uint32')
-        #self.maze[:] = wall
-        #self.maze[1:10, 1:10] = path
-        #self.maze[25:35, 105:115] = path
-        #self.maze[20:39, 1:80] = path
-        #self.maze[5:30, 6] = path
-        #self.maze[35, 5:115] = path
-        #for i in range(24,36,10):
-            #for j in range(15,70,15):
-                #self.maze[i:i+2, j:j+2] = wall
-        #self.maze[30, 3] = wall
         
         self.maze = maze
         shape = maze.shape
@@ -82,19 +70,17 @@ class Scene(object):
 
         # line-of-sight computation
         self.opacity = (self.maze == wall).astype('float32')
-        #self.opacity_tex = vispy.gloo.Texture2D(self.opacity, format='luminance', interpolation='nearest')
-        #self.sight_renderer = SightRenderer(self, self.opacity_tex)
-        #self.sight_tex = vispy.gloo.Texture2D(shape=(1, 100), format='luminance', internalformat='r32f', interpolation='linear')
-        ss = 4
-        #self.los_tex_renderer = LOSTextureRenderer(self, self.sight_tex, self.maze.shape, supersample=ss)
+        ss = 2
         self.los_renderer = ShadowRenderer(self, self.opacity, supersample=ss)
         
         ms = self.maze.shape
-        self.memory = np.zeros((ms[0]*ss, ms[1]*ss, 4), dtype='ubyte')
-        self.memory[...,3] = 1
-        self.memory_tex = vispy.gloo.Texture2D(self.memory, interpolation='linear')
+        #self.memory = np.zeros((ms[0]*ss, ms[1]*ss, 4), dtype='ubyte')
+        #self.memory[...,3] = 1
+        #self.memory_tex = vispy.gloo.Texture2D(self.memory, interpolation='linear')
         tr = self.txt.transforms.get_transform('framebuffer', 'visual')
-        self.sight_filter = TextureMaskFilter(self.memory_tex, tr, scale=(1./ms[1], 1./ms[0]))
+        
+        #self.sight_filter = TextureMaskFilter(self.memory_tex, tr, scale=(1./ms[1], 1./ms[0]))
+        self.sight_filter = TextureMaskFilter(self.los_renderer.texture, tr, scale=(1./ms[1], 1./ms[0]))
         self.txt.attach(self.sight_filter)
         
         # set positions
@@ -170,16 +156,13 @@ class Scene(object):
     def move_player(self, pos):
         self.player.position = pos
         self.update_sight()
-        self.update_maze()
-        #self.sight_filter.set_player_pos(pos)
-        #img = self.sight_renderer.render(pos)
-
-        #self.sight_tex.set_data(img.astype('float32'))
-        #los = self.los_tex_renderer.render(pos)[::-1]
+        #self.update_maze()
+        
         los = self.los_renderer.render(pos)
-        mask = np.where(los > self.memory, los, self.memory)
-        self.memory[..., 2] = mask[..., 2]
-        self.memory_tex.set_data(mask)
+        
+        #mask = np.where(los > self.memory, los, self.memory)
+        #self.memory[..., 2] = mask[..., 2]
+        #self.memory_tex.set_data(mask)
 
         self._update_camera_target()
         
@@ -309,7 +292,7 @@ class Scene(object):
         
         
     def update_maze(self):
-        mem = np.clip(self.memory[...,None], 0, 1)
+        #mem = np.clip(self.memory[...,None], 0, 1)
         self.maze_sprites.fgcolor = self.fgcolor# * mem
         self.maze_sprites.bgcolor = self.bgcolor# * mem
 
