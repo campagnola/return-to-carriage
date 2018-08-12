@@ -47,7 +47,7 @@ class Scene(object):
         # generate a texture for each character we need
         self.atlas = CharAtlas()
         self.atlas.add_chars(" .#")
-        
+
         # create sprites visual
         size = 1/0.6
         scale = (0.6, 1)
@@ -105,19 +105,12 @@ class Scene(object):
         self.bgcolor[...,:3][walls] += rock[walls]
 
 
+        # track items by location
+        self.items = {}
+
         # add player
         self.player = Player(self)
 
-        ## add items
-        self.items = self.txt.add_sprites((10,))
-        self.items.sprite = 0
-        
-        self.scroll = self.txt.add_sprites((1,))
-        self.scroll.position = (5, 5, -0.1)
-        self.scroll.sprite = self.atlas.add_chars(u'次')
-        self.scroll.fgcolor = (0.7, 0, 0, 1)
-        self.scroll.bgcolor = (0, 0, 0, 1)
-        
         self.move_player([7, 7])
         self.update_sight()
         self.update_maze()
@@ -187,6 +180,9 @@ class Scene(object):
                 self.los_tex_imv =  pg.image()
                 self.los_tex_imv.imageItem.setBorder('w')
             self.los_tex_imv.setImage(los.transpose(1, 0, 2))
+
+    def items_at(self, pos):
+        return self.items.get(tuple(pos), [])
             
     def _update_camera_target(self):
         pp = np.array(self.player.position)
@@ -230,7 +226,10 @@ class Scene(object):
     def key_pressed(self, ev):
         if ev.key == 'Escape':
             self.canvas.close()
-        
+        if ev.key == 't':
+            for item in self.items_at(self.player.position):
+                self.player.take(item)
+                self.console.write("Taken: %s" % item.name)
         self.keys.add(ev.key)
         self._handle_input(None)
         
@@ -307,6 +306,8 @@ class Player(object):
         self.sprite.fgcolor = (0, 0, 0.3, 1)
         self.sprite.bgcolor = (0.5, 0.5, 0.5, 1)
         self.position = (7, 7)
+        
+        self.inventory = []
 
     @property
     def position(self):
@@ -317,6 +318,46 @@ class Player(object):
         self._pos = p
         self.sprite.position = tuple(p) + (self.zval,)
 
+    def take(self, item):
+        self.inventory.append(item)
+        item.location = self
+
+    def drop(self, item):
+        self.inventory.remove(item)
+        item.location = self.position
+
+
+class Item(object):
+    def __init__(self, location, scene):
+        self._location = None
+        self.name = "a scroll of infinite recursion"
+        self.scene = scene
+        
+        self.sprite = scene.txt.add_sprites((1,))        
+        self.sprite.fgcolor = (0.7, 0, 0, 1)
+        self.sprite.bgcolor = (0, 0, 0, 1)
+        
+        self.location = location
+
+    @property
+    def location(self):
+        return self._location
+    
+    @location.setter
+    def location(self, loc):
+        if self._location is not None:
+            self.scene.items[self._location].remove(self)
+        
+        self._location = loc
+        self.scene.items.setdefault(loc, [])
+        self.scene.items[loc].append(self)
+        if isinstance(loc, (tuple, list, np.ndarray)):
+            self.sprite.position = (loc[0], loc[1], -0.1)
+            self.sprite.sprite = scene.atlas[u'次']
+        elif isinstance(loc, Player):
+            self.sprite.sprite = 0
+        else:
+            raise TypeError('location must be x,y position or Player')
 
 
 if __name__ == '__main__':
@@ -328,5 +369,6 @@ if __name__ == '__main__':
     
     scene = Scene(canvas)
 
+    scroll = Item(location=(5, 5), scene=scene)
     
     

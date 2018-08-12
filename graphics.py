@@ -437,6 +437,12 @@ class CharAtlas(object):
         self.glyphs = np.empty((0,) + char_shape + (3,), dtype='ubyte')
         self._rebuild_atlas()
 
+    def __getitem__(self, char):
+        if char not in self.chars:
+            return self.add_chars(char)
+        else:
+            return self.chars[char]
+
     def add_chars(self, chars):
         """Add new characters to the atlas, return the first new index.
         """
