@@ -107,6 +107,9 @@ class Scene(object):
 
         # track items by location
         self.items = {}
+        
+        # track monsters by location
+        self.monsters = {}
 
         # add player
         self.player = Player(self)
@@ -145,6 +148,11 @@ class Scene(object):
         self.console.write('Is anybody\n    there?')
         self.console.write(''.join([chr(i) for i in range(0x20,128)]))        
         #self.console.view.camera.rect = [-1, -1, 30, 3]
+
+    def monster_moved(self, mon, old_pos):
+        if old_pos is not None:
+            self.monsters[tuple(old_pos)].remove(mon)
+        self.monsters.setdefault(tuple(mon.position), []).append(mon)
         
     def move_player(self, pos):
         self.player.position = pos
@@ -173,13 +181,19 @@ class Scene(object):
             #self.sight_img.setImage(img.transpose(1, 0), autoLevels=False)
             self.sight_img.setImage(img.transpose(1, 0), autoLevels=False)
 
-
         if self.debug_los_tex:
             if not hasattr(self, 'los_tex_imv'):
                 import pyqtgraph as pg
                 self.los_tex_imv =  pg.image()
                 self.los_tex_imv.imageItem.setBorder('w')
             self.los_tex_imv.setImage(los.transpose(1, 0, 2))
+
+        self.end_turn()
+        
+    def end_turn(self):
+        for mlist in self.monsters.values():
+            for m in mlist:
+                m.turn()
 
     def items_at(self, pos):
         return self.items.get(tuple(pos), [])
@@ -334,8 +348,9 @@ class Item(object):
         self.scene = scene
         
         self.sprite = scene.txt.add_sprites((1,))        
-        self.sprite.fgcolor = (0.7, 0, 0, 1)
+        self.sprite.fgcolor = (0, 0, 0.6, 1)
         self.sprite.bgcolor = (0, 0, 0, 1)
+        self.sprite.sprite = scene.atlas[u'次']
         
         self.location = location
 
@@ -353,11 +368,39 @@ class Item(object):
         self.scene.items[loc].append(self)
         if isinstance(loc, (tuple, list, np.ndarray)):
             self.sprite.position = (loc[0], loc[1], -0.1)
-            self.sprite.sprite = scene.atlas[u'次']
         elif isinstance(loc, Player):
-            self.sprite.sprite = 0
+            self.sprite.position = (float('nan'),) * 3
         else:
             raise TypeError('location must be x,y position or Player')
+
+
+class Monster(object):
+    def __init__(self, position, scene):
+        self._position = None
+        self.scene = scene
+        
+        self.sprite = scene.txt.add_sprites((1,))        
+        self.sprite.fgcolor = (0.6, 0.6, 0.6, 1)
+        self.sprite.bgcolor = (0, 0, 0, 1)
+        self.sprite.sprite = scene.atlas[u'Y']
+        
+        self.position = position
+    
+    def turn(self):
+        l = list(self.position)
+        l[1] -= 1
+        self.position = l
+
+    @property
+    def position(self):
+        return self._position
+    
+    @position.setter
+    def position(self, pos):
+        old_pos = self._position
+        self._position = pos
+        self.sprite.position = (pos[0], pos[1], -0.1)
+        self.scene.monster_moved(self, old_pos)
 
 
 if __name__ == '__main__':
@@ -370,5 +413,5 @@ if __name__ == '__main__':
     scene = Scene(canvas)
 
     scroll = Item(location=(5, 5), scene=scene)
-    
+    yeti = Monster(position=(8, 40), scene=scene)
     
