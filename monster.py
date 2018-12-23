@@ -15,7 +15,7 @@ class Monster(object):
         
         self.position = position
     
-    def turn(self):
+    def take_turn(self):
         l = list(self.position)
         l[1] -= 1
         self.position = l

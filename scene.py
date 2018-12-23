@@ -6,38 +6,32 @@ import vispy.util.ptime as ptime
 from PIL import Image
 
 from graphics import CharAtlas, Sprites, TextureMaskFilter, ShadowRenderer, Console
-from input import InputThread
+from input import InputDispacher, DefaultInputHandler
 from player import Player
 
 
 class Scene(object):
+    """Central organizing class for managing UI, landscape, player, items, and mobs
+    """
     def __init__(self, canvas):
         self.debug_line_of_sight = False
         self.debug_los_tex = False
         self.canvas = canvas
         
+        # Setup input event handling
+        self.input_dispacher = InputDispacher(canvas)
+        self.default_input_handler = DefaultInputHandler(self)
+        self.input_dispacher.push_handler(self.default_input_handler)
+
+        # setup UI
         self.view = canvas.central_widget.add_view()
         self.view.camera = 'panzoom'
         self.view.camera.rect = [0, -5, 120, 60]
         self.view.camera.aspect = 0.6
-        canvas.events.key_press.connect(self.key_pressed)
-        canvas.events.key_release.connect(self.key_released)
         
         self.camera_target = self.view.camera.rect
         self._last_camera_update = ptime.time()
-        self.scroll_timer = vispy.app.Timer(start=True, connect=self._scroll_camera, interval=0.016)
-
-        self.keys = set()
-        self._last_input_update = ptime.time()
-        self.input_timer = vispy.app.Timer(start=True, connect=self._handle_input, interval=0.016)
-        
-        try:
-            self.input_thread = InputThread()
-            self.input_thread.new_event.connect(self._gamepad_event)
-        except Exception:
-            self.input_thread = None
-            sys.excepthook(*sys.exc_info())
-        self._gamepad_state = {}
+        self.scroll_timer = vispy.app.Timer(start=True, connect=self._scroll_camera, interval=0.016)        
         
         # generate a texture for each character we need
         self.atlas = CharAtlas()
@@ -65,7 +59,7 @@ class Scene(object):
 
         # line-of-sight computation
         self.opacity = (self.maze == wall).astype('float32')
-        ss = 2
+        ss = 4
         self.los_renderer = ShadowRenderer(self, self.opacity, supersample=ss)
         
         ms = self.maze.shape
@@ -188,11 +182,55 @@ class Scene(object):
     def end_turn(self):
         for mlist in self.monsters.values():
             for m in mlist:
-                m.turn()
+                m.take_turn()
 
     def items_at(self, pos):
         return self.items.get(tuple(pos), [])
-            
+    
+    def request_player_move(self, newpos):
+        """Attempt to move the player to newpos.
+        """
+        pos = self.player.position
+        j, i = newpos
+        j0, i0 = self.player.position
+        if self.maze[i, j] == self.path:
+            self.move_player(newpos)
+        elif self.maze[i0, j] == self.path:
+            newpos[1] = i0
+            self.move_player(newpos)
+        elif self.maze[i, j0] == self.path:
+            newpos[0] = j0
+            self.move_player(newpos)
+
+    def request_player_action(self, action):
+        if action == 'take':
+            items = self.items_at(self.player.position)
+            if len(items) == 0:
+                self.console.write("Nothing to take here.")
+            else:
+                for item in items:
+                    self.player.take(item)
+                    self.console.write("Taken: %s" % item.name)
+        elif action == 'read':
+            self.player.read_item()
+
+    def user_request_item(self, message, items, callback):
+        """Ask the user to select an item from a list.
+        """
+        self.console.write(message)
+ 
+    def update_sight(self):
+        #self.sight_filter.set_player_pos(self.player.position[:2])
+        pass        
+        
+    def update_maze(self):
+        #mem = np.clip(self.memory[...,None], 0, 1)
+        self.maze_sprites.fgcolor = self.fgcolor# * mem
+        self.maze_sprites.bgcolor = self.bgcolor# * mem
+
+    def quit(self):
+        self.canvas.close()
+
     def _update_camera_target(self):
         pp = np.array(self.player.position)
         cr = vispy.geometry.Rect(self.view.camera.rect)
@@ -231,76 +269,3 @@ class Scene(object):
         cr.pos = nrv[:2]
         cr.size = nrv[2:]
         self.view.camera.rect = cr
-
-    def key_pressed(self, ev):
-        if ev.key == 'Escape':
-            self.canvas.close()
-        if ev.key == 't':
-            for item in self.items_at(self.player.position):
-                self.player.take(item)
-                self.console.write("Taken: %s" % item.name)
-        self.keys.add(ev.key)
-        self._handle_input(None)
-        
-    def key_released(self, ev):
-        try:
-            self.keys.remove(ev.key)
-        except KeyError:
-            pass
-        
-    def _gamepad_event(self, ev, state):
-        # gamepad input
-        self._gamepad_state = state
-        self._handle_input(None)
- 
-    def _handle_input(self, ev):
-        now = ptime.time()
-        dt = now - self._last_input_update
-        
-        gp = self._gamepad_state
-        gp_south = gp.get('BTN_SOUTH', 0) == 1
-        wait = 0.05 if ('Shift' in self.keys or gp_south) else 0.1
-        if dt < wait:
-            return
-
-        gp_x = gp.get('ABS_HAT0X', 0)
-        gp_y = gp.get('ABS_HAT0Y', 0)
-        dx = [gp_x, -gp_y]
-        if 'Right' in self.keys:
-            dx[0] += 1
-        if 'Left' in self.keys:
-            dx[0] -= 1
-        if 'Up' in self.keys:
-            dx[1] += 1
-        if 'Down' in self.keys:
-            dx[1] -= 1
-        
-        if dx[0] == 0 and dx[1] == 0:
-            return
-        
-        pos = self.player.position
-        j0, i0 = pos.astype('uint')
-        newpos = pos + dx
-        j, i = newpos.astype('uint')
-        
-        if self.maze[i, j] == self.path:
-            self.move_player(newpos)
-        elif self.maze[i0, j] == self.path:
-            newpos[1] = i0
-            self.move_player(newpos)
-        elif self.maze[i, j0] == self.path:
-            newpos[0] = j0
-            self.move_player(newpos)
-        
-        self._last_input_update = now
- 
-    def update_sight(self):
-        #self.sight_filter.set_player_pos(self.player.position[:2])
-        pass
-        
-        
-    def update_maze(self):
-        #mem = np.clip(self.memory[...,None], 0, 1)
-        self.maze_sprites.fgcolor = self.fgcolor# * mem
-        self.maze_sprites.bgcolor = self.bgcolor# * mem
-

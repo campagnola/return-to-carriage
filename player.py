@@ -30,3 +30,14 @@ class Player(object):
     def drop(self, item):
         self.inventory.remove(item)
         item.location = self.position
+
+    def read_item(self, item=None):
+        if item is None:
+            readables = [i for i in self.inventory if i.readable]
+            self.scene.user_request_item("What item do you want to read?", readables, self.read_item)
+            return
+        
+        item.read(self)
+
+    def lose_item(self, item):
+        self.inventory.remove(item)
