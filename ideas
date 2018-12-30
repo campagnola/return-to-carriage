@@ -1,11 +1,14 @@
+All the ideas, in one place. It'll be amazing if we implement 5% of these.
+==========================================================================
+
+
 Random Stuff:
 
 - Narrator should be snarky.
-"your busted-ass armor has seen better days".
+  "your busted-ass armor has seen better days".
 - 2nd 'over' map, showing connections to different maps, be them deeper into dungeons / caves, or further across land
 - "Gauntlet" stages? Moving walls, spikes, action based play
 - Inventory page - to include current armor and weapons, with lists of inventory to one side 
-
 
 ------------------
 
@@ -21,17 +24,34 @@ Add some more realism to combat / health
     - need water / food / sleep
     - poisons can differ in strength and effect
     - would be nice if healers can give you advice about causes / treatments for your ailments.
+        - with experience / training, player can determine these things on their own
     - detailed blow-by-blow logging of activities that lead to health problems so we can learn from our mistakes
     - head wounds can cause amnesia (forget parts of levels, skills, scroll effects, etc)
-    
-    
+    - realistic interactions between offensive and defensive attributes. for example:
+        - sharp weapons are ineffective against plate armor unless you have very good aim
+        - heavy weapons are less effective against fast opponents
+        - smiths can offer advice about the condition of equipment and how to repair it
+        - with training / experience, the player can determine these things on their own
+
+-------------------
+
+
+Mobs
+    - Generally sparse, but potentially more dangerous
+    - Some mobs come in groups
+    - Many personality attributes: timid/aggressive, passive/aggressive, 
+    - Many are peaceful / avoid contact
+    - May run away when hurt
+    - May fight / avoid / help / react to other mobs
+
 -------------------
 
 More realism to skills / memory
     - You can forget parts of the maze that you haven't visited recently or frequently
     - Unused skills degrade over time (but with a realistic memory model)
+    - Maps can be overlaid on the dungeon
     - Spells / potions can improve your memory
-    - Magic maps
+        - magic maps draw themselves as you explore and never forget
 
 
 -------------------
@@ -114,6 +134,11 @@ Graphics
         some parts of levels can be transparent to level below
     Parts of the map that are out of line-of-sight (by that you still remember) are desaturated / dimmed
 
+    Since we can position each character individually / precisely in 3D, there is some opportuity for cool effects
+        - Maybe break the 2D character grid as part of the story
+         - A flatland-like setting, where magic is used to move in the 3rd dimension (for example, to walk through walls or teleport)
+         - Rifts in the 2D spacetime continuum can actually mess up the grid
+
     Turn-based mode should be identified by boundary via colored floor area        
 
     Use unicode to represent many different items.
@@ -123,6 +148,15 @@ Graphics
         If we can work this out such that we start learning other languages, that would
         be fantastic (for example, phonetic symbols always have the same sound
         as the first letter of the english name)
+
+-----------------------
+
+DM mode
+
+- Play as the dungeon master. You are given ample resources (minions, treasure, etc) to lure in and kill adventurers. 
+- High-level heros are worth exponentially more, so there is incentive to allow them to level up as far as possible before killing them
+  (but without getting killed yourself)
+- Could be part of the story -- you can become DM by defeating the current one
 
 -----------------------
 
@@ -191,6 +225,8 @@ Stores
     - prices can fluctuate based on local variations in availability
     - Items you sell can be repurchased
 
+
+------------------------
 
 Classes:
 

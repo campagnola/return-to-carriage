@@ -11,7 +11,7 @@ class Item(object):
     takable = False
 
     def __init__(self, location, scene):
-        self._location = None
+        self._location = (None, None)
         self.scene = scene
         
         self.sprite = scene.txt.add_sprites((1,))        
@@ -27,18 +27,24 @@ class Item(object):
     
     @location.setter
     def location(self, loc):
-        if isinstance(self._location, (tuple, list, np.ndarray)):
-            self.scene.items[self._location].remove(self)
+        """Set item location.
+
+        *loc* should be a tuple (container, slot) where container is a Scene, Player, etc and slot
+        is the (i, j) location within the scene or an inventory slot letter.
+        """
+        oldloc = self._location
+        if oldloc[0] is self.scene:
+            self.scene.items[oldloc[1]].remove(self)
         
         self._location = loc
-        if isinstance(loc, (tuple, list, np.ndarray)):
-            self.scene.items.setdefault(loc, [])
-            self.scene.items[loc].append(self)
-            self.sprite.position = (loc[0], loc[1], -0.1)
+        if loc[0] is self.scene:
+            self.scene.items.setdefault(loc[1], [])
+            self.scene.items[loc[1]].append(self)
+            self.sprite.position = (loc[1][0], loc[1][1], -0.1)
         elif isinstance(loc, Player):
             self.sprite.position = (float('nan'),) * 3
         else:
-            raise TypeError('location must be x,y position or Player')
+            raise Exception("Not sure what to do with location: %s" % str(loc))
 
     def destroy(self):
         """Remove this item from the game.

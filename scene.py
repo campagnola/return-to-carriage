@@ -6,7 +6,7 @@ import vispy.util.ptime as ptime
 from PIL import Image
 
 from graphics import CharAtlas, Sprites, TextureMaskFilter, ShadowRenderer, Console
-from input import InputDispacher, DefaultInputHandler
+from input import InputDispatcher, DefaultInputHandler
 from player import Player
 
 
@@ -19,9 +19,9 @@ class Scene(object):
         self.canvas = canvas
         
         # Setup input event handling
-        self.input_dispacher = InputDispacher(canvas)
+        self.input_dispacher = InputDispatcher(canvas)
         self.default_input_handler = DefaultInputHandler(self)
-        self.input_dispacher.push_handler(self.default_input_handler)
+        self.input_dispacher.add_handler(self.default_input_handler)
 
         # setup UI
         self.view = canvas.central_widget.add_view()
@@ -218,6 +218,11 @@ class Scene(object):
         """Ask the user to select an item from a list.
         """
         self.console.write(message)
+        while True:
+            ev = get_keypress()
+            
+                
+
  
     def update_sight(self):
         #self.sight_filter.set_player_pos(self.player.position[:2])

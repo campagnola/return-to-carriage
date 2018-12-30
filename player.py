@@ -1,5 +1,6 @@
 # coding: utf8
 import numpy as np
+from collections import OrderedDict
 
 
 class Player(object):
@@ -12,7 +13,7 @@ class Player(object):
         self.sprite.bgcolor = (0.5, 0.5, 0.5, 1)
         self.position = (7, 7)
         
-        self.inventory = []
+        self.inventory = OrderedDict([(chr(i),None) for i in range(ord('a'), ord('z')+1)])
 
     @property
     def position(self):
@@ -24,8 +25,12 @@ class Player(object):
         self.sprite.position = tuple(p) + (self.zval,)
 
     def take(self, item):
-        self.inventory.append(item)
-        item.location = self
+        for k in self.inventory:
+            if self.inventory[k] is None:
+                self.inventory[k] = item
+                item.location = (self, k)
+                return
+        self.scene.console.write("For lack of another letter in the alphabet, you decline to take this item.")
 
     def drop(self, item):
         self.inventory.remove(item)

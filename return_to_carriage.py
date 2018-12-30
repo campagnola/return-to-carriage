@@ -22,6 +22,6 @@ if __name__ == '__main__':
     
     scene = Scene(canvas)
 
-    scroll = Item(location=(5, 5), scene=scene)
+    scroll = Item(location=(scene, (5, 5)), scene=scene)
     yeti = Monster(position=(8, 40), scene=scene)
     

@@ -6,10 +6,16 @@ import vispy.app
 import vispy.util.ptime as ptime
 
 
-class InputDispacher(object):
+class InputDispatcher(object):
     """Receives all user input events and dispatches them to event handlers.
     """
+    dispatcher = None
+
     def __init__(self, canvas):
+        if InputDispatcher.dispatcher is not None:
+            raise Exception("Only one InputDispatcher allowed.")
+        InputDispatcher.dispatcher = self
+
         self.handlers = []
 
         # get keyboard events from the vispy canvas
@@ -25,19 +31,22 @@ class InputDispacher(object):
             self.gamepad_thread = None
             sys.excepthook(*sys.exc_info())
 
-    def push_handler(self, handler):
-        """Push a new input handler to the top of the stack.
+    def add_handler(self, handler):
+        """Add a new input handler to the beginning of the list of input handlers.
 
         The new handler will be the first to receive all user input until it is
-        popped from the stack or another handler is pushed on top of it.
+        removed from the stack or another handler is added on top of it.
         """
         self.handlers.append(handler)
-
-    def pop_handler(self):
-        """Remove the input handler at the top of the stack.
-        """
-        return self.handlers.pop()
         
+    def remove_handler(self, handler):
+        """Remove the first instance of a handler from the list of input handlers.
+
+        The handler will no longer receive input events unless it existed multiple times
+        in the handler list.
+        """
+        self.handlers.remove(handler)
+
     def gamepad_event(self, event):
         for handler in self.handlers:
             if handler.gamepad_event(event) is True:
@@ -54,7 +63,6 @@ class InputDispacher(object):
                 break        
 
 
-
 class InputHandler(object):
     """Base class for user input handling.
 
@@ -66,12 +74,21 @@ class InputHandler(object):
         self.gamepad_state = {}
         self.keys = set()
 
+    def activate(self):
+        disp = InputDispatcher.dispatcher
+        if self not in disp.handlers:
+            disp.add_handler(self)
+
+    def deactivate(self):
+        InputDispatcher.dispatcher.remove_handler(self)
+    
     def gamepad_event(self, event, state):
         """Called when the gamepad state has changed.
 
         Return True if this event is handled, False to allow downstream handlers
         to receive the event.
         """
+        return True
 
     def key_presssed(self, event):
         """Called when a key is pressed.
@@ -79,13 +96,15 @@ class InputHandler(object):
         Return True if this event is handled, False to allow downstream handlers
         to receive the event.
         """
+        return True
 
-    def key_presssed(self, event):
+    def key_released(self, event):
         """Called when a key is released.
 
         Return True if this event is handled, False to allow downstream handlers
         to receive the event.
         """
+        return True
 
 
 class DefaultInputHandler(InputHandler):
@@ -153,6 +172,29 @@ class DefaultInputHandler(InputHandler):
         except KeyError:
             pass
 
+
+class KeyInputHandler(InputHandler):
+    """For handling exclusively keyboard input (such as when entering text)
+
+    Optional callback is invoked for every press or release event.
+    """
+    def __init__(self, callback=None):
+        self.callback = callback
+        self.text = ""
+        self.key_events = []
+        self.press_events = []
+    
+    def key_pressed(self, event):
+        self.text = self.text + event.text
+        self.key_events.append(event)
+        self.press_events.append(event)
+        if self.callback is not None:
+            self.callback(self, event)
+
+    def key_released(self, event):
+        self.key_events.append(event)
+        if self.callback is not None:
+            self.callback(self, event)
 
 
 class InputThread(QtCore.QThread):
