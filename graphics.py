@@ -1044,6 +1044,10 @@ class Console(object):
         self.lines.extend(txt.split('\n'))
         self.update_text()
         
+    def set_last_line(self, line):
+        self.lines[-1] = line
+        self.update_text()
+
     def update_text(self):
         sprites = np.zeros(self.shape, dtype='uint8')
         sprites[:] = ord(' ')
@@ -1051,4 +1055,3 @@ class Console(object):
             line = np.fromstring(self.lines[-i-1].encode('ascii'), dtype='ubyte')
             sprites[i, :len(line)] = line[:self.shape[1]]
         self.txt_sprites.sprite = sprites - 0x20
-        

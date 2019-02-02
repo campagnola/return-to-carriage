@@ -4,6 +4,7 @@ import threading
 from PyQt4 import QtGui, QtCore
 import vispy.app
 import vispy.util.ptime as ptime
+from command import CommandThread
 
 
 class InputDispatcher(object):
@@ -114,6 +115,8 @@ class DefaultInputHandler(InputHandler):
         self.scene = scene
         InputHandler.__init__(self)
 
+        self.command = CommandThread(self)
+
         self.last_input_update = ptime.time()
         self.input_timer = vispy.app.Timer(start=True, connect=self.handle_input, interval=0.016)
 
@@ -159,9 +162,9 @@ class DefaultInputHandler(InputHandler):
         if ev.key == 'Escape':
             self.scene.quit()
         if ev.key == 't':
-            self.scene.request_player_action('take')
+            self.command('take')
         elif ev.key == 'r':
-            self.scene.request_player_action('read')
+            self.command('read')
         
         self.keys.add(ev.key)
         self.handle_input(None)
@@ -173,57 +176,35 @@ class DefaultInputHandler(InputHandler):
             pass
 
 
-class KeyInputHandler(InputHandler):
-    """For handling exclusively keyboard input (such as when entering text)
+class CommandInputHandler(InputHandler):
+    def __init__(self, console, interpreter):
+        self.console = console
+        self.interpreter = interpreter
+        InputHandler.__init__(self)
+        self.command = ""
+        self.command_history = []
 
-    Optional callback is invoked for every press or release event.
-    """
-    def __init__(self, callback=None):
-        self.callback = callback
-        self.text = ""
-        self.key_events = []
-        self.press_events = []
-    
-    def key_pressed(self, event):
-        self.text = self.text + event.text
-        self.key_events.append(event)
-        self.press_events.append(event)
-        if self.callback is not None:
-            self.callback(self, event)
+    def key_pressed(self, ev):
+        if ev.key == 'Escape':
+            self.scene.quit()
 
-    def key_released(self, event):
-        self.key_events.append(event)
-        if self.callback is not None:
-            self.callback(self, event)
-
-
-class InputThread(QtCore.QThread):
-    
-    new_event = QtCore.pyqtSignal(object, object)
-    
-    def __init__(self, device=None):
-        QtCore.QThread.__init__(self)
-        if device is None:
-            gp = inputs.devices.gamepads
-            if len(gp) == 0:
-                print "No gamepads found."
-                return
-            self.dev = gp[0]
-        else:
-            self.dev = device
-            
-        self.lock = threading.Lock()
+        if ev.key == 'Tab':
+            # todo: visual cue
+            self.deactivate()
+            return
+        if ev.key == 'Enter':
+            self.run_command()
+            return
         
-        self.start()
-        
-    def run(self):
-        state = {}
-        while True:
-            for ev in self.dev.read():
-                if ev.ev_type not in ['Absolute', 'Key']:
-                    continue
-                state[ev.code] = ev.state
-                self.new_event.emit(ev, state.copy())
+        # todo: command history up/down
+        # todo: cursor left/right/bkspc/del/home/end
 
+        s = ev.text
+        self.command += ev.text
+        self.console.set_last_line(self.command)
 
-    
+    def run_command(self):
+        cmd = self.command
+        self.command = ""
+        self.command_history.append(cmd)
+        self.interpreter(cmd)
