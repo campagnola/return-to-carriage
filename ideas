@@ -43,6 +43,8 @@ Mobs
     - Many are peaceful / avoid contact
     - May run away when hurt
     - May fight / avoid / help / react to other mobs
+    - May not notice you (depending on mob perception, your level of stealth, whether you stink, etc)
+         - "hide" command?  Maybe "try to be sneaky" mode?
 
 -------------------
 
@@ -120,7 +122,9 @@ Gameplay
             descriptions can be hierarchical -- terse descriptions can be expanded 
         one panel gives description of character state
         console for entering commands + event log
-        
+    - Pits / traps can sometimes be avoided, but this requires manual intervention from user and depends on player skill
+
+    
 ----------------------
 
 

@@ -4,7 +4,6 @@ import threading
 from PyQt4 import QtGui, QtCore
 import vispy.app
 import vispy.util.ptime as ptime
-from command import CommandThread
 
 
 class InputDispatcher(object):
@@ -115,8 +114,6 @@ class DefaultInputHandler(InputHandler):
         self.scene = scene
         InputHandler.__init__(self)
 
-        self.command = CommandThread(self)
-
         self.last_input_update = ptime.time()
         self.input_timer = vispy.app.Timer(start=True, connect=self.handle_input, interval=0.016)
 
@@ -161,13 +158,15 @@ class DefaultInputHandler(InputHandler):
     def key_pressed(self, ev):
         if ev.key == 'Escape':
             self.scene.quit()
-        if ev.key == 't':
-            self.command('take')
+        elif ev.key == 'Tab':
+            self.scene.toggle_command_mode()
+        elif ev.key == 't':
+            self.scene.command('take')
         elif ev.key == 'r':
-            self.command('read')
-        
-        self.keys.add(ev.key)
-        self.handle_input(None)
+            self.scene.command('read')
+        else:
+            self.keys.add(ev.key)
+            self.handle_input(None)
         
     def key_released(self, ev):
         try:
@@ -185,13 +184,10 @@ class CommandInputHandler(InputHandler):
         self.command_history = []
 
     def key_pressed(self, ev):
-        if ev.key == 'Escape':
-            self.scene.quit()
+        if ev.key in ['Escape', 'Tab']:
+            # pass on to default handler
+            return False
 
-        if ev.key == 'Tab':
-            # todo: visual cue
-            self.deactivate()
-            return
         if ev.key == 'Enter':
             self.run_command()
             return

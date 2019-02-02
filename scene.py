@@ -6,9 +6,9 @@ import vispy.util.ptime as ptime
 from PIL import Image
 
 from graphics import CharAtlas, Sprites, TextureMaskFilter, ShadowRenderer, Console
-from input import InputDispatcher, DefaultInputHandler
+from input import InputDispatcher, DefaultInputHandler, CommandInputHandler
 from player import Player
-
+from command import CommandInterpreter
 
 class Scene(object):
     """Central organizing class for managing UI, landscape, player, items, and mobs
@@ -19,9 +19,10 @@ class Scene(object):
         self.canvas = canvas
         
         # Setup input event handling
-        self.input_dispacher = InputDispatcher(canvas)
+        self.input_dispatcher = InputDispatcher(canvas)
         self.default_input_handler = DefaultInputHandler(self)
-        self.input_dispacher.add_handler(self.default_input_handler)
+        self.input_dispatcher.add_handler(self.default_input_handler)
+        self.command_mode = False
 
         # setup UI
         self.view = canvas.central_widget.add_view()
@@ -137,6 +138,17 @@ class Scene(object):
         self.console.write('Is anybody\n    there?')
         self.console.write(''.join([chr(i) for i in range(0x20,128)]))        
         #self.console.view.camera.rect = [-1, -1, 30, 3]
+
+        self.command_interpreter = CommandInterpreter(self)
+        self.cmd_input_handler = CommandInputHandler(self.console, self.command_interpreter)
+
+    def toggle_command_mode(self):
+        # todo: visual cue
+        self.command_mode = not self.command_mode
+        if self.command_mode:
+            self.cmd_input_handler.activate()
+        else:
+            self.cmd_input_handler.deactivate()
 
     def monster_moved(self, mon, old_pos):
         if old_pos is not None:
