@@ -29,6 +29,7 @@ class Player(object):
             if self.inventory[k] is None:
                 self.inventory[k] = item
                 item.location = (self, k)
+                self.scene.console.write("Taken: %s" % item.description)
                 return
         self.scene.console.write("For lack of another letter in the alphabet, you decline to take this item.")
 

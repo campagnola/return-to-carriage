@@ -139,8 +139,8 @@ class Scene(object):
         self.console.write(''.join([chr(i) for i in range(0x20,128)]))        
         #self.console.view.camera.rect = [-1, -1, 30, 3]
 
-        self.command_interpreter = CommandInterpreter(self)
-        self.cmd_input_handler = CommandInputHandler(self.console, self.command_interpreter)
+        self.command = CommandInterpreter(self)
+        self.cmd_input_handler = CommandInputHandler(self.console, self.command)
 
     def toggle_command_mode(self):
         # todo: visual cue

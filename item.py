@@ -22,6 +22,13 @@ class Item(object):
         self.location = location
 
     @property
+    def description(self):
+        """A short description of this item
+        """
+        # todo: include minimal detail, custom naming, etc.
+        return self.name
+
+    @property
     def location(self):
         return self._location
     
@@ -41,7 +48,7 @@ class Item(object):
             self.scene.items.setdefault(loc[1], [])
             self.scene.items[loc[1]].append(self)
             self.sprite.position = (loc[1][0], loc[1][1], -0.1)
-        elif isinstance(loc, Player):
+        elif isinstance(loc[0], Player):
             self.sprite.position = (float('nan'),) * 3
         else:
             raise Exception("Not sure what to do with location: %s" % str(loc))

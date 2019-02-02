@@ -48,17 +48,17 @@ class InputDispatcher(object):
         self.handlers.remove(handler)
 
     def gamepad_event(self, event):
-        for handler in self.handlers:
+        for handler in self.handlers[::-1]:
             if handler.gamepad_event(event) is True:
                 break        
 
     def key_pressed(self, event):
-        for handler in self.handlers:
+        for handler in self.handlers[::-1]:
             if handler.key_pressed(event) is True:
                 break        
 
     def key_released(self, event):
-        for handler in self.handlers:
+        for handler in self.handlers[::-1]:
             if handler.key_released(event) is True:
                 break        
 
@@ -76,11 +76,16 @@ class InputHandler(object):
 
     def activate(self):
         disp = InputDispatcher.dispatcher
-        if self not in disp.handlers:
+        if not self.active:
             disp.add_handler(self)
 
     def deactivate(self):
         InputDispatcher.dispatcher.remove_handler(self)
+
+    @property
+    def active(self):
+        disp = InputDispatcher.dispatcher
+        return self in disp.handlers
     
     def gamepad_event(self, event, state):
         """Called when the gamepad state has changed.
@@ -182,6 +187,15 @@ class CommandInputHandler(InputHandler):
         InputHandler.__init__(self)
         self.command = ""
         self.command_history = []
+        self.console_line_started = False
+
+    def activate(self):
+        InputHandler.activate(self)
+        self.update_prompt()
+
+    def deactivate(self):
+        InputHandler.deactivate(self)
+        self.clear_prompt()
 
     def key_pressed(self, ev):
         if ev.key in ['Escape', 'Tab']:
@@ -190,17 +204,68 @@ class CommandInputHandler(InputHandler):
 
         if ev.key == 'Enter':
             self.run_command()
-            return
+            return True
         
         # todo: command history up/down
         # todo: cursor left/right/bkspc/del/home/end
 
         s = ev.text
         self.command += ev.text
-        self.console.set_last_line(self.command)
+        self.update_prompt()
+        
+        return True
+
+    def update_prompt(self, cursor=True):
+        line = "> " + self.command
+        if cursor:
+            line += '_'
+        if not self.console_line_started:
+            self.console.write("\n" + line)
+            self.console_line_started = True
+        else:
+            self.console.set_last_line(line)
+
+    def clear_prompt(self):
+        self.command = ""
+        if self.console_line_started:
+            self.console.remove_last_line()
+            self.console.remove_last_line()
+            self.console_line_started = False
 
     def run_command(self):
         cmd = self.command
-        self.command = ""
+        self.clear_prompt()
         self.command_history.append(cmd)
         self.interpreter(cmd)
+        if self.active:
+            self.update_prompt()
+
+
+class InputThread(QtCore.QThread):
+    """Thread for polling joystick input
+    """
+    new_event = QtCore.pyqtSignal(object, object)
+    
+    def __init__(self, device=None):
+        QtCore.QThread.__init__(self)
+        if device is None:
+            gp = inputs.devices.gamepads
+            if len(gp) == 0:
+                print "No gamepads found."
+                return
+            self.dev = gp[0]
+        else:
+            self.dev = device
+            
+        self.lock = threading.Lock()
+        
+        self.start()
+        
+    def run(self):
+        state = {}
+        while True:
+            for ev in self.dev.read():
+                if ev.ev_type not in ['Absolute', 'Key']:
+                    continue
+                state[ev.code] = ev.state
+                self.new_event.emit(ev, state.copy())

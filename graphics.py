@@ -1048,10 +1048,15 @@ class Console(object):
         self.lines[-1] = line
         self.update_text()
 
+    def remove_last_line(self):
+        self.lines.pop(-1)
+        self.update_text()
+
     def update_text(self):
         sprites = np.zeros(self.shape, dtype='uint8')
         sprites[:] = ord(' ')
         for i in range(min(self.shape[0], len(self.lines))):
+            # todo: line wrapping
             line = np.fromstring(self.lines[-i-1].encode('ascii'), dtype='ubyte')
             sprites[i, :len(line)] = line[:self.shape[1]]
         self.txt_sprites.sprite = sprites - 0x20

@@ -1,3 +1,5 @@
+import re
+from collections import OrderedDict
 try:
     from queue import Queue
 except ImportError:
@@ -40,6 +42,7 @@ class CommandInterpreter(object):
             return
 
         try:
+            self.scene.console.write("\n> %s" % command)
             response = fn(args)
             if response is not None:
                 self.scene.console.write(response)
@@ -57,21 +60,22 @@ class CommandInterpreter(object):
                 # maybe offer up a menu
                 self.scene.console.write("You feel the urge to hoard:")
                 return self._partial_item_menu('take', items) 
+            take_items = items
         else:
             # see if we can figure out which item(s) are wanted.
-            items = []
+            take_items = []
             for name in args:
                 possible_items = self._items_matching(name, items)
-                if possible_items == 0:
+                if len(possible_items) == 0:
                     if len(name) == 1:
                         return 'You double-check, but %s is definitely not on the menu.' % name
                     else:
                         return 'You thought there was a "%s" around here, but perhaps that was just your imagination.' % name
-                if possible_items > 1:
+                if len(possible_items) > 1:
                     return 'Despite the variety of "%s" to choose from, indecision paralyzes you and you resolve to try again later.' % name
-                items.append(possible_items[0])
+                take_items.append(possible_items[0])
         
-        for item in items:
+        for item in take_items:
             try:
                 self.player.take(item)
             except ActionError as exc:
