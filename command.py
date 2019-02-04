@@ -6,6 +6,7 @@ except ImportError:
     from Queue import Queue
 from PyQt4 import QtCore
 from errors import ActionError
+from input import MenuInputHandler
 
 
 class CommandInterpreter(object):
@@ -125,3 +126,8 @@ class CommandInterpreter(object):
             letter = chr(97 + i)
             self.scene.console.write("  %s: %s" % (letter, item.description))
             self._menu_items[letter] = item
+
+        if not self.scene.command_mode:
+            self._menu_input_handler = MenuInputHandler(self)
+            self._menu_input_handler.activate()
+

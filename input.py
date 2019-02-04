@@ -1,4 +1,4 @@
-import sys
+import sys, re
 import inputs
 import threading
 from PyQt4 import QtGui, QtCore
@@ -49,16 +49,22 @@ class InputDispatcher(object):
 
     def gamepad_event(self, event):
         for handler in self.handlers[::-1]:
+            if handler not in self.handlers:
+                continue
             if handler.gamepad_event(event) is True:
                 break        
 
     def key_pressed(self, event):
         for handler in self.handlers[::-1]:
+            if handler not in self.handlers:
+                continue
             if handler.key_pressed(event) is True:
                 break        
 
     def key_released(self, event):
         for handler in self.handlers[::-1]:
+            if handler not in self.handlers:
+                continue
             if handler.key_released(event) is True:
                 break        
 
@@ -241,6 +247,23 @@ class CommandInputHandler(InputHandler):
         self.interpreter(cmd)
         if self.active:
             self.update_prompt()
+
+
+class MenuInputHandler(InputHandler):
+    """For handling input during normal (non-command) play when a menu of items is presented to the user.
+    """
+    def __init__(self, interpreter):
+        self.interpreter = interpreter
+        InputHandler.__init__(self)
+        
+    def key_pressed(self, ev):
+        if re.match(r'[a-zA-Z]$', ev.text) is not None:
+            self.interpreter(ev.text)
+        else:
+            self.interpreter.cancel()
+
+        self.deactivate()        
+        return True
 
 
 class InputThread(QtCore.QThread):
