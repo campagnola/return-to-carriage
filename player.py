@@ -34,8 +34,9 @@ class Player(object):
         self.scene.console.write("For lack of another letter in the alphabet, you decline to take this item.")
 
     def drop(self, item):
-        self.inventory.remove(item)
-        item.location = self.position
+        self.inventory.pop(item.location[1])
+        item.location = (self.scene, tuple(self.position))
+        self.scene.console.write("Dropped: %s" % item.description)
 
     def read_item(self, item=None):
         if item is None:

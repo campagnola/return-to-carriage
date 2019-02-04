@@ -167,6 +167,8 @@ class DefaultInputHandler(InputHandler):
             self.scene.toggle_command_mode()
         elif ev.key == 't':
             self.scene.command('take')
+        elif ev.key == 'd':
+            self.scene.command('drop')
         elif ev.key == 'r':
             self.scene.command('read')
         else:

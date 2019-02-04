@@ -81,6 +81,30 @@ class CommandInterpreter(object):
             except ActionError as exc:
                 return exc.reason
 
+    def drop(self, args):
+        items = [i for i in list(self.player.inventory.values()) if i is not None]
+        if len(args) == 0:
+            self.scene.console.write("Drop which item?")
+            return self._partial_item_menu('drop', items)
+
+        drop_items = []
+        for name in args:
+            possible_items = self._items_matching(name, items)
+            if len(possible_items) == 0:
+                if len(name) == 1:
+                    return 'You double-check, but %s is definitely not on the menu.' % name
+                else:
+                    return 'You thought there was a "%s" around here, but perhaps that was just your imagination.' % name
+            if len(possible_items) > 1:
+                return 'Despite the variety of "%s" to choose from, indecision paralyzes you and you resolve to try again later.' % name
+            drop_items.append(possible_items[0])
+
+        for item in drop_items:
+            try:
+                self.player.drop(item)
+            except ActionError as exc:
+                return exc.reason
+
     def _items_matching(self, search, items):
         match = []
         if len(search) == 1:
@@ -95,9 +119,9 @@ class CommandInterpreter(object):
         return match
 
     def _partial_item_menu(self, partial, items):
-        self.partial = partial
+        self.partial = partial + " "
         self._menu_items = OrderedDict()
         for i, item in enumerate(items):
             letter = chr(97 + i)
-            self.scene.console.write("%s: %s" % (letter, item.description))
+            self.scene.console.write("  %s: %s" % (letter, item.description))
             self._menu_items[letter] = item
