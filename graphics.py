@@ -1,6 +1,6 @@
 
 import numpy as np
-from PyQt4 import QtGui, QtCore
+from PyQt5 import QtGui, QtCore
 import vispy.visuals, vispy.scene, vispy.gloo
 from vispy.visuals.shaders import ModularProgram, Function, Varying
 from vispy.visuals.transforms import STTransform, PolarTransform, NullTransform

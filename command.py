@@ -4,7 +4,7 @@ try:
     from queue import Queue
 except ImportError:
     from Queue import Queue
-from PyQt4 import QtCore
+from PyQt5 import QtCore
 from errors import ActionError
 from input import MenuInputHandler
 

@@ -5,7 +5,7 @@ try:
 except ImportError:
     pass
 
-from PyQt4 import QtGui, QtCore
+from PyQt5 import QtGui, QtCore
 import vispy.scene, vispy.app
 
 from scene import Scene
@@ -14,8 +14,6 @@ from item import Item
 
 
 if __name__ == '__main__':
-    import user
-    
     canvas = vispy.scene.SceneCanvas()
     canvas.show()
     canvas.size = 1400,900

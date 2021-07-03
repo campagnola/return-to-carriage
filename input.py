@@ -1,7 +1,7 @@
 import sys, re
 import inputs
 import threading
-from PyQt4 import QtGui, QtCore
+from PyQt5 import QtGui, QtCore
 import vispy.app
 import vispy.util.ptime as ptime
 
@@ -276,7 +276,7 @@ class InputThread(QtCore.QThread):
         if device is None:
             gp = inputs.devices.gamepads
             if len(gp) == 0:
-                print "No gamepads found."
+                print("No gamepads found.")
                 return
             self.dev = gp[0]
         else:
