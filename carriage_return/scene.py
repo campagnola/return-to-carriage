@@ -70,9 +70,9 @@ class Scene(object):
         # add player
         self.player = Player(self)
 
+        self._need_los_update = True
+
         self.move_player([7, 7])
-        self.update_sight()
-        
         
         self.console_grid = self.canvas.central_widget.add_grid()
 
@@ -107,6 +107,8 @@ class Scene(object):
         self.command = CommandInterpreter(self)
         self.cmd_input_handler = CommandInputHandler(self.console, self.command)
 
+        self.canvas.events.draw.connect(self.on_draw)
+
     def toggle_command_mode(self):
         # todo: visual cue
         self.command_mode = not self.command_mode
@@ -122,36 +124,7 @@ class Scene(object):
         
     def move_player(self, pos):
         self.player.position = pos
-        self.update_sight()
-        
-        los = self.los_renderer.render(pos)
-        
-        #mask = np.where(los > self.memory, los, self.memory)
-        #self.memory[..., 2] = mask[..., 2]
-        #self.memory_tex.set_data(mask)
-
-        self._update_camera_target()
-        
-        if self.debug_line_of_sight:
-            if not hasattr(self, 'sight_plot'):
-                import pyqtgraph as pg
-                #self.sight_plot = pg.plot()
-                #self.sight_plot.setYRange(0, 20)
-                self.sight_img = pg.image()
-                self.sight_img.imageItem.setBorder('w')
-                #self.sight_img.resize(1200, 200)
-                #self.sight_img.setLevels(0, 10)
-            #theta = np.linspace(-np.pi, np.pi, img.shape[1])
-            #self.sight_plot.plot(theta, img[img.shape[0]//2], clear=True)
-            #self.sight_img.setImage(img.transpose(1, 0), autoLevels=False)
-            self.sight_img.setImage(img.transpose(1, 0), autoLevels=False)
-
-        if self.debug_los_tex:
-            if not hasattr(self, 'los_tex_imv'):
-                import pyqtgraph as pg
-                self.los_tex_imv =  pg.image()
-                self.los_tex_imv.imageItem.setBorder('w')
-            self.los_tex_imv.setImage(los.transpose(1, 0, 2))
+        self._need_los_update = True
 
         self.end_turn()
         
@@ -196,10 +169,6 @@ class Scene(object):
         self.console.write(message)
         while True:
             ev = get_keypress()
- 
-    def update_sight(self):
-        #self.sight_filter.set_player_pos(self.player.position[:2])
-        pass        
 
     def quit(self):
         self.canvas.close()
@@ -242,3 +211,43 @@ class Scene(object):
         cr.pos = nrv[:2]
         cr.size = nrv[2:]
         self.view.camera.rect = cr
+
+    def on_draw(self, ev):
+        self.update_los()
+
+    def update_los(self):
+        
+        if not self._need_los_update:
+            return
+
+        los = self.los_renderer.render(self.player.position)
+        
+        #mask = np.where(los > self.memory, los, self.memory)
+        #self.memory[..., 2] = mask[..., 2]
+        #self.memory_tex.set_data(mask)
+
+        self._update_camera_target()
+        
+        if self.debug_line_of_sight:
+            if not hasattr(self, 'sight_plot'):
+                import pyqtgraph as pg
+                #self.sight_plot = pg.plot()
+                #self.sight_plot.setYRange(0, 20)
+                self.sight_img = pg.image()
+                self.sight_img.imageItem.setBorder('w')
+                #self.sight_img.resize(1200, 200)
+                #self.sight_img.setLevels(0, 10)
+            #theta = np.linspace(-np.pi, np.pi, img.shape[1])
+            #self.sight_plot.plot(theta, img[img.shape[0]//2], clear=True)
+            #self.sight_img.setImage(img.transpose(1, 0), autoLevels=False)
+            self.sight_img.setImage(img.transpose(1, 0), autoLevels=False)
+
+        if self.debug_los_tex:
+            if not hasattr(self, 'los_tex_imv'):
+                import pyqtgraph as pg
+                self.los_tex_imv =  pg.image()
+                self.los_tex_imv.imageItem.setBorder('w')
+            self.los_tex_imv.setImage(los.transpose(1, 0, 2))
+
+        self._need_los_update = False
+

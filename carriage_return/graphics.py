@@ -844,10 +844,8 @@ class ShadowRenderer(object):
         
         # for render to texture
         self.texture = vispy.gloo.Texture2D(shape=self.size+(4,), format='rgba', interpolation='linear', wrapping='repeat')
-        print("Create FBO")
         self.fbo = vispy.gloo.FrameBuffer(color=self.texture, 
                                           depth=vispy.gloo.RenderBuffer(self.size))
-        print("Create FBO done")
         
         # For render / read to CPU
         #self.fbo = vispy.gloo.FrameBuffer(color=vispy.gloo.RenderBuffer(self.size), 
@@ -962,9 +960,7 @@ class ShadowRenderer(object):
             vispy.gloo.clear(color=(1, 1, 1))
             vispy.gloo.set_viewport(0, 0, *self.size[::-1])
             #vispy.gloo.set_state(cull_face=True)
-            print("Draw shadow ...")
             self.program.draw(mode='points', check_error=True)
-            print("Draw shadow done")
 
             vispy.gloo.set_viewport(0, 0, *self.scene.canvas.size)
             if read:
