@@ -58,6 +58,7 @@ class Scene(object):
         
         ms = self.maze.shape
 
+        self.shadow_renderer = ShadowRenderer(self, opacity, supersample=1)
         self.light_texture =  vispy.gloo.Texture2D(shape=self.maze.shape+(4,), format='rgba', interpolation='linear', wrapping='repeat')
         self.light_filter = TextureMaskFilter(self.light_texture, tr, scale=(1./ms[1], 1./ms[0]))
         self.txt.attach(self.light_filter)
@@ -265,4 +266,6 @@ class Scene(object):
                     continue
                 light += item.lightmap()
                 
-        self.light_texture.set_data(light)
+        log_light = np.log(light)
+        norm_light = log_light / log_light.max()
+        self.light_texture.set_data(norm_light)

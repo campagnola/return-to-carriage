@@ -11,11 +11,18 @@ class Item(object):
     takable = False
     fg_color = (0, 0, 0.8, 1)
     bg_color = None
+    light_source = False
+    light_color = (10, 10, 10)
 
     def __init__(self, location, scene):
         self._location = (None, None)
         self.scene = scene
-        
+
+        # for handling light sources
+        self._shadow_map = None
+        self._unscaled_light_map = None
+        self._light_map = None
+
         self.sprite = scene.txt.add_sprites((1,))        
         self.sprite.fgcolor = self.fg_color
         self.sprite.sprite = scene.atlas[self.char]
@@ -71,6 +78,30 @@ class Item(object):
             loc.lose_item(self)
         self.location = None
 
+    def shadow_map(self):
+        if self._shadow_map is None:
+            self._shadow_map = self.scene.shadow_renderer.render(self.location[1], read=True)[..., :3]
+            assert self._shadow_map is not None
+        return self._shadow_map
+
+    def lightmap(self):
+        if self._unscaled_light_map is None:
+            scene = self.location[0]
+            x,y = self.location[1]
+
+            maze_shape = scene.maze.shape
+            maze_pos = np.mgrid[0:maze_shape[0], 0:maze_shape[1]].transpose(1, 2, 0)
+            dist2 = ((maze_pos - np.array([[[y, x]]])) ** 2).sum(axis=2) + 0.5  # 0.5 enforces height
+
+            self._unscaled_light_map = self.shadow_map() / dist2[:, :, None]
+
+        if self._light_map is None:
+
+            self._light_map = self._unscaled_light_map * np.array(self.light_color)[None, None, :]
+
+        return self._light_map
+
+
 
 
 class Scroll(Item):
@@ -96,14 +127,6 @@ class Torch(Item):
     light_source = True
     mass = 0.2
     fg_color = (1, 0.8, 0.2, 1)
-
-    def lightmap(self):
-        scene = self.location[0]
-        x,y = self.location[1]
-        lm = np.zeros(scene.maze.shape + (3,), dtype='float32')
-        lm[y-8:y+8, x-8:x+8] = (1, 1, 0.5)
-
-        return lm
 
 
 
