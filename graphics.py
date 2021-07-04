@@ -276,7 +276,7 @@ class SpritesVisual(vispy.visuals.Visual):
         """Expand to allow more sprites, return a SpriteData instance with the specified shape.
         """
         if not isinstance(shape, tuple):
-            raise TypeError("shape must be a tuple")
+            raise TypeError("shape must be a tuple (got %r)" % shape)
         n = np.product(shape)
         i = self._resize(self.position.shape[0] + n)
         return SpriteData(self, i, shape)
@@ -817,6 +817,26 @@ class LOSTextureRenderer(object):
         return img
     
 
+class CPUShadowRenderer:
+    def __init__(self, scene, opacity, supersample=1):
+        self.scene = scene
+        self.size = (opacity.shape[0] * supersample, opacity.shape[1] * supersample)
+        self.supersample = supersample
+
+        # for render to texture
+        self.texture = vispy.gloo.Texture2D(shape=self.size+(4,), format='rgba', interpolation='linear', wrapping='repeat')
+
+    def render(self, pos, read=False):
+        p1 = (((np.array(pos) + 0.5) * self.supersample) - 15).astype(int)
+        p2 = p1 + 30
+
+        img = np.zeros(self.size + (4,), dtype='ubyte')
+        img[..., 3] = 255
+        img[p1[1]:p2[1], p1[0]:p2[0], :3] = 255
+        self.texture.set_data(img)
+        
+        return img
+        
 
 class ShadowRenderer(object):
     """For computing 2D shadows
@@ -827,8 +847,10 @@ class ShadowRenderer(object):
         
         # for render to texture
         self.texture = vispy.gloo.Texture2D(shape=self.size+(4,), format='rgba', interpolation='linear', wrapping='repeat')
+        print("Create FBO")
         self.fbo = vispy.gloo.FrameBuffer(color=self.texture, 
                                           depth=vispy.gloo.RenderBuffer(self.size))
+        print("Create FBO done")
         
         # For render / read to CPU
         #self.fbo = vispy.gloo.FrameBuffer(color=vispy.gloo.RenderBuffer(self.size), 
@@ -931,8 +953,8 @@ class ShadowRenderer(object):
         self.program['opacity'] = vispy.gloo.Texture2D(opacity, format='luminance', interpolation='nearest')
         self.program['opacity_size'] = opacity.shape[:2][::-1]
         
-        self.program['ij'] = np.mgrid[0:opacity.shape[1], 0:opacity.shape[0]].astype('float32').transpose(1, 2, 0)
-        
+        corner_coords = np.mgrid[0:opacity.shape[1], 0:opacity.shape[0]].astype('float32').transpose(1, 2, 0)
+        self.program['ij'] = corner_coords.copy()  # copy to prevent warning about discontiguous data
         
     def render(self, pos, read=False):
         """
@@ -943,7 +965,10 @@ class ShadowRenderer(object):
             vispy.gloo.clear(color=(1, 1, 1))
             vispy.gloo.set_viewport(0, 0, *self.size[::-1])
             #vispy.gloo.set_state(cull_face=True)
+            print("Draw shadow ...")
             self.program.draw(mode='points', check_error=True)
+            print("Draw shadow done")
+
             vispy.gloo.set_viewport(0, 0, *self.scene.canvas.size)
             if read:
                 img = self.fbo.read()[::-1]

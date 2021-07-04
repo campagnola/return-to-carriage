@@ -3,12 +3,14 @@ import sys
 import numpy as np
 import vispy.scene, vispy.app
 import vispy.util.ptime as ptime
-from PIL import Image
 
-from graphics import CharAtlas, Sprites, TextureMaskFilter, ShadowRenderer, Console
+from graphics import CharAtlas, Sprites, TextureMaskFilter, CPUShadowRenderer, Console
 from input import InputDispatcher, DefaultInputHandler, CommandInputHandler
 from player import Player
+from maze import Maze, MazeSprites
+from blocktypes import BlockTypes
 from command import CommandInterpreter
+
 
 class Scene(object):
     """Central organizing class for managing UI, landscape, player, items, and mobs
@@ -44,24 +46,13 @@ class Scene(object):
         self.txt = Sprites(self.atlas, sprite_size=(1, 1), point_cs='visual', parent=self.view.scene)
         
         # create maze
-        path = 1
-        wall = 2
-        maze = np.array(Image.open('level1.png'))[::-1,:,0]
-        maze[maze>0] = wall
-        maze[maze==0] = path
-        
-        self.maze = maze
-        shape = maze.shape
-        self.path = path
-        self.wall = wall
-        
-        self.maze_sprites = self.txt.add_sprites(shape)
-        self.maze_sprites.sprite = self.maze
+        self.maze = Maze.load_image('level1.png')
+        self.maze_sprites = MazeSprites(self.maze, self.txt)
 
         # line-of-sight computation
-        self.opacity = (self.maze == wall).astype('float32')
+        opacity = self.maze.opacity.astype('float32')
         ss = 4
-        self.los_renderer = ShadowRenderer(self, self.opacity, supersample=ss)
+        self.los_renderer = CPUShadowRenderer(self, opacity, supersample=ss)
         
         ms = self.maze.shape
         #self.memory = np.zeros((ms[0]*ss, ms[1]*ss, 4), dtype='ubyte')
@@ -72,28 +63,6 @@ class Scene(object):
         #self.sight_filter = TextureMaskFilter(self.memory_tex, tr, scale=(1./ms[1], 1./ms[0]))
         self.sight_filter = TextureMaskFilter(self.los_renderer.texture, tr, scale=(1./ms[1], 1./ms[0]))
         self.txt.attach(self.sight_filter)
-        
-        # set positions
-        pos = np.zeros(shape + (3,), dtype='float32')
-        pos[...,:2] = np.mgrid[0:shape[1], 0:shape[0]].transpose(2, 1, 0)
-        self.maze_sprites.position = pos
-
-        # set colors
-        sprite_colors = np.array([
-            [[0.0, 0.0, 0.0, 0.0], [0.0, 0.0, 0.0, 0.0]],  # nothing
-            [[0.2, 0.2, 0.2, 1.0], [0.05, 0.05, 0.05, 1.0]],  # path
-            [[0.0, 0.0, 0.0, 1.0], [0.2, 0.2, 0.2, 1.0]],  # wall
-        ], dtype='float32')
-        color = sprite_colors[self.maze]
-        self.fgcolor = color[...,0,:]
-        self.bgcolor = color[...,1,:]
-        
-        # randomize wall color a bit
-        rock = np.random.normal(scale=0.01, size=shape + (1,))
-        walls = self.maze == 2
-        n_walls = walls.sum()
-        self.bgcolor[...,:3][walls] += rock[walls]
-
 
         # track items by location
         self.items = {}
@@ -106,7 +75,6 @@ class Scene(object):
 
         self.move_player([7, 7])
         self.update_sight()
-        self.update_maze()
         
         
         self.console_grid = self.canvas.central_widget.add_grid()
@@ -158,7 +126,6 @@ class Scene(object):
     def move_player(self, pos):
         self.player.position = pos
         self.update_sight()
-        #self.update_maze()
         
         los = self.los_renderer.render(pos)
         
@@ -192,7 +159,7 @@ class Scene(object):
         self.end_turn()
         
     def end_turn(self):
-        for mlist in self.monsters.values():
+        for mlist in list(self.monsters.values()):
             for m in mlist:
                 m.take_turn()
 
@@ -205,12 +172,12 @@ class Scene(object):
         pos = self.player.position
         j, i = newpos
         j0, i0 = self.player.position
-        if self.maze[i, j] == self.path:
+        if self.maze.blocktype_at(i, j)['walkable']:
             self.move_player(newpos)
-        elif self.maze[i0, j] == self.path:
+        elif self.maze.blocktype_at(i0, j)['walkable']:
             newpos[1] = i0
             self.move_player(newpos)
-        elif self.maze[i, j0] == self.path:
+        elif self.maze.blocktype_at(i, j0)['walkable']:
             newpos[0] = j0
             self.move_player(newpos)
 
@@ -232,18 +199,10 @@ class Scene(object):
         self.console.write(message)
         while True:
             ev = get_keypress()
-            
-                
-
  
     def update_sight(self):
         #self.sight_filter.set_player_pos(self.player.position[:2])
         pass        
-        
-    def update_maze(self):
-        #mem = np.clip(self.memory[...,None], 0, 1)
-        self.maze_sprites.fgcolor = self.fgcolor# * mem
-        self.maze_sprites.bgcolor = self.bgcolor# * mem
 
     def quit(self):
         self.canvas.close()
