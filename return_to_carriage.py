@@ -8,9 +8,9 @@ except ImportError:
 from PyQt5 import QtGui, QtCore
 import vispy.scene, vispy.app
 
-from scene import Scene
-from monster import Monster
-from item import Item
+from carriage_return.scene import Scene
+from carriage_return.monster import Monster
+from carriage_return.item import Item
 
 
 if __name__ == '__main__':

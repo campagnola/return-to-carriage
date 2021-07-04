@@ -1,12 +1,9 @@
 import re
 from collections import OrderedDict
-try:
-    from queue import Queue
-except ImportError:
-    from Queue import Queue
+from queue import Queue
 from PyQt5 import QtCore
-from errors import ActionError
-from input import MenuInputHandler
+from .errors import ActionError
+from .input import MenuInputHandler
 
 
 class CommandInterpreter(object):

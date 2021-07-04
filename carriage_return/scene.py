@@ -4,12 +4,12 @@ import numpy as np
 import vispy.scene, vispy.app
 import vispy.util.ptime as ptime
 
-from graphics import CharAtlas, Sprites, TextureMaskFilter, CPUShadowRenderer, Console
-from input import InputDispatcher, DefaultInputHandler, CommandInputHandler
-from player import Player
-from maze import Maze, MazeSprites
-from blocktypes import BlockTypes
-from command import CommandInterpreter
+from .graphics import CharAtlas, Sprites, TextureMaskFilter, CPUShadowRenderer, Console
+from .input import InputDispatcher, DefaultInputHandler, CommandInputHandler
+from .player import Player
+from .maze import Maze, MazeSprites
+from .blocktypes import BlockTypes
+from .command import CommandInterpreter
 
 
 class Scene(object):

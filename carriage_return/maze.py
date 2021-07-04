@@ -1,6 +1,6 @@
 import numpy as np
 from PIL import Image
-from blocktypes import BlockTypes
+from .blocktypes import BlockTypes
 
 
 class Maze:

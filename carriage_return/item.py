@@ -79,4 +79,4 @@ class Scroll(Item):
         self.destroy()
         
 
-from player import Player
+from .player import Player
