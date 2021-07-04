@@ -126,6 +126,8 @@ class Scene(object):
         self.player.position = pos
         self._need_los_update = True
 
+        self._update_camera_target()
+
         self.end_turn()
         
     def end_turn(self):
@@ -225,8 +227,6 @@ class Scene(object):
         #mask = np.where(los > self.memory, los, self.memory)
         #self.memory[..., 2] = mask[..., 2]
         #self.memory_tex.set_data(mask)
-
-        self._update_camera_target()
         
         if self.debug_line_of_sight:
             if not hasattr(self, 'sight_plot'):

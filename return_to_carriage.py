@@ -9,7 +9,7 @@ import vispy.scene, vispy.app
 
 from carriage_return.scene import Scene
 from carriage_return.monster import Monster
-from carriage_return.item import Item
+from carriage_return.item import Scroll, Torch
 
 
 if __name__ == '__main__':
@@ -19,6 +19,7 @@ if __name__ == '__main__':
     
     scene = Scene(canvas)
 
-    scroll = Item(location=(scene, (5, 5)), scene=scene)
+    scroll = Scroll(location=(scene, (5, 5)), scene=scene)
+    torch = Torch(location=(scene, (17, 12)), scene=scene)
     yeti = Monster(position=(8, 40), scene=scene)
     

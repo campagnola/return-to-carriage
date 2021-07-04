@@ -9,17 +9,21 @@ class Item(object):
     mass = 0.0   # in kg
     readable = False
     takable = False
+    fg_color = (0, 0, 0.8, 1)
+    bg_color = None
 
     def __init__(self, location, scene):
         self._location = (None, None)
         self.scene = scene
         
         self.sprite = scene.txt.add_sprites((1,))        
-        self.sprite.fgcolor = (0, 0, 0.6, 1)
-        self.sprite.bgcolor = (0, 0, 0, 1)
+        self.sprite.fgcolor = self.fg_color
         self.sprite.sprite = scene.atlas[self.char]
-        
+
         self.location = location
+
+    def _maze_bg_color(self):
+        return self.location[0].maze.bg_color[self.location[1]]
 
     @property
     def description(self):
@@ -53,6 +57,9 @@ class Item(object):
         else:
             raise Exception("Not sure what to do with location: %s" % str(loc))
 
+        self.sprite.bgcolor = self.bg_color or self._maze_bg_color()
+
+
     def destroy(self):
         """Remove this item from the game.
         """
@@ -71,12 +78,30 @@ class Scroll(Item):
     name = "scroll of infinite recursion"
     char = u'次'
     readable = True
-    takable = True
+    takeable = True
+    light_source = False
     mass = 0.05
 
     def read(self, reader):
         self.scene.write("Unfortunately, you never learned to read. The scroll nevertheless appreciates your effort and self-destructs out of pity.") 
         self.destroy()
-        
+
+
+class Torch(Item):
+
+    name = "torch"
+    char = 't'
+    readable = False
+    takeable = True
+    light_source = True
+    mass = 0.2
+    fg_color = (1, 1, 0, 1)
+
+
+
+
 
 from .player import Player
+
+
+
