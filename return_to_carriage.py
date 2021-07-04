@@ -5,7 +5,6 @@ try:
 except ImportError:
     pass
 
-from PyQt5 import QtGui, QtCore
 import vispy.scene, vispy.app
 
 from carriage_return.scene import Scene
@@ -16,7 +15,7 @@ from carriage_return.item import Item
 if __name__ == '__main__':
     canvas = vispy.scene.SceneCanvas()
     canvas.show()
-    canvas.size = 1400,900
+    canvas.size = 1400, 900
     
     scene = Scene(canvas)
 

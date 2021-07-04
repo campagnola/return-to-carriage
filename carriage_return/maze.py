@@ -1,4 +1,5 @@
 import numpy as np
+import vispy
 from PIL import Image
 from .blocktypes import BlockTypes
 
@@ -56,11 +57,44 @@ class Maze:
         maze_blocks[maze_blocks==0] = blocktypes.id_of('path')
         return cls(maze_blocks, blocktypes)
 
+    def add_sprites(self, char_atlas, txt):
+        self.sprites = MazeSprites(self, char_atlas, txt)
+
+    def opaque_geometry(self):
+        """Return a list of vertex loops defining the boundaries of objects that block line-of-sight.
+        """
+        m = self._opaque_geometry_mask()
+        return vispy.geometry.isocurve.isocurve(m.astype(float), level=0.5, connected=True)
+
+    def _opaque_geometry_mask(self):
+        opaque = self.opacity > 0.5
+        padded = np.zeros((opaque.shape[0] + 2, opaque.shape[1] + 2), dtype=bool)
+        padded[1:-1, 1:-1] = opaque
+        opaque_mask = np.empty((opaque.shape[0] * 3, opaque.shape[1] * 3), dtype=bool)
+
+        opaque_mask[1::3, 1::3] = opaque
+
+        opaque_mask[0::3, 1::3] = padded[:-2,  1:-1] & opaque
+        opaque_mask[2::3, 1::3] = padded[2:,   1:-1] & opaque
+        opaque_mask[1::3, 0::3] = padded[1:-1,  :-2] & opaque
+        opaque_mask[1::3, 2::3] = padded[1:-1,   2:] & opaque
+
+        opaque_mask[0::3, 0::3] = padded[:-2, :-2] & opaque_mask[0::3, 1::3] & opaque_mask[1::3, 0::3]
+        opaque_mask[2::3, 0::3] = padded[2:,  :-2] & opaque_mask[2::3, 1::3] & opaque_mask[1::3, 0::3]
+        opaque_mask[0::3, 2::3] = padded[:-2,  2:] & opaque_mask[0::3, 1::3] & opaque_mask[1::3, 2::3]
+        opaque_mask[2::3, 2::3] = padded[2:,   2:] & opaque_mask[2::3, 1::3] & opaque_mask[1::3, 2::3]
+
+        return opaque_mask
+        
+
 
 class MazeSprites:
-    def __init__(self, maze, txt):
+    def __init__(self, maze, char_atlas, txt):
         self._txt = txt
         self._maze = maze
+        self._char_atlas = char_atlas
+        char_atlas.add_chars(maze.blocktypes.all_chars)
+
         self.sprites = txt.add_sprites(maze.shape)
         self.sprites.sprite = maze.blocks
 

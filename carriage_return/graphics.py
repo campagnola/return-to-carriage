@@ -1,6 +1,5 @@
-
 import numpy as np
-from PyQt5 import QtGui, QtCore
+from PyQt5 import QtGui
 import vispy.visuals, vispy.scene, vispy.gloo
 from vispy.visuals.shaders import ModularProgram, Function, Varying
 from vispy.visuals.transforms import STTransform, PolarTransform, NullTransform
@@ -22,8 +21,6 @@ class SpritesVisual(vispy.visuals.Visual):
         - GLSL 120 drawing point_sprites
             map to sprite cs, set corners -> map to canvas, set point size -> map to render
         - GLSL 150+ with geometry shader converting points into quads
-    
-    
     
     """
     vertex_shader_2 = """

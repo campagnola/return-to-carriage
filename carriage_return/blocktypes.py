@@ -21,7 +21,6 @@ _default_blocktypes = np.array([
 ], dtype=blocktype_dtype)
 
 
-
 class BlockTypes:
     def __init__(self, bt_array=None):
         self.data = (bt_array or _default_blocktypes).copy()

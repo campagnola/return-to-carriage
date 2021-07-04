@@ -4,11 +4,10 @@ import numpy as np
 import vispy.scene, vispy.app
 import vispy.util.ptime as ptime
 
-from .graphics import CharAtlas, Sprites, TextureMaskFilter, CPUShadowRenderer, Console
+from .graphics import CharAtlas, Sprites, TextureMaskFilter, CPUShadowRenderer, ShadowRenderer, Console
 from .input import InputDispatcher, DefaultInputHandler, CommandInputHandler
 from .player import Player
 from .maze import Maze, MazeSprites
-from .blocktypes import BlockTypes
 from .command import CommandInterpreter
 
 
@@ -36,30 +35,28 @@ class Scene(object):
         self._last_camera_update = ptime.time()
         self.scroll_timer = vispy.app.Timer(start=True, connect=self._scroll_camera, interval=0.016)        
         
-        # create maze
-        self.maze = Maze.load_image('level1.png')
-
         # generate a texture for each character we need
         self.atlas = CharAtlas()
-        self.atlas.add_chars(self.maze.blocktypes.all_chars)
 
         # create sprites visual
         self.txt = Sprites(self.atlas, sprite_size=(1, 1), point_cs='visual', parent=self.view.scene)
 
-        # Add sprites for drawing maze
-        self.maze_sprites = MazeSprites(self.maze, self.txt)
+        # create maze
+        self.maze = Maze.load_image('level1.png')
+
+        # add sprites for drawing maze
+        self.maze.add_sprites(self.atlas, self.txt)
 
         # line-of-sight computation
         opacity = self.maze.opacity.astype('float32')
-        ss = 4
-        self.los_renderer = CPUShadowRenderer(self, opacity, supersample=ss)
+        self.los_renderer = ShadowRenderer(self, opacity, supersample=4)
         
-        ms = self.maze.shape
         #self.memory = np.zeros((ms[0]*ss, ms[1]*ss, 4), dtype='ubyte')
         #self.memory[...,3] = 1
         #self.memory_tex = vispy.gloo.Texture2D(self.memory, interpolation='linear')
         tr = self.txt.transforms.get_transform('framebuffer', 'visual')
         
+        ms = self.maze.shape
         #self.sight_filter = TextureMaskFilter(self.memory_tex, tr, scale=(1./ms[1], 1./ms[0]))
         self.sight_filter = TextureMaskFilter(self.los_renderer.texture, tr, scale=(1./ms[1], 1./ms[0]))
         self.txt.attach(self.sight_filter)
