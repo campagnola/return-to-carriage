@@ -51,3 +51,7 @@ class BlockTypes:
 
     def _update(self):    
         self.by_name = {bt['name']:bt for bt in self.data}
+
+    @property
+    def all_chars(self):
+        return self.data['char'].tostring().decode()

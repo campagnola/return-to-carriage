@@ -36,17 +36,17 @@ class Scene(object):
         self._last_camera_update = ptime.time()
         self.scroll_timer = vispy.app.Timer(start=True, connect=self._scroll_camera, interval=0.016)        
         
-        # generate a texture for each character we need
-        self.atlas = CharAtlas()
-        self.atlas.add_chars(" .#")
-
-        # create sprites visual
-        size = 1/0.6
-        scale = (0.6, 1)
-        self.txt = Sprites(self.atlas, sprite_size=(1, 1), point_cs='visual', parent=self.view.scene)
-        
         # create maze
         self.maze = Maze.load_image('level1.png')
+
+        # generate a texture for each character we need
+        self.atlas = CharAtlas()
+        self.atlas.add_chars(self.maze.blocktypes.all_chars)
+
+        # create sprites visual
+        self.txt = Sprites(self.atlas, sprite_size=(1, 1), point_cs='visual', parent=self.view.scene)
+
+        # Add sprites for drawing maze
         self.maze_sprites = MazeSprites(self.maze, self.txt)
 
         # line-of-sight computation

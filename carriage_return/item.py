@@ -6,7 +6,7 @@ class Item(object):
 
     name = "nondescript item"
     char = '?'
-    mass = 0   # in kg
+    mass = 0.0   # in kg
     readable = False
     takable = False
 
