@@ -57,6 +57,11 @@ class Scene(object):
         tr = self.txt.transforms.get_transform('framebuffer', 'visual')
         
         ms = self.maze.shape
+
+        self.light_texture =  vispy.gloo.Texture2D(shape=self.maze.shape+(4,), format='rgba', interpolation='linear', wrapping='repeat')
+        self.light_filter = TextureMaskFilter(self.light_texture, tr, scale=(1./ms[1], 1./ms[0]))
+        self.txt.attach(self.light_filter)
+
         #self.sight_filter = TextureMaskFilter(self.memory_tex, tr, scale=(1./ms[1], 1./ms[0]))
         self.sight_filter = TextureMaskFilter(self.los_renderer.texture, tr, scale=(1./ms[1], 1./ms[0]))
         self.txt.attach(self.sight_filter)
@@ -216,6 +221,7 @@ class Scene(object):
 
     def on_draw(self, ev):
         self.update_los()
+        self.update_light()
 
     def update_los(self):
         
@@ -251,3 +257,12 @@ class Scene(object):
 
         self._need_los_update = False
 
+    def update_light(self):
+        light = np.zeros(self.maze.shape + (3,), dtype='float32')
+        for items in self.items.values():
+            for item in items:
+                if not item.light_source:
+                    continue
+                light += item.lightmap()
+                
+        self.light_texture.set_data(light)

@@ -95,8 +95,15 @@ class Torch(Item):
     takeable = True
     light_source = True
     mass = 0.2
-    fg_color = (1, 1, 0, 1)
+    fg_color = (1, 0.8, 0.2, 1)
 
+    def lightmap(self):
+        scene = self.location[0]
+        x,y = self.location[1]
+        lm = np.zeros(scene.maze.shape + (3,), dtype='float32')
+        lm[y-8:y+8, x-8:x+8] = (1, 1, 0.5)
+
+        return lm
 
 
 
