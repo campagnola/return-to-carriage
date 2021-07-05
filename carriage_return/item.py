@@ -30,7 +30,8 @@ class Item(object):
         self.location = location
 
     def _maze_bg_color(self):
-        return self.location[0].maze.bg_color[self.location[1]]
+        x, y = self.location[1]
+        return self.location[0].maze.bg_color[y, x]
 
     @property
     def description(self):
@@ -91,7 +92,8 @@ class Item(object):
 
             maze_shape = scene.maze.shape
             maze_pos = np.mgrid[0:maze_shape[0]*supersample, 0:maze_shape[1]*supersample].transpose(1, 2, 0)
-            dist2 = ((maze_pos - np.array([[[y*supersample, x*supersample]]])) ** 2).sum(axis=2) + 0.5  # 0.5 enforces height
+            light_pos = np.array([[[y * supersample, x * supersample]]]) + (0.5 * supersample)
+            dist2 = ((maze_pos - light_pos) ** 2).sum(axis=2) + 0.5  # 0.5 enforces height
 
             self._unscaled_light_map = self.shadow_map() / dist2[:, :, None]
 

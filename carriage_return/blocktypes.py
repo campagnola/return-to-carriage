@@ -16,8 +16,8 @@ blocktype_dtype = [
 _default_blocktypes = np.array([
     #id  name               char  walkable  opacity fg_color              bg_color              meta
     (0,  'void',            ' ',  False,    0,      (.00, .00, .00, 1.0), (.00, .00, .00, 1.0), {}),
-    (1,  'path',            '.',  True,     0,      (.20, .20, .20, 1.0), (.05, .05, .05, 1.0), {}),
-    (2,  'wall',            '#',  False,    1,      (.00, .00, .00, 1.0), (.20, .20, .20, 1.0), {'bg_color_var': 0.01}),
+    (1,  'path',            '.',  True,     0,      (.20, .20, .20, 1.0), (.10, .10, .10, 1.0), {}),
+    (2,  'wall',            '#',  False,    1,      (.00, .00, .00, 1.0), (.40, .40, .40, 1.0), {'bg_color_var': 0.03}),
 ], dtype=blocktype_dtype)
 
 
