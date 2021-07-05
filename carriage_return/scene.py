@@ -250,6 +250,6 @@ class Scene(object):
         self.memory *= 0.999
 
         # add sight to memory
-        self.memory[:, :, 1] = np.maximum(self.memory[:, :, 1], self.sight.max(axis=2))
+        self.memory[:, :, 2] = np.maximum(self.memory[:, :, 2], self.sight.max(axis=2))
 
 
