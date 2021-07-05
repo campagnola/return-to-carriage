@@ -504,6 +504,7 @@ class TextureMaskFilter(object):
                 vec4 tex_pos = $transform(gl_FragCoord);
                 tex_pos /= tex_pos.w;
                 vec4 mask = texture2D($texture, tex_pos.xy);
+                mask.w = 1.0;
                 gl_FragColor = gl_FragColor * mask;
             }
         """)

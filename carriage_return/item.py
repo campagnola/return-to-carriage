@@ -84,14 +84,14 @@ class Item(object):
             assert self._shadow_map is not None
         return self._shadow_map
 
-    def lightmap(self):
+    def lightmap(self, supersample=1):
         if self._unscaled_light_map is None:
             scene = self.location[0]
             x,y = self.location[1]
 
             maze_shape = scene.maze.shape
-            maze_pos = np.mgrid[0:maze_shape[0], 0:maze_shape[1]].transpose(1, 2, 0)
-            dist2 = ((maze_pos - np.array([[[y, x]]])) ** 2).sum(axis=2) + 0.5  # 0.5 enforces height
+            maze_pos = np.mgrid[0:maze_shape[0]*supersample, 0:maze_shape[1]*supersample].transpose(1, 2, 0)
+            dist2 = ((maze_pos - np.array([[[y*supersample, x*supersample]]])) ** 2).sum(axis=2) + 0.5  # 0.5 enforces height
 
             self._unscaled_light_map = self.shadow_map() / dist2[:, :, None]
 

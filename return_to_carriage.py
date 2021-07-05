@@ -28,11 +28,11 @@ if __name__ == '__main__':
         Torch(location=(scene, (32, 45)), scene=scene),
         Torch(location=(scene, (43, 39)), scene=scene),
 
-        Torch(location=(scene, (16, 75)), scene=scene),
+        Torch(location=(scene, (15, 75)), scene=scene),
         Torch(location=(scene, (28, 75)), scene=scene),
         Torch(location=(scene, (40, 75)), scene=scene),
         Torch(location=(scene, (52, 75)), scene=scene),
-        Torch(location=(scene, (16, 82)), scene=scene),
+        Torch(location=(scene, (15, 82)), scene=scene),
         Torch(location=(scene, (28, 82)), scene=scene),
         Torch(location=(scene, (40, 82)), scene=scene),
         Torch(location=(scene, (52, 82)), scene=scene),

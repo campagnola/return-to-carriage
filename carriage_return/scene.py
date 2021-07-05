@@ -49,22 +49,24 @@ class Scene(object):
 
         # line-of-sight computation
         opacity = self.maze.opacity.astype('float32')
-        self.los_renderer = ShadowRenderer(self, opacity, supersample=4)
-        
-        #self.memory = np.zeros((ms[0]*ss, ms[1]*ss, 4), dtype='ubyte')
-        #self.memory[...,3] = 1
-        #self.memory_tex = vispy.gloo.Texture2D(self.memory, interpolation='linear')
         tr = self.txt.transforms.get_transform('framebuffer', 'visual')
         
         ms = self.maze.shape
+        self.supersample = 4
+        self.texture_shape = (ms[0] * self.supersample, ms[1] * self.supersample, 4)
 
-        self.shadow_renderer = ShadowRenderer(self, opacity, supersample=1)
-        self.light_texture =  vispy.gloo.Texture2D(shape=self.maze.shape+(4,), format='rgba', interpolation='linear', wrapping='repeat')
-        self.light_filter = TextureMaskFilter(self.light_texture, tr, scale=(1./ms[1], 1./ms[0]))
-        self.txt.attach(self.light_filter)
+        self.shadow_renderer = ShadowRenderer(self, opacity, supersample=self.supersample)
+        self.norm_light = None
+        
+        self.los_renderer = ShadowRenderer(self, opacity, supersample=self.supersample)
 
-        #self.sight_filter = TextureMaskFilter(self.memory_tex, tr, scale=(1./ms[1], 1./ms[0]))
-        self.sight_filter = TextureMaskFilter(self.los_renderer.texture, tr, scale=(1./ms[1], 1./ms[0]))
+        self.memory = np.zeros(self.texture_shape, dtype='float32')
+        self.memory[...,3] = 1
+        self.sight = np.zeros(self.texture_shape, dtype='float32')
+        
+        # filters scene for lighting, line of sight, and memory
+        self.sight_texture =  vispy.gloo.Texture2D(shape=self.texture_shape, format='rgba', interpolation='linear', wrapping='repeat')
+        self.sight_filter = TextureMaskFilter(self.sight_texture, tr, scale=(1./ms[1], 1./ms[0]))
         self.txt.attach(self.sight_filter)
 
         # track items by location
@@ -221,20 +223,33 @@ class Scene(object):
         self.view.camera.rect = cr
 
     def on_draw(self, ev):
-        self.update_los()
-        self.update_light()
+        # calculate lighting
+        if self.norm_light is None:
+            light = np.zeros(self.texture_shape, dtype='float32')
+            for items in self.items.values():
+                for item in items:
+                    if not item.light_source:
+                        continue
+                    light[:, :, :3] += item.lightmap(supersample=self.supersample)
+            log_light = np.clip(np.log(light), 0, np.inf)
+            self.norm_light = log_light / log_light.max()
 
-    def update_los(self):
-        
-        if not self._need_los_update:
-            return
+        # render new line of sight
+        self.line_of_sight = self.los_renderer.render(self.player.position, read=True) / 255.0
 
-        los = self.los_renderer.render(self.player.position)
-        
-        #mask = np.where(los > self.memory, los, self.memory)
-        #self.memory[..., 2] = mask[..., 2]
-        #self.memory_tex.set_data(mask)
-        
+        # current sight is combination of lighting and LOS
+        self.sight = self.line_of_sight * self.norm_light
+
+        self.sight_with_memory = self.memory * (1 - self.line_of_sight) + self.sight
+
+        self.sight_texture.set_data(self.sight_with_memory.astype('float32'))
+
+        # forget
+        self.memory *= 0.999
+
+        # add sight to memory
+        self.memory[:, :, 1] = np.maximum(self.memory[:, :, 1], self.sight.max(axis=2))
+
         if self.debug_line_of_sight:
             if not hasattr(self, 'sight_plot'):
                 import pyqtgraph as pg
@@ -258,14 +273,3 @@ class Scene(object):
 
         self._need_los_update = False
 
-    def update_light(self):
-        light = np.zeros(self.maze.shape + (3,), dtype='float32')
-        for items in self.items.values():
-            for item in items:
-                if not item.light_source:
-                    continue
-                light += item.lightmap()
-                
-        log_light = np.log(light)
-        norm_light = log_light / log_light.max()
-        self.light_texture.set_data(norm_light)
