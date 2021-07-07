@@ -13,5 +13,3 @@ dependencies:
   - pyopengl
   - pip:
     - inputs
-    - git+https://github.com/pyqtgraph/pyqtgraph
-    - git+https://github.com/alleninstitute/neuroanalysis
