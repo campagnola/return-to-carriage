@@ -129,7 +129,7 @@ class Scene(object):
         self.monsters.setdefault(tuple(mon.position), []).append(mon)
         
     def move_player(self, pos):
-        self.player.position = pos
+        self.player.location.update(self.maze, pos)
         self._need_los_update = True
 
         self._update_camera_target()

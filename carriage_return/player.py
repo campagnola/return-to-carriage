@@ -20,7 +20,6 @@ class Player(object):
         self.sprite.fgcolor = (0, 0, 0.3, 1)
         self.sprite.bgcolor = (0.5, 0.5, 0.5, 1)
         
-
     @property
     def position(self):
         return np.array(self._pos)

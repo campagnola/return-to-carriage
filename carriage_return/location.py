@@ -7,6 +7,10 @@ class Location:
         self.container = container
         self.slot = slot
 
+    def update(self, container, slot):
+        self.container = container
+        self.slot = slot
+
     @property
     def maze_location(self):
         """The maze location that contains this location
@@ -23,3 +27,6 @@ class Location:
     def __iter__(self):
         yield self.container
         yield self.slot
+
+    def __repr__(self):
+        return f"<Location {repr(self.container)}, {repr(self.slot)}>"
