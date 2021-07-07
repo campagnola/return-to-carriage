@@ -1,19 +1,25 @@
 # coding: utf8
 import numpy as np
 from collections import OrderedDict
+from .inventory import Inventory
+from .location import Location
+from .entity_type import EntityType
 
 
 class Player(object):
     def __init__(self, scene):
         self.scene = scene
+
+        self.type = EntityType('player')
+        self.inventory = Inventory(self, max_weight=40, max_length=100, allowed_locations=['right hand', 'left hand'])
+        self.location = Location(None, None)
+
         self.zval = -0.2
         self.sprite = self.scene.txt.add_sprites((1,))
         self.sprite.sprite = self.scene.atlas.add_chars('&')
         self.sprite.fgcolor = (0, 0, 0.3, 1)
         self.sprite.bgcolor = (0.5, 0.5, 0.5, 1)
-        self.position = (7, 7)
         
-        self.inventory = OrderedDict([(chr(i),None) for i in range(ord('a'), ord('z')+1)])
 
     @property
     def position(self):
@@ -48,3 +54,13 @@ class Player(object):
 
     def lose_item(self, item):
         self.inventory.remove(item)
+
+    def line_of_sight(self):
+        los = self.scene.shadow_renderer.render(self.position, read=True) / 255.0
+        for item in self.inventory.all_items():
+            if isinstance(item, Item) and item.light_source:
+                item.set_shadow_map(los)
+        return los
+
+
+from .item import Item

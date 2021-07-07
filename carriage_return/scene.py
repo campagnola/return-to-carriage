@@ -58,8 +58,6 @@ class Scene(object):
         self.shadow_renderer = ShadowRenderer(self, opacity, supersample=self.supersample)
         self.norm_light = None
 
-        self.los_renderer = ShadowRenderer(self, opacity, supersample=self.supersample)
-
         self.memory = np.zeros(self.texture_shape, dtype='float32')
         self.memory[...,3] = 1
         self.sight = np.zeros(self.texture_shape, dtype='float32')
@@ -69,8 +67,8 @@ class Scene(object):
         self.sight_filter = TextureMaskFilter(self.sight_texture, tr, scale=(1./ms[1], 1./ms[0]))
         self.txt.attach(self.sight_filter)
 
-        # track items by location
-        self.items = {}
+        # track all items
+        self.items = []
         
         # track monsters by location
         self.monsters = {}
@@ -143,9 +141,9 @@ class Scene(object):
             for m in mlist:
                 m.take_turn()
 
-    def items_at(self, pos):
-        return self.items.get(tuple(pos), [])
-    
+    def add_item(self, item):
+        self.items.append(item)
+
     def request_player_move(self, newpos):
         """Attempt to move the player to newpos.
         """
@@ -223,21 +221,26 @@ class Scene(object):
         self.view.camera.rect = cr
 
     def on_draw(self, ev):
+        # render new line of sight
+        if self._need_los_update:
+            self.line_of_sight = self.player.line_of_sight()
+            self._need_los_update = False
+
         # calculate lighting
         if self.norm_light is None:
             light = np.zeros(self.texture_shape, dtype='float32')
-            for items in self.items.values():
-                for item in items:
-                    if not item.light_source:
-                        continue
-                    light[:, :, :3] += item.lightmap(supersample=self.supersample)
+            for item in self.items:
+                if not item.light_source:
+                    continue
+                item_visible = True  # todo
+                if not item_visible:
+                    continue
+                item_light = item.lightmap(supersample=self.supersample)
+                if item_light is None:
+                    continue
+                light[:, :, :3] += item_light
             log_light = np.log(np.clip(light*10, 1, np.inf))
             self.norm_light = log_light / log_light.max()
-
-        # render new line of sight
-        if self._need_los_update:
-            self.line_of_sight = self.los_renderer.render(self.player.position, read=True) / 255.0
-            self._need_los_update = False
 
         # current sight is combination of lighting and LOS
         self.sight = self.line_of_sight * self.norm_light

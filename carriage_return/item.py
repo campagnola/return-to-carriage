@@ -1,12 +1,16 @@
 # coding: utf8
 import numpy as np
+from .inventory import Inventory
+from .location import Location
+from .entity_type import EntityType
 
 
 class Item(object):
 
     name = "nondescript item"
     char = '?'
-    mass = 0.0   # in kg
+    mass = 0.0     # in kg
+    length = 10.0  # in cm
     readable = False
     takable = False
     fg_color = (0, 0, 0.8, 1)
@@ -15,8 +19,13 @@ class Item(object):
     light_color = (10, 10, 10)
 
     def __init__(self, location, scene):
-        self._location = (None, None)
         self.scene = scene
+
+        self.type = EntityType('item.' + self.name)
+        self.inventory = Inventory(self, allowed_locations=[])
+        self.location = Location(None, None)
+
+        scene.add_item(self)
 
         # for handling light sources
         self._shadow_map = None
@@ -27,11 +36,17 @@ class Item(object):
         self.sprite.fgcolor = self.fg_color
         self.sprite.sprite = scene.atlas[self.char]
 
-        self.location = location
+        if location is not None:
+            self.set_location(location)
+
+    @property
+    def weight(self):
+        # allows us to change gravity later..
+        return self.mass
 
     def _maze_bg_color(self):
-        x, y = self.location[1]
-        return self.location[0].maze.bg_color[y, x]
+        x, y = self.location.slot
+        return self.location.container.bg_color[y, x]
 
     @property
     def description(self):
@@ -40,33 +55,26 @@ class Item(object):
         # todo: include minimal detail, custom naming, etc.
         return self.name
 
-    @property
-    def location(self):
-        return self._location
-    
-    @location.setter
-    def location(self, loc):
+    def set_location(self, loc):
+        container, pos = loc
+        container.inventory.add_item(self, pos)
+
+    def _location_changed(self, loc):
         """Set item location.
 
         *loc* should be a tuple (container, slot) where container is a Scene, Player, etc and slot
         is the (i, j) location within the scene or an inventory slot letter.
         """
-        oldloc = self._location
-        if oldloc[0] is self.scene:
-            self.scene.items[oldloc[1]].remove(self)
+        oldloc = tuple(self.location)
+        if self.location.container is not None:
+            self.location.container.inventory.remove(self, self.location.slot)
         
-        self._location = loc
-        if loc[0] is self.scene:
-            self.scene.items.setdefault(loc[1], [])
-            self.scene.items[loc[1]].append(self)
+        self.location.container, self.location.slot = loc
+        if loc[0].type.isa('maze'):
             self.sprite.position = (loc[1][0], loc[1][1], -0.1)
-        elif isinstance(loc[0], Player):
-            self.sprite.position = (float('nan'),) * 3
+            self.sprite.bgcolor = self.bg_color or self._maze_bg_color()
         else:
-            raise Exception("Not sure what to do with location: %s" % str(loc))
-
-        self.sprite.bgcolor = self.bg_color or self._maze_bg_color()
-
+            self.sprite.position = (float('nan'),) * 3
 
     def destroy(self):
         """Remove this item from the game.
@@ -81,16 +89,25 @@ class Item(object):
 
     def shadow_map(self):
         if self._shadow_map is None:
-            self._shadow_map = self.scene.shadow_renderer.render(self.location[1], read=True)[..., :3]
+            smap = self.scene.shadow_renderer.render(self.location.slot, read=True)[..., :3]
+            self.set_shadow_map(smap)
             assert self._shadow_map is not None
         return self._shadow_map
 
+    def set_shadow_map(self, smap):
+        self._shadow_map = smap
+        self._unscaled_light_map = None
+        self._light_map = None
+
     def lightmap(self, supersample=1):
         if self._unscaled_light_map is None:
-            scene = self.location[0]
-            x,y = self.location[1]
+            ml = self.location.maze_location
+            if ml is None:
+                return None
+            
+            (x,y) = ml.slot
 
-            maze_shape = scene.maze.shape
+            maze_shape = self.scene.maze.shape
             maze_pos = np.mgrid[0:maze_shape[0]*supersample, 0:maze_shape[1]*supersample].transpose(1, 2, 0)
             light_pos = np.array([[[y * supersample, x * supersample]]]) + (0.5 * supersample)
             dist2 = ((maze_pos - light_pos) ** 2).sum(axis=2) + 0.5  # 0.5 enforces height
@@ -114,6 +131,8 @@ class Scroll(Item):
     takeable = True
     light_source = False
     mass = 0.05
+    length = 20.0
+    fg_color = (0.8, 0.8, 0.8, 1.0)
 
     def read(self, reader):
         self.scene.write("Unfortunately, you never learned to read. The scroll nevertheless appreciates your effort and self-destructs out of pity.") 
@@ -127,8 +146,10 @@ class Torch(Item):
     readable = False
     takeable = True
     light_source = True
-    mass = 0.2
-    fg_color = (1, 0.8, 0.2, 1)
+    mass = 0.5
+    length = 30.0
+    light_color = (10.0, 8.0, 2.0)
+    fg_color = (1.0, 0.8, 0.2, 1.0)
 
 
 
