@@ -5,21 +5,13 @@ dependencies:
   - python=3
   - pyqt=5.12
   - pip
-  - h5py
   - pillow
-  - psycopg2
-  - sqlalchemy
-  - matplotlib
-  - jupyter
-  - pandas
-  - seaborn
   - scipy
-  - pyyaml
   - numba
-  - scikit-image
-  - scikit-learn
-  - statsmodels
+  - pyqtgraph
+  - vispy
+  - pyopengl
   - pip:
-    - lmfit
+    - inputs
     - git+https://github.com/pyqtgraph/pyqtgraph
     - git+https://github.com/alleninstitute/neuroanalysis
