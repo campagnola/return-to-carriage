@@ -53,24 +53,21 @@ class Scene(object):
         
         ms = self.maze.shape
         self.supersample = 4
-        self.texture_shape = (ms[0] * self.supersample, ms[1] * self.supersample, 4)
+        self.texture_shape = (ms[0] * self.supersample, ms[1] * self.supersample, 3)
 
         self.shadow_renderer = ShadowRenderer(self, opacity, supersample=self.supersample)
         self.norm_light = None
 
-        self.los_renderer = ShadowRenderer(self, opacity, supersample=self.supersample)
-
         self.memory = np.zeros(self.texture_shape, dtype='float32')
-        self.memory[...,3] = 1
         self.sight = np.zeros(self.texture_shape, dtype='float32')
         
         # filters scene for lighting, line of sight, and memory
-        self.sight_texture =  vispy.gloo.Texture2D(shape=self.texture_shape, format='rgba', interpolation='linear', wrapping='repeat')
+        self.sight_texture =  vispy.gloo.Texture2D(shape=self.texture_shape, format='rgb', interpolation='linear', wrapping='repeat')
         self.sight_filter = TextureMaskFilter(self.sight_texture, tr, scale=(1./ms[1], 1./ms[0]))
         self.txt.attach(self.sight_filter)
 
-        # track items by location
-        self.items = {}
+        # track all items
+        self.items = []
         
         # track monsters by location
         self.monsters = {}
@@ -131,7 +128,7 @@ class Scene(object):
         self.monsters.setdefault(tuple(mon.position), []).append(mon)
         
     def move_player(self, pos):
-        self.player.position = pos
+        self.player.location.update(self.maze, pos)
         self._need_los_update = True
 
         self._update_camera_target()
@@ -143,15 +140,15 @@ class Scene(object):
             for m in mlist:
                 m.take_turn()
 
-    def items_at(self, pos):
-        return self.items.get(tuple(pos), [])
-    
+    def add_item(self, item):
+        self.items.append(item)
+
     def request_player_move(self, newpos):
         """Attempt to move the player to newpos.
         """
-        pos = self.player.position
+        pos = self.player.location.slot
         j, i = newpos
-        j0, i0 = self.player.position
+        j0, i0 = self.player.location.slot
         if self.maze.blocktype_at(i, j)['walkable']:
             self.move_player(newpos)
         elif self.maze.blocktype_at(i0, j)['walkable']:
@@ -163,7 +160,7 @@ class Scene(object):
 
     def request_player_action(self, action):
         if action == 'take':
-            items = self.items_at(self.player.position)
+            items = self.items_at(self.player.location.slot)
             if len(items) == 0:
                 self.console.write("Nothing to take here.")
             else:
@@ -184,7 +181,7 @@ class Scene(object):
         self.canvas.close()
 
     def _update_camera_target(self):
-        pp = np.array(self.player.position)
+        pp = np.array(self.player.location.global_location.slot)
         cr = vispy.geometry.Rect(self.view.camera.rect)
         cc = np.array(cr.center)
         cs = np.array(cr.size)
@@ -223,21 +220,26 @@ class Scene(object):
         self.view.camera.rect = cr
 
     def on_draw(self, ev):
+        # render new line of sight
+        if self._need_los_update:
+            self.line_of_sight = self.player.line_of_sight()
+            self._need_los_update = False
+
         # calculate lighting
         if self.norm_light is None:
             light = np.zeros(self.texture_shape, dtype='float32')
-            for items in self.items.values():
-                for item in items:
-                    if not item.light_source:
-                        continue
-                    light[:, :, :3] += item.lightmap(supersample=self.supersample)
+            for item in self.items:
+                if not item.light_source:
+                    continue
+                item_visible = True  # todo
+                if not item_visible:
+                    continue
+                item_light = item.lightmap(supersample=self.supersample)
+                if item_light is None:
+                    continue
+                light[:, :, :3] += item_light
             log_light = np.log(np.clip(light*10, 1, np.inf))
             self.norm_light = log_light / log_light.max()
-
-        # render new line of sight
-        if self._need_los_update:
-            self.line_of_sight = self.los_renderer.render(self.player.position, read=True) / 255.0
-            self._need_los_update = False
 
         # current sight is combination of lighting and LOS
         self.sight = self.line_of_sight * self.norm_light
