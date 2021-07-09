@@ -3,6 +3,7 @@ import numpy as np
 from .inventory import Inventory
 from .location import Location
 from .entity_type import EntityType
+from .sprite import SingleCharSprite
 
 
 class Item(object):
@@ -24,6 +25,7 @@ class Item(object):
         self.type = EntityType('item.' + self.name)
         self.inventory = Inventory(self, allowed_slots=[])
         self.location = Location(self, None, None)
+        self.sprite = SingleCharSprite(self, zval=-0.1, char=self.char, fg_color=self.fg_color)
 
         scene.add_item(self)
 
@@ -31,10 +33,6 @@ class Item(object):
         self._shadow_map = None
         self._unscaled_light_map = None
         self._light_map = None
-
-        self.sprite = scene.txt.add_sprites((1,))        
-        self.sprite.fgcolor = self.fg_color
-        self.sprite.sprite = scene.atlas[self.char]
 
         if location is not None:
             self.location.update(*location)
