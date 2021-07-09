@@ -2,6 +2,7 @@ import sys, re
 import inputs
 import threading
 from PyQt5 import QtGui, QtCore
+import numpy as np
 import vispy.app
 import vispy.util.ptime as ptime
 
@@ -158,7 +159,7 @@ class DefaultInputHandler(InputHandler):
         if dx[0] == 0 and dx[1] == 0:
             return
         
-        pos = self.scene.player.position
+        pos = np.array(self.scene.player.location.slot)
         j0, i0 = pos.astype('uint')
         newpos = pos + dx
         

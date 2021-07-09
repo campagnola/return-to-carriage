@@ -22,8 +22,8 @@ class Item(object):
         self.scene = scene
 
         self.type = EntityType('item.' + self.name)
-        self.inventory = Inventory(self, allowed_locations=[])
-        self.location = Location(None, None)
+        self.inventory = Inventory(self, allowed_slots=[])
+        self.location = Location(self, None, None)
 
         scene.add_item(self)
 
@@ -37,16 +37,12 @@ class Item(object):
         self.sprite.sprite = scene.atlas[self.char]
 
         if location is not None:
-            self.set_location(location)
+            self.location.update(*location)
 
     @property
     def weight(self):
         # allows us to change gravity later..
         return self.mass
-
-    def _maze_bg_color(self):
-        x, y = self.location.slot
-        return self.location.container.bg_color[y, x]
 
     @property
     def description(self):
@@ -54,27 +50,6 @@ class Item(object):
         """
         # todo: include minimal detail, custom naming, etc.
         return self.name
-
-    def set_location(self, loc):
-        container, pos = loc
-        container.inventory.add_item(self, pos)
-
-    def _location_changed(self, loc):
-        """Set item location.
-
-        *loc* should be a tuple (container, slot) where container is a Scene, Player, etc and slot
-        is the (i, j) location within the scene or an inventory slot letter.
-        """
-        oldloc = tuple(self.location)
-        if self.location.container is not None:
-            self.location.container.inventory.remove(self, self.location.slot)
-        
-        self.location.container, self.location.slot = loc
-        if loc[0].type.isa('maze'):
-            self.sprite.position = (loc[1][0], loc[1][1], -0.1)
-            self.sprite.bgcolor = self.bg_color or self._maze_bg_color()
-        else:
-            self.sprite.position = (float('nan'),) * 3
 
     def destroy(self):
         """Remove this item from the game.
@@ -101,7 +76,7 @@ class Item(object):
 
     def lightmap(self, supersample=1):
         if self._unscaled_light_map is None:
-            ml = self.location.maze_location
+            ml = self.location.global_location
             if ml is None:
                 return None
             
@@ -115,7 +90,6 @@ class Item(object):
             self._unscaled_light_map = self.shadow_map() / dist2[:, :, None]
 
         if self._light_map is None:
-
             self._light_map = self._unscaled_light_map * np.array(self.light_color)[None, None, :]
 
         return self._light_map

@@ -4,6 +4,7 @@ from collections import OrderedDict
 from .inventory import Inventory
 from .location import Location
 from .entity_type import EntityType
+from .sprite import SingleCharSprite
 
 
 class Player(object):
@@ -11,37 +12,9 @@ class Player(object):
         self.scene = scene
 
         self.type = EntityType('player')
-        self.inventory = Inventory(self, max_weight=40, max_length=100, allowed_locations=['right hand', 'left hand'])
-        self.location = Location(None, None)
-
-        self.zval = -0.2
-        self.sprite = self.scene.txt.add_sprites((1,))
-        self.sprite.sprite = self.scene.atlas.add_chars('&')
-        self.sprite.fgcolor = (0, 0, 0.3, 1)
-        self.sprite.bgcolor = (0.5, 0.5, 0.5, 1)
-        
-    @property
-    def position(self):
-        return np.array(self._pos)
-    
-    @position.setter
-    def position(self, p):
-        self._pos = p
-        self.sprite.position = tuple(p) + (self.zval,)
-
-    def take(self, item):
-        for k in self.inventory:
-            if self.inventory[k] is None:
-                self.inventory[k] = item
-                item.location = (self, k)
-                self.scene.console.write("Taken: %s" % item.description)
-                return
-        self.scene.console.write("For lack of another letter in the alphabet, you decline to take this item.")
-
-    def drop(self, item):
-        self.inventory.pop(item.location[1])
-        item.location = (self.scene, tuple(self.position))
-        self.scene.console.write("Dropped: %s" % item.description)
+        self.inventory = Inventory(self, slot_type=str, max_weight=40, max_length=100, allowed_slots=['right hand', 'left hand'])
+        self.location = Location(self, None, None)
+        self.sprite = SingleCharSprite(self, zval=-0.1, char='&')
 
     def read_item(self, item=None):
         if item is None:
@@ -51,12 +24,10 @@ class Player(object):
         
         item.read(self)
 
-    def lose_item(self, item):
-        self.inventory.remove(item)
-
     def line_of_sight(self):
-        los = self.scene.shadow_renderer.render(self.position, read=True) / 255.0
-        for item in self.inventory.all_items():
+        pos = self.location.global_location.slot
+        los = self.scene.shadow_renderer.render(pos, read=True)[:, :, :3] / 255.0
+        for item in self.inventory.all_entities():
             if isinstance(item, Item) and item.light_source:
                 item.set_shadow_map(los)
         return los

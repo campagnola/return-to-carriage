@@ -53,17 +53,16 @@ class Scene(object):
         
         ms = self.maze.shape
         self.supersample = 4
-        self.texture_shape = (ms[0] * self.supersample, ms[1] * self.supersample, 4)
+        self.texture_shape = (ms[0] * self.supersample, ms[1] * self.supersample, 3)
 
         self.shadow_renderer = ShadowRenderer(self, opacity, supersample=self.supersample)
         self.norm_light = None
 
         self.memory = np.zeros(self.texture_shape, dtype='float32')
-        self.memory[...,3] = 1
         self.sight = np.zeros(self.texture_shape, dtype='float32')
         
         # filters scene for lighting, line of sight, and memory
-        self.sight_texture =  vispy.gloo.Texture2D(shape=self.texture_shape, format='rgba', interpolation='linear', wrapping='repeat')
+        self.sight_texture =  vispy.gloo.Texture2D(shape=self.texture_shape, format='rgb', interpolation='linear', wrapping='repeat')
         self.sight_filter = TextureMaskFilter(self.sight_texture, tr, scale=(1./ms[1], 1./ms[0]))
         self.txt.attach(self.sight_filter)
 
@@ -147,9 +146,9 @@ class Scene(object):
     def request_player_move(self, newpos):
         """Attempt to move the player to newpos.
         """
-        pos = self.player.position
+        pos = self.player.location.slot
         j, i = newpos
-        j0, i0 = self.player.position
+        j0, i0 = self.player.location.slot
         if self.maze.blocktype_at(i, j)['walkable']:
             self.move_player(newpos)
         elif self.maze.blocktype_at(i0, j)['walkable']:
@@ -161,7 +160,7 @@ class Scene(object):
 
     def request_player_action(self, action):
         if action == 'take':
-            items = self.items_at(self.player.position)
+            items = self.items_at(self.player.location.slot)
             if len(items) == 0:
                 self.console.write("Nothing to take here.")
             else:
@@ -182,7 +181,7 @@ class Scene(object):
         self.canvas.close()
 
     def _update_camera_target(self):
-        pp = np.array(self.player.position)
+        pp = np.array(self.player.location.global_location.slot)
         cr = vispy.geometry.Rect(self.view.camera.rect)
         cc = np.array(cr.center)
         cs = np.array(cr.size)
