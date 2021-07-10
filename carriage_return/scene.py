@@ -157,6 +157,7 @@ class Scene(object):
         elif self.maze.blocktype_at(i, j0)['walkable']:
             newpos[0] = j0
             self.move_player(newpos)
+        self.norm_light = None
 
     def request_player_action(self, action):
         if action == 'take':

@@ -93,7 +93,7 @@ class Item(object):
         return self._light_map
 
     def __repr__(self):
-        return f"<{type(self).__name__} {self.name}>"
+        return f"<{type(self).__name__} {self.name} {id(self)}>"
 
 
 class Scroll(Item):

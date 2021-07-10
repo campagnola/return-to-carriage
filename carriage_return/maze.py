@@ -19,7 +19,7 @@ class Maze:
         self.inventory = Inventory(
             entity=self, 
             slot_type=tuple,
-            allowed_slots=[(i,j) for j in range(blocks.shape[1]) for i in range(blocks.shape[0])]
+            allowed_slots=[(j, i) for j in range(blocks.shape[1]) for i in range(blocks.shape[0])]
         )
         self.location = Location(self, None, None)
 
