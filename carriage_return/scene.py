@@ -8,7 +8,8 @@ from .graphics import CharAtlas, Sprites, TextureMaskFilter, CPUShadowRenderer, 
 from .input import InputDispatcher, DefaultInputHandler, CommandInputHandler
 from .player import Player
 from .maze import Maze, MazeSprites
-from .command import CommandInterpreter
+from .console import CommandInterpreter
+from .array_cache import ArraySumCache
 
 
 class Scene(object):
@@ -57,6 +58,8 @@ class Scene(object):
 
         self.shadow_renderer = ShadowRenderer(self, opacity, supersample=self.supersample)
         self.norm_light = None
+
+        self.light_cache = ArraySumCache()
 
         self.memory = np.zeros(self.texture_shape, dtype='float32')
         self.sight = np.zeros(self.texture_shape, dtype='float32')
@@ -228,7 +231,7 @@ class Scene(object):
 
         # calculate lighting
         if self.norm_light is None:
-            light = np.zeros(self.texture_shape, dtype='float32')
+            lights = []
             for item in self.items:
                 if not item.light_source:
                     continue
@@ -238,7 +241,9 @@ class Scene(object):
                 item_light = item.lightmap(supersample=self.supersample)
                 if item_light is None:
                     continue
-                light[:, :, :3] += item_light
+                lights.append(item_light)
+            # light = np.zeros(self.texture_shape, dtype='float32')
+            light = self.light_cache.sum_arrays(lights)
             log_light = np.log(np.clip(light*10, 1, np.inf))
             self.norm_light = log_light / log_light.max()
 
