@@ -65,6 +65,14 @@ class MainWindow:
         self.command = CommandInterpreter(self)
         self.cmd_input_handler = CommandInputHandler(self.console, self.command)
 
+        self._follow_entity = None
+
+    def follow_entity(self, entity):
+        if self._follow_entity is not None:
+            self._follow_entity.location.global_changed.disconnect(self._update_camera_target)
+        self._follow_entity = entity
+        entity.location.global_changed.connect(self._update_camera_target)
+
     def toggle_command_mode(self):
         # todo: visual cue
         self.command_mode = not self.command_mode

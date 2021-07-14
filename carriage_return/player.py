@@ -16,6 +16,8 @@ class Player(object):
         self.location = Location(self, None, None)
         self.sprite = SingleCharSprite(self, zval=-0.1, char='&')
 
+        scene.player = self
+
     def read_item(self, item=None):
         if item is None:
             readables = [i for i in self.inventory if i.readable]

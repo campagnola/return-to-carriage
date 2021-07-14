@@ -4,6 +4,8 @@ faulthandler.enable()
 
 from carriage_return.ui import MainWindow
 from carriage_return.scene import Scene
+from carriage_return.dm import DungeonMaster
+from carriage_return.player import Player
 from carriage_return.monster import Monster
 from carriage_return.item import Scroll, Torch
 from carriage_return.input import DefaultInputHandler
@@ -13,7 +15,12 @@ if __name__ == '__main__':
 
     ui = MainWindow()
     scene = Scene(ui)
-    default_input_handler = DefaultInputHandler(scene)
+    dm = DungeonMaster(scene)
+
+    player = Player(scene)
+    player.location.update(scene.maze, [7, 7])
+
+    default_input_handler = DefaultInputHandler(dm, ui, player)
     ui.input_dispatcher.add_handler(default_input_handler)
 
     scroll = Scroll(location=(scene.maze, (5, 5)), scene=scene)
