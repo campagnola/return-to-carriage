@@ -9,7 +9,6 @@ from .input import MenuInputHandler
 class CommandInterpreter(object):
     def __init__(self, scene):
         self.scene = scene
-        self.player = self.scene.player
         self.partial = None
         self._menu_items = {}
 

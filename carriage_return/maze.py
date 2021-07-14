@@ -38,7 +38,7 @@ class Maze:
     @property
     def opacity(self):
         if self._opacity is None:
-            self._opacity = self.blocktypes['opacity'][self.blocks]
+            self._opacity = self.blocktypes['opacity'][self.blocks].astype('float32')
         return self._opacity
 
     @property

@@ -839,18 +839,15 @@ class CPUShadowRenderer:
 class ShadowRenderer(object):
     """For computing 2D shadows
     """
-    def __init__(self, scene, opacity, supersample=1):
-        self.scene = scene
-        self.size = (opacity.shape[0] * supersample, opacity.shape[1] * supersample)
+    def __init__(self, maze, canvas, supersample=1):
+        self.maze = maze
+        self.canvas = canvas
+        self.size = (maze.shape[0] * supersample, maze.shape[1] * supersample)
         
         # for render to texture
         self.texture = vispy.gloo.Texture2D(shape=self.size+(4,), format='rgba', interpolation='linear', wrapping='repeat')
         self.fbo = vispy.gloo.FrameBuffer(color=self.texture, 
                                           depth=vispy.gloo.RenderBuffer(self.size))
-        
-        # For render / read to CPU
-        #self.fbo = vispy.gloo.FrameBuffer(color=vispy.gloo.RenderBuffer(self.size), 
-                                          #depth=vispy.gloo.RenderBuffer(self.size))
         
         vert = """
             #version 330 compatibility
@@ -944,12 +941,12 @@ class ShadowRenderer(object):
                 gl_FragColor = vec4(0, 0, 0, 1);
             }
         """
-        
+
         self.program = ModularProgram(vert, frag, gcode=geom)
-        self.program['opacity'] = vispy.gloo.Texture2D(opacity, format='luminance', interpolation='nearest')
-        self.program['opacity_size'] = opacity.shape[:2][::-1]
+        self.program['opacity'] = vispy.gloo.Texture2D(maze.opacity, format='luminance', interpolation='nearest')
+        self.program['opacity_size'] = maze.shape[:2][::-1]
         
-        corner_coords = np.mgrid[0:opacity.shape[1], 0:opacity.shape[0]].astype('float32').transpose(1, 2, 0)
+        corner_coords = np.mgrid[0:maze.shape[1], 0:maze.shape[0]].astype('float32').transpose(1, 2, 0)
         self.program['ij'] = corner_coords.copy()  # copy to prevent warning about discontiguous data
         
     def render(self, pos, read=False):
@@ -963,7 +960,7 @@ class ShadowRenderer(object):
             #vispy.gloo.set_state(cull_face=True)
             self.program.draw(mode='points', check_error=True)
 
-            vispy.gloo.set_viewport(0, 0, *self.scene.canvas.size)
+            vispy.gloo.set_viewport(0, 0, *self.canvas.size)
             if read:
                 img = self.fbo.read()[::-1]
         

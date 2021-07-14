@@ -1,23 +1,20 @@
 # coding: utf8
-try:
-    import faulthandler
-    faulthandler.enable()
-except ImportError:
-    pass
+import faulthandler
+faulthandler.enable()
 
-import vispy.scene, vispy.app
-
+from carriage_return.ui import MainWindow
 from carriage_return.scene import Scene
 from carriage_return.monster import Monster
 from carriage_return.item import Scroll, Torch
+from carriage_return.input import DefaultInputHandler
 
 
 if __name__ == '__main__':
-    canvas = vispy.scene.SceneCanvas()
-    canvas.show()
-    canvas.size = 1400, 900
-    
-    scene = Scene(canvas)
+
+    ui = MainWindow()
+    scene = Scene(ui)
+    default_input_handler = DefaultInputHandler(scene)
+    ui.input_dispatcher.add_handler(default_input_handler)
 
     scroll = Scroll(location=(scene.maze, (5, 5)), scene=scene)
     torches = [
