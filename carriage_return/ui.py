@@ -72,6 +72,7 @@ class MainWindow:
             self._follow_entity.location.global_changed.disconnect(self._update_camera_target)
         self._follow_entity = entity
         entity.location.global_changed.connect(self._update_camera_target)
+        self._update_camera_target()
 
     def toggle_command_mode(self):
         # todo: visual cue
@@ -102,8 +103,8 @@ class MainWindow:
         cr.size = nrv[2:]
         self.view.camera.rect = cr
 
-    def _update_camera_target(self, event):
-        location = event.source
+    def _update_camera_target(self, event=None):
+        location = self._follow_entity.location
         pp = np.array(location.global_location.slot)
         cr = vispy.geometry.Rect(self.view.camera.rect)
         cc = np.array(cr.center)

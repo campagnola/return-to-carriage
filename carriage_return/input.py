@@ -171,7 +171,7 @@ class DefaultInputHandler(InputHandler):
     
     def key_pressed(self, ev):
         if ev.key == 'Escape':
-            self.scene.quit()
+            self.ui.quit()
         elif ev.key == 'Tab':
             self.scene.toggle_command_mode()
         elif ev.key == 't':

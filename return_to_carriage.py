@@ -19,6 +19,7 @@ if __name__ == '__main__':
 
     player = Player(scene)
     player.location.update(scene.maze, [7, 7])
+    ui.follow_entity(player)
 
     default_input_handler = DefaultInputHandler(dm, ui, player)
     ui.input_dispatcher.add_handler(default_input_handler)
