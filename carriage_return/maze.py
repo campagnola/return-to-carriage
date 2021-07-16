@@ -2,6 +2,9 @@ import numpy as np
 import vispy
 from PIL import Image
 from .blocktypes import BlockTypes
+from .inventory import Inventory
+from .location import Location
+from .entity_type import EntityType
 
 
 class Maze:
@@ -10,6 +13,15 @@ class Maze:
     def __init__(self, blocks, blocktypes):
         self.blocks = blocks
         self.blocktypes = blocktypes
+
+        # all objects in maze by location
+        self.type = EntityType('maze')
+        self.inventory = Inventory(
+            entity=self, 
+            slot_type=tuple,
+            allowed_slots=[(j, i) for j in range(blocks.shape[1]) for i in range(blocks.shape[0])]
+        )
+        self.location = Location(self, None, None)
 
         self._opacity = None
         self._fg_color = None
