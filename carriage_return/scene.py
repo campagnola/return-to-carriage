@@ -1,18 +1,18 @@
 # coding: utf8
-import sys
 import numpy as np
 import vispy.scene, vispy.app
 
 from .graphics import CharAtlas, Sprites, TextureMaskFilter, ShadowRenderer
-from .player import Player
-from .maze import Maze, MazeSprites
+from .maze import Maze
 from .array_cache import ArraySumCache
+from .entity import Entity
 
 
-class Scene(object):
+class Scene(Entity):
     """Central organizing class for managing UI, landscape, player, items, and mobs
     """
     def __init__(self, ui):
+        Entity.__init__(self, entity_type='scene')
         self._player = None
 
         # generate a texture for each character we need
@@ -72,6 +72,7 @@ class Scene(object):
 
     def _player_moved(self, event=None):
         self._need_los_update = True
+        self.norm_light = None  # should have a more intelligent way to clear this cache
 
     def monster_moved(self, mon, old_pos):
         if old_pos is not None:

@@ -1,20 +1,15 @@
 # coding: utf8
-import numpy as np
-from collections import OrderedDict
-
 from .entity import Entity
 from .inventory import Inventory
 from .location import Location
-from .entity_type import EntityType
 from .sprite import SingleCharSprite
 
 
 class Player(Entity):
-    def __init__(self, scene):
-        Entity.__init__(self, name="player")
+    def __init__(self, scene, obj_name=None):
+        Entity.__init__(self, entity_type='player', obj_name=obj_name)
         self.scene = scene
 
-        self.type = EntityType('player')
         self.inventory = Inventory(self, slot_type=str, max_weight=40, max_length=100, allowed_slots=['right hand', 'left hand'])
         self.location = Location(self, None, None)
         self.sprite = SingleCharSprite(self, zval=-0.1, char='&')

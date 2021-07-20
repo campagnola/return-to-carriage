@@ -5,19 +5,17 @@ from .blocktypes import BlockTypes
 from .entity import Entity
 from .inventory import Inventory
 from .location import Location
-from .entity_type import EntityType
 
 
 class Maze(Entity):
     """Data defining the landscape.
     """
-    def __init__(self, blocks, blocktypes):
-        Entity.__init__(self, 'maze')
+    def __init__(self, blocks, blocktypes, obj_name=None):
+        Entity.__init__(self, entity_type='maze', obj_name=obj_name)
         self.blocks = blocks
         self.blocktypes = blocktypes
 
         # all objects in maze by location
-        self.type = EntityType('maze')
         self.inventory = Inventory(
             entity=self, 
             slot_type=tuple,

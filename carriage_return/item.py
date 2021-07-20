@@ -4,12 +4,12 @@ import numpy as np
 from .entity import Entity
 from .inventory import Inventory
 from .location import Location
-from .entity_type import EntityType
 from .sprite import SingleCharSprite
 
 
 class Item(Entity):
 
+    name = "nondescript item"
     char = '?'
     mass = 0.0     # in kg
     length = 10.0  # in cm
@@ -20,11 +20,10 @@ class Item(Entity):
     light_source = False
     light_color = (10, 10, 10)
 
-    def __init__(self, location, scene, name=None):
-        Entity.__init__(self, name or self.name)
+    def __init__(self, location, scene, obj_name=None):
+        Entity.__init__(self, entity_type='item.' + self.name, obj_name=obj_name)
         self.scene = scene
 
-        self.type = EntityType('item.' + self.name)
         self.inventory = Inventory(self, allowed_slots=[])
         self.location = Location(self, None, None)
         self.sprite = SingleCharSprite(self, zval=-0.1, char=self.char, fg_color=self.fg_color)
@@ -99,9 +98,6 @@ class Item(Entity):
             self._light_map = self._unscaled_light_map * np.array(self.light_color)[None, None, :]
 
         return self._light_map
-
-    def __repr__(self):
-        return f"<{type(self).__name__} {self.name} {id(self)}>"
 
 
 class Scroll(Item):
