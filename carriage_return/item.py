@@ -1,28 +1,29 @@
 # coding: utf8
 import numpy as np
+
+from .entity import Entity
 from .inventory import Inventory
 from .location import Location
-from .entity_type import EntityType
 from .sprite import SingleCharSprite
 
 
-class Item(object):
+class Item(Entity):
 
     name = "nondescript item"
     char = '?'
     mass = 0.0     # in kg
     length = 10.0  # in cm
     readable = False
-    takable = False
+    takeable = False
     fg_color = (0, 0, 0.8, 1)
     bg_color = None
     light_source = False
     light_color = (10, 10, 10)
 
-    def __init__(self, location, scene):
+    def __init__(self, location, scene, obj_name=None):
+        Entity.__init__(self, entity_type='item.' + self.name, obj_name=obj_name)
         self.scene = scene
 
-        self.type = EntityType('item.' + self.name)
         self.inventory = Inventory(self, allowed_slots=[])
         self.location = Location(self, None, None)
         self.sprite = SingleCharSprite(self, zval=-0.1, char=self.char, fg_color=self.fg_color)
@@ -33,9 +34,15 @@ class Item(object):
         self._shadow_map = None
         self._unscaled_light_map = None
         self._light_map = None
+        self.location.global_changed.connect(self._location_changed)
 
         if location is not None:
             self.location.update(*location)
+
+    def _location_changed(self, event):
+        self._shadow_map = None
+        self._unscaled_light_map = None
+        self._light_map = None
 
     @property
     def weight(self):
@@ -91,9 +98,6 @@ class Item(object):
             self._light_map = self._unscaled_light_map * np.array(self.light_color)[None, None, :]
 
         return self._light_map
-
-    def __repr__(self):
-        return f"<{type(self).__name__} {self.name} {id(self)}>"
 
 
 class Scroll(Item):

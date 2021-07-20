@@ -122,8 +122,10 @@ class InputHandler(object):
 class DefaultInputHandler(InputHandler):
     """Gamepad and keyboard handling during normal gameplay.
     """
-    def __init__(self, scene):
-        self.scene = scene
+    def __init__(self, dm, ui, player):
+        self.dm = dm
+        self.ui = ui
+        self.player = player
         InputHandler.__init__(self)
 
         self.last_input_update = ptime.time()
@@ -159,17 +161,17 @@ class DefaultInputHandler(InputHandler):
         if dx[0] == 0 and dx[1] == 0:
             return
         
-        pos = np.array(self.scene.player.location.slot)
+        pos = np.array(self.player.location.slot)
         j0, i0 = pos.astype('uint')
         newpos = pos + dx
         
-        self.scene.request_player_move(newpos.astype('uint'))
+        self.dm.request_player_move(self.player, newpos.astype('uint'))
         
         self.last_input_update = now
     
     def key_pressed(self, ev):
         if ev.key == 'Escape':
-            self.scene.quit()
+            self.ui.quit()
         elif ev.key == 'Tab':
             self.scene.toggle_command_mode()
         elif ev.key == 't':

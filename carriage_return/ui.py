@@ -65,6 +65,15 @@ class MainWindow:
         self.command = CommandInterpreter(self)
         self.cmd_input_handler = CommandInputHandler(self.console, self.command)
 
+        self._follow_entity = None
+
+    def follow_entity(self, entity):
+        if self._follow_entity is not None:
+            self._follow_entity.location.global_changed.disconnect(self._update_camera_target)
+        self._follow_entity = entity
+        entity.location.global_changed.connect(self._update_camera_target)
+        self._update_camera_target()
+
     def toggle_command_mode(self):
         # todo: visual cue
         self.command_mode = not self.command_mode
@@ -94,8 +103,8 @@ class MainWindow:
         cr.size = nrv[2:]
         self.view.camera.rect = cr
 
-    def _update_camera_target(self, event):
-        location = event.source
+    def _update_camera_target(self, event=None):
+        location = self._follow_entity.location
         pp = np.array(location.global_location.slot)
         cr = vispy.geometry.Rect(self.view.camera.rect)
         cc = np.array(cr.center)

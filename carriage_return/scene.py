@@ -1,18 +1,19 @@
 # coding: utf8
-import sys
 import numpy as np
 import vispy.scene, vispy.app
 
 from .graphics import CharAtlas, Sprites, TextureMaskFilter, ShadowRenderer
-from .player import Player
-from .maze import Maze, MazeSprites
+from .maze import Maze
 from .array_cache import ArraySumCache
+from .entity import Entity
 
 
-class Scene(object):
+class Scene(Entity):
     """Central organizing class for managing UI, landscape, player, items, and mobs
     """
     def __init__(self, ui):
+        Entity.__init__(self, entity_type='scene')
+        self._player = None
 
         # generate a texture for each character we need
         self.atlas = CharAtlas()
@@ -53,50 +54,33 @@ class Scene(object):
         # track monsters by location
         self.monsters = {}
 
-        # add player
-        self.player = Player(self)
-
         self._need_los_update = True
 
-        self.move_player([7, 7])
-
         ui.canvas.events.draw.connect(self.on_draw)
-        self.player.location.global_changed.connect(ui._update_camera_target)
+        self._need_los_update = True
+
+    @property
+    def player(self):
+        return self._player
+
+    @player.setter
+    def player(self, player):
+        assert self._player is None
+        self._player = player
+        player.location.global_changed.connect(self._player_moved)
+        self._player_moved()
+
+    def _player_moved(self, event=None):
+        self._need_los_update = True
+        self.norm_light = None  # should have a more intelligent way to clear this cache
 
     def monster_moved(self, mon, old_pos):
         if old_pos is not None:
             self.monsters[tuple(old_pos)].remove(mon)
         self.monsters.setdefault(tuple(mon.position), []).append(mon)
         
-    def move_player(self, pos):
-        self.player.location.update(self.maze, pos)
-        self._need_los_update = True
-
-        self.end_turn()
-        
-    def end_turn(self):
-        for mlist in list(self.monsters.values()):
-            for m in mlist:
-                m.take_turn()
-
     def add_item(self, item):
         self.items.append(item)
-
-    def request_player_move(self, newpos):
-        """Attempt to move the player to newpos.
-        """
-        pos = self.player.location.slot
-        j, i = newpos
-        j0, i0 = self.player.location.slot
-        if self.maze.blocktype_at(i, j)['walkable']:
-            self.move_player(newpos)
-        elif self.maze.blocktype_at(i0, j)['walkable']:
-            newpos[1] = i0
-            self.move_player(newpos)
-        elif self.maze.blocktype_at(i, j0)['walkable']:
-            newpos[0] = j0
-            self.move_player(newpos)
-        self.norm_light = None
 
     def request_player_action(self, action):
         if action == 'take':
