@@ -2,15 +2,17 @@ import numpy as np
 import vispy
 from PIL import Image
 from .blocktypes import BlockTypes
+from .entity import Entity
 from .inventory import Inventory
 from .location import Location
 from .entity_type import EntityType
 
 
-class Maze:
+class Maze(Entity):
     """Data defining the landscape.
     """
     def __init__(self, blocks, blocktypes):
+        Entity.__init__(self, 'maze')
         self.blocks = blocks
         self.blocktypes = blocktypes
 

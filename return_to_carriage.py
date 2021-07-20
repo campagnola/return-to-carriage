@@ -44,7 +44,7 @@ if __name__ == '__main__':
     ]
     torches[0].light_color = (10000, 5000, 1000)
 
-    held_torch = Torch(location=(scene.player, 'right hand'), scene=scene)
+    held_torch = Torch(location=(scene.player, 'right hand'), scene=scene, name="held torch")
     held_torch.light_color = (10000, 5000, 1000)
 
     yeti = Monster(position=(8, 40), scene=scene)

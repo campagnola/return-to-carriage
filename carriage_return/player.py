@@ -1,14 +1,17 @@
 # coding: utf8
 import numpy as np
 from collections import OrderedDict
+
+from .entity import Entity
 from .inventory import Inventory
 from .location import Location
 from .entity_type import EntityType
 from .sprite import SingleCharSprite
 
 
-class Player(object):
+class Player(Entity):
     def __init__(self, scene):
+        Entity.__init__(self, name="player")
         self.scene = scene
 
         self.type = EntityType('player')

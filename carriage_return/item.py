@@ -1,25 +1,27 @@
 # coding: utf8
 import numpy as np
+
+from .entity import Entity
 from .inventory import Inventory
 from .location import Location
 from .entity_type import EntityType
 from .sprite import SingleCharSprite
 
 
-class Item(object):
+class Item(Entity):
 
-    name = "nondescript item"
     char = '?'
     mass = 0.0     # in kg
     length = 10.0  # in cm
     readable = False
-    takable = False
+    takeable = False
     fg_color = (0, 0, 0.8, 1)
     bg_color = None
     light_source = False
     light_color = (10, 10, 10)
 
-    def __init__(self, location, scene):
+    def __init__(self, location, scene, name=None):
+        Entity.__init__(self, name or self.name)
         self.scene = scene
 
         self.type = EntityType('item.' + self.name)
@@ -33,9 +35,15 @@ class Item(object):
         self._shadow_map = None
         self._unscaled_light_map = None
         self._light_map = None
+        self.location.global_changed.connect(self._location_changed)
 
         if location is not None:
             self.location.update(*location)
+
+    def _location_changed(self, event):
+        self._shadow_map = None
+        self._unscaled_light_map = None
+        self._light_map = None
 
     @property
     def weight(self):
