@@ -43,6 +43,7 @@ Mobs
     - Many are peaceful / avoid contact
     - May run away when hurt
     - May fight / avoid / help / react to other mobs
+        - SJ Add threshold where flight becomes fight? E.g. chase a cat until it decides it is better to turn and fight you
     - May not notice you (depending on mob perception, your level of stealth, whether you stink, etc)
          - "hide" command?  Maybe "try to be sneaky" mode?
 
@@ -54,6 +55,7 @@ More realism to skills / memory
     - Maps can be overlaid on the dungeon
     - Spells / potions can improve your memory
         - magic maps draw themselves as you explore and never forget
+        - SJ "Enlightenment" & "Expanded Awareness" type spells could have a wicked visual effect e.g. enlightened areas expanding out from player location
 
 
 -------------------
@@ -117,14 +119,81 @@ Gameplay
     - most parts gamepad playable
     - Use mouse / js for ranged weapon aiming
         skill affects accuracy
+    - SJ "target line" / crosshair / laser pointer for aiming - maybe this is a spell? or always on in 'easy' gameplay mode
     - combination of rougelike and interactive fiction
         one panel gives a description of the local area
-            descriptions can be hierarchical -- terse descriptions can be expanded 
+            descriptions can be hierarchical -- terse descriptions can be expanded
+            SJ Expanding description trees need kybd shortcuts as to avoid unnecessary mouse clicks 
         one panel gives description of character state
         console for entering commands + event log
     - Pits / traps can sometimes be avoided, but this requires manual intervention from user and depends on player skill
 
     
+
+------------------------
+
+Player to NPC Dialogue
+    
+    Terms: 
+        - Dialogue Matrix - the network of all possible dialogue options with an NPC (one Dialogue Matrix per NPC)
+        - Dialogue Node - One statement or question made by Player (multiple choice) or NPC 
+        - Dialogue Branch - A grouping of Dialogue Nodes
+        - Dialogue Column - a specific conversational function e.g. an "Introduction" column, where NPC or Player introduces themselves by name. Dialogue Columns can contain Dialogue Nodes, and Dialogue Branches
+        - Time Tier - An axis of the Dialogue Matrix used to help with selecting Dialogue Nodes and Branches
+    
+    - For all NPC interactions, a Dialogue Matrix will determine the conversation options
+        - Each Dialogue Column will accomplish a conversational transaction with a specific information sharing and/or gameplay function
+            - e.g. A Column named "Passing Greeting" will contain all of the Dialogue Nodes that NPC or Player can use when passing by each other (assuming that, conditionally, they decide to greet each other at all)
+            - Dialogue columns can be ommitted entirely if unnecessary / inappropriate (e.g. if you know the shop keep by name, he doesn't introduce himself. The "Introduction" Column is forever ommitted within that NPC's Dialogue Matrix once you have been properly introduced (unless you or the shopkeep forget the other for whatever reason)) 
+        - Dialogue variations will be determined by Dialogue Matrix Axes:
+            - 1+ axis based on the nature of the relationship between conversating characters
+                - Friendly/enemyly
+            - Time spent since last conversation with NPC (Time Tiers)
+                - Tiers of time-based conversational reset:
+                    - Tier 1. First Ever: Greet and introduce NPC like it's the first time meeting NPC (unless the storyline dictates that the NPC in question is already well acquainted with Player, in which case)
+                    - Tier 2. First in Recent History: If Player hasn't interacted with NPC in nnn hours playtime / nnn hours realtime, then greet appropriately
+                    - Tier 3. Recent Interaction: e.g. If Player goes into a shop, buys something, leaves for 15 mins, then comes back into shop, the shop keep doesn't greet Player / doesn't say "Hello there!"
+                    - Tier 4. Broken Interaction: e.g. Player buys something, then stops interacting with shop keep by leaving the store, and then goes straight back in. 
+                    - Tier 5. Immediate Interaction: e.g. If you're in a shop and have already talked to the shop keep, and you bug them a 2nd time without breaking the interaction (e.g. by leaving the store), they don't greet you or ask what they can do for you again. Maybe just a considerate glance, or a "What else?" etc etc
+
+                    ** Note Tier 5 could be a great opportunity for an NPC to offer random bits of information. e.g. You're hanging out near a drunk by the river, and every so often the drunk starts talking to you about something random. ('Them pointy toed shoes hurt!')
+
+                - Time Tier 1 has its own column
+                - Time Tier 2 has its own column
+                - Time Tiers 3, 4, and 5 will share a column, as conversationally, they provide the same function, just differ by circumstantial branching conditions. In this case, Tiers 3, 4, and 5 all allow, for example, the shop keep to inquire as to how he can help you.
+                    - e.g. 
+                        - Assume player knows NPC (the shop keep) by name, ergo Time Tier 1 is conditionally omitted, meaning no introductions are made.
+                        - Player walks into shop for the first time in 9 days: NPC greets Player using a Dialogue Node from the Dialogue Column containing Time Tier 2 interactions - "Hey there, nice to see you!"
+                        - Then NPC continues with a Node from Column containing Time Tier 3 because this is the first time within nnn hours NPC is offering to help the customer, "What can I do for you?"
+                        - Player buys something, and then leaves
+                        - Player then immediately re-enters the shop, looking for something else to buy. 
+                        - NPC pulls a Node from Time Tier 4, because the last interaction occurred quite recently, but Player stopped interacting with NPC by leaving the store (even if just for a moment).
+
+                    - another e.g.
+                        - Player is executing a nefarious plan with an NPC
+                        - Player and NPC have agreed that the next thing Player needs to do is steal Suzy's magic wand
+                        - Player stops interacting with NPC by leaving the area, and comes back 2 hours later. This meets conditions for Time Tier 3, so NPC draws a Node from "Player Returns After Agreeing to Plan" Column, "Time Tier 3" Branch, and says, "Did you get the wand?"
+                        - Player did not get the wand, so he says "No", and the coversation loops back by nn Columns.
+
+                        Alternate: 
+                        - Player and NPC agree that Player must steal wand.
+                        - Player leaves the area.
+                        - Player comes back 2 minutes later
+                        - NPC draws from Time Tier 4, saying "Whats up? Did you forget the plan already?"
+
+
+                        In the Nefarious Plan examples above, the responses by NPC after <Player returns to the area> carry the same function: this is the "Player Returns After Agreeing to Plan" Column. However, because of the variance in the amount of time that Player spends away, NPC draws from different Time Tier branches (3 and 4, respectively).
+
+                        ** Note: in this case, if Player returned after only 2 minutes away but had, in fact, successfully completed the quest step by stealing Suzy's wand, NPC would still draw from Tier 4, and this is OK! It is realistic for NPC to assume the wand was not stolen because Player was only away for 2 minutes. The selected Tier 4 Node, upon conditionally determining that the wand was successfully stolen, will continue to the next Column, "After Wand is Stolen", and will utilize the "From Tier 4" Branch. NPC might draw a Node that says "Wow, you're quite the thief!" 
+            - Immediate Conditions axis
+                - Are there dangerous monsters around?
+                - Is the room completely dark, or near completely dark?
+                - Is Player butt naked?
+
+
+
+
+
 ----------------------
 
 
@@ -152,6 +221,7 @@ Graphics
         If we can work this out such that we start learning other languages, that would
         be fantastic (for example, phonetic symbols always have the same sound
         as the first letter of the english name)
+        ^^ If using Mandarin, maybe the scroll symbol meanings could actually be representative of the spell being cast
 
 -----------------------
 
