@@ -1,6 +1,7 @@
+from carriage_return.entity import Component
 
 
-class Inventory:
+class Inventory(Component):
     """Any collection of entities with multiple storage slots
 
     - Player inventory
@@ -9,6 +10,7 @@ class Inventory:
     - Container contents
     """
     def __init__(self, entity, slot_type=None, max_weight=None, max_length=None, allowed_slots=None):
+        Component.__init__(self, entity, component_type='inventory')
         self.entity = entity
         self.slot_type = slot_type or (lambda x: x)
         self.max_weight = max_weight

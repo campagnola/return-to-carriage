@@ -1,12 +1,14 @@
 from vispy.util.event import EventEmitter, Event
 
+from carriage_return.entity import Component
 
-class Location:
+
+class Location(Component):
     """Stores the location of an entity: what container is it in, and which slot within the container
     """
 
     def __init__(self, entity, container, slot):
-        self.entity = entity
+        Component.__init__(self, entity, component_type='location')
         self.container = None
         self.slot = None
 
@@ -55,9 +57,9 @@ class Location:
         if changed:
             # update inventories
             if old_container is not None:
-                old_container.inventory._remove_entity(entity=self.entity, slot=old_slot)
+                old_container.inventory._remove_entity(entity=self.parent_entity, slot=old_slot)
             if self.container is not None:
-                self.container.inventory._add_entity(entity=self.entity, slot=self.slot)
+                self.container.inventory._add_entity(entity=self.parent_entity, slot=self.slot)
             
             # emit events
             old_loc = (old_container, old_slot)
