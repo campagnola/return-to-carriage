@@ -65,7 +65,7 @@ def choose(*choices):
 
 
 
-def n0():
+def start():
     """NPC greeting"""
     disp = npc.disposition_to(player)
     if disp > 1:
@@ -74,23 +74,23 @@ def n0():
         npc.say(random.choice(["Welcome!", "How can I help?"]))
     else:
         npc.say("Make it quick.")
-    return n1
+    return choose_item
 
-def n1():
+def choose_item():
     """Player select item of interest"""
     choice = choose("Red potion, please", "10 of your finest arrows.", "You know what I want.", None)
     conv.request, next_node = [
-        (('red potion', 1), n2),
-        (('arrow', 10), n2),
-        (None, n3),
-        (None, n7),
+        (('red potion', 1), make_offer),
+        (('arrow', 10), make_offer),
+        (None, offer_cat),
+        (None, leave),
     ][choice]
     if choice == 2:
         npc.adjust_disposition(player, -0.5)
 
     return next_node
 
-def n2():
+def make_offer():
     """Make offer to player"""
     if npc.disposition_to(player) > 1:
         conv.discount = 0.5
@@ -101,23 +101,23 @@ def n2():
         item_price = total_price / conv.request[1]
         npc.say(f"{conv.request[0].capitalize()}s are hot. {item_price} each comes out to {total_price} gourd.")
 
-    return n4
+    return consider_offer
 
-def n4():
+def consider_offer():
     """Accept or reject offer"""
     choice = choose("I accept.", "No way!")
     if choice == 0:
         if player.money >= npc.offer_price(conv):
-            return n5
+            return accept_offer
         else:
             scene.narrate("You dig around in our purse as your error dawns on you.")
             player.say("Wait. I changed my mind.")
             npc.adjust_disposition(player, -0.2)
-            return n6
+            return reject_offer
     else:
-        return n6
+        return reject_offer
 
-def n5():
+def accept_offer():
     """Offer accepted"""
     price = npc.offer_price(conv)
     npc.say(f"It's a bargain at {price} gourd!")
@@ -125,19 +125,19 @@ def n5():
     player.inventory.append(conv.request)
     conv.request = None
     player.money -= price
-    return n1
+    return choose_item
 
-def n6():
+def reject_offer():
     """Offer refused"""
     npc.say("Come back when you're serious.")
     npc.adjust_disposition(player, -0.2)
-    return n1
+    return choose_item
 
-def n3():
+def offer_cat():
     npc.say("*sigh* Not again. C'mon man, I'm all outta cats.")
     if not player.saw_cats:
         player.say("Next time, then.")
-        return n1
+        return choose_item
 
     player.say("No you're not. Let's see 'em.")
     npc.adjust_disposition(player, -0.4)
@@ -148,14 +148,14 @@ def n3():
     npc.say("150 for the siamese.")
     conv.discount = 1.0
     conv.request = ('siamese cat', 1)
-    return n4
+    return consider_offer
 
-def n7():
+def leave():
     scene.narrate("You wander the streets until finding yourself back at the shop.")
-    return n0
+    return start
 
 
 if __name__ == '__main__':
-    node = n0
+    node = start
     while True:
         node = node()
