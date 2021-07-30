@@ -1,69 +1,5 @@
 import random
 
-class Player:
-    def __init__(self):
-        self.inventory = []
-        self.money = 200
-        self.saw_cats = True
-
-    def say(self, msg):
-        print("\nPlayer:", msg)
-
-
-class NPC:
-    def __init__(self):
-        self._disp = {}
-    
-    def disposition_to(self, player):
-        return self._disp.get(player, 0)
-
-    def adjust_disposition(self, player, amount):
-        self._disp.setdefault(player, 0)
-        self._disp[player] += amount
-
-    def say(self, msg):
-        print("\n         NPC:", msg)
-    
-    def offer_price(self, conv):
-        item, qty = conv.request
-        item_price = {
-            'red potion': 15,
-            'arrow': 6,
-            'siamese cat': 150,
-        }[item]
-
-        return int(item_price * qty * conv.discount)
-
-
-class Scene:
-    def narrate(self, text):
-        print("\n  **  ", text)
-
-class ConversationState:
-    pass
-
-
-player = Player()
-npc = NPC()
-scene = Scene()
-conv = ConversationState()
-
-
-def choose(*choices):
-    print("\nSay:")
-    for i,ch in enumerate(choices):
-        print(f"    {i}) {ch or '[ leave ]'}")
-    response = input()
-    try:
-        choice = int(response)
-        assert choice < len(choices)
-        player.say(choices[choice])
-        return choice
-    except Exception:
-        print("You chose .. poorly:", response)
-        return choose(*choices)
-
-
 
 def start():
     """NPC greeting"""
@@ -156,6 +92,71 @@ def leave():
 
 
 if __name__ == '__main__':
+
+    class Player:
+        def __init__(self):
+            self.inventory = []
+            self.money = 200
+            self.saw_cats = True
+
+        def say(self, msg):
+            print("\nPlayer:", msg)
+
+
+    class NPC:
+        def __init__(self):
+            self._disp = {}
+        
+        def disposition_to(self, player):
+            return self._disp.get(player, 0)
+
+        def adjust_disposition(self, player, amount):
+            self._disp.setdefault(player, 0)
+            self._disp[player] += amount
+
+        def say(self, msg):
+            print("\n         NPC:", msg)
+        
+        def offer_price(self, conv):
+            item, qty = conv.request
+            item_price = {
+                'red potion': 15,
+                'arrow': 6,
+                'siamese cat': 150,
+            }[item]
+
+            return int(item_price * qty * conv.discount)
+
+
+    class Scene:
+        def narrate(self, text):
+            print("\n  **  ", text)
+
+    class ConversationState:
+        pass
+
+
+    player = Player()
+    npc = NPC()
+    scene = Scene()
+    conv = ConversationState()
+
+
+    def choose(*choices):
+        print("\nSay:")
+        for i,ch in enumerate(choices):
+            print(f"    {i}) {ch or '[ leave ]'}")
+        response = input()
+        try:
+            choice = int(response)
+            assert choice < len(choices)
+            player.say(choices[choice])
+            return choice
+        except Exception:
+            print("You chose .. poorly:", response)
+            return choose(*choices)
+
+
     node = start
     while True:
         node = node()
