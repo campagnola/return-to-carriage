@@ -1,7 +1,6 @@
 from enum import Enum
 import numpy as np
 import time
-import msvcrt
 import random
 
 
@@ -110,9 +109,7 @@ class Node(object):
             self.print_text(self.text, self.character_uid)
             a = None
             while a not in self.valid_input:
-                a = msvcrt.getch().decode('utf-8')
-                if a == '\x1b':
-                    break
+                a = input()
             i = int(a)-1
             print('\n{0}\n'.format(self.opt[i]))
             n = int(i)
