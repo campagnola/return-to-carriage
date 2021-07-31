@@ -13,6 +13,9 @@ class Entity:
     def components(self):
         return {k:v for k,v in self.__dict__.items() if isinstance(v, Component)}
 
+    def has_component(self, name):
+        return name in self.components
+
 
 class Component(Entity):
     """A sub-part of an entity"""

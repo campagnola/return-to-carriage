@@ -1017,49 +1017,46 @@ class MemoryRenderer(object):
             return img[::-1]
 
 
-
-
-
-class Console(object):
+class TextBox(object):
     def __init__(self, shape):
         self.shape = shape
-        
+
         self.view = vispy.scene.widgets.ViewBox(border_color=(1, 1, 1, 0.2), bgcolor=(0, 0, 0, 0.4))
         self.view.camera = 'panzoom'
         self.view.camera.rect = vispy.geometry.Rect(-0.7, -0.7, shape[1], shape[0])
         self.view.padding = 0
         self.view.margin = 1
-        
+
         # generate a texture for each character we need
         self.atlas = CharAtlas(size=12)
         ascii_chars = [chr(i) for i in range(0x20, 128)]
         self.atlas.add_chars(ascii_chars)
-        
+
         # create sprites visual
         self.txt = Sprites(self.atlas, sprite_size=(1, 1), point_cs='visual', parent=self.view.scene)
         self.txt.update_gl_state(depth_test=False)
-        
+
         self.txt_sprites = self.txt.add_sprites(shape)
         self.txt_sprites.sprite = 0
-        
+
         pos = np.zeros(shape + (3,), dtype='float32')
         pos[...,:2] = np.mgrid[0:shape[1], 0:shape[0]].transpose(2, 1, 0)
         self.txt_sprites.position = pos
-        
+
         fgcolor = np.ones(shape + (4,), dtype='float32')
         fgcolor[...,3] = 0.5
         self.txt_sprites.fgcolor = fgcolor
-        
+
         bgcolor = np.ones(shape + (4,), dtype='float32')
         bgcolor[..., 3] = 0
         self.txt_sprites.bgcolor = bgcolor
-        
+
         self.lines = []
 
     def write(self, txt):
         self.lines.extend(txt.split('\n'))
         self.update_text()
-        
+
     def set_last_line(self, line):
         self.lines[-1] = line
         self.update_text()

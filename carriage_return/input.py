@@ -173,13 +173,13 @@ class DefaultInputHandler(InputHandler):
         if ev.key == 'Escape':
             self.ui.quit()
         elif ev.key == 'Tab':
-            self.scene.toggle_command_mode()
+            self.ui.toggle_command_mode()
         elif ev.key == 't':
-            self.scene.command('take')
+            self.ui.command('take')
         elif ev.key == 'd':
-            self.scene.command('drop')
+            self.ui.command('drop')
         elif ev.key == 'r':
-            self.scene.command('read')
+            self.ui.command('read')
         else:
             self.keys.add(ev.key)
             self.handle_input(None)
@@ -219,9 +219,10 @@ class CommandInputHandler(InputHandler):
         
         # todo: command history up/down
         # todo: cursor left/right/bkspc/del/home/end
-
-        s = ev.text
-        self.command += ev.text
+        if ev.key == 'Backspace':
+            self.command = self.command[:-1]
+        else:
+            self.command += ev.text
         self.update_prompt()
         
         return True
