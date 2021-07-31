@@ -10,6 +10,10 @@ from carriage_return.monster import Monster
 from carriage_return.item import Scroll, Torch
 from carriage_return.input import DefaultInputHandler
 
+import sys
+import vispy.app
+
+
 
 if __name__ == '__main__':
 
@@ -49,3 +53,5 @@ if __name__ == '__main__':
 
     yeti = Monster(position=(8, 40), scene=scene)
     
+    if sys.flags.interactive == 0:
+        vispy.app.run()
