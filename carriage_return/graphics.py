@@ -237,7 +237,9 @@ class SpritesVisual(vispy.visuals.Visual):
 
         self.method = method
         self.point_cs = point_cs
-        
+
+        self.sprite_data_items = []
+
         self.atlas = atlas
         self.atlas.atlas_changed.connect(self._atlas_changed)
         self.position = np.empty((0, 3), dtype='float32')
@@ -276,7 +278,9 @@ class SpritesVisual(vispy.visuals.Visual):
             raise TypeError("shape must be a tuple (got %r)" % shape)
         n = np.product(shape)
         i = self._resize(self.position.shape[0] + n)
-        return SpriteData(self, i, shape)
+        sd = SpriteData(self, i, shape)
+        self.sprite_data_items.append(sd)
+        return sd
 
     def _resize(self, n):
         """Resize sprite array, return old size.
@@ -288,6 +292,14 @@ class SpritesVisual(vispy.visuals.Visual):
         self.bgcolor = np.resize(self.bgcolor, (n, 4))        
         self._upload_data()
         return n1
+
+    def data_changed_shape(self):
+        size = sum([len(sd) for sd in self.sprite_data_items])
+        self._resize(size)
+        start = 0
+        for sd in self.sprite_data_items:
+            sd.set_start(start)
+            start += len(sd)
     
     def _upload_data(self):
         self.shared_program['position'].set_data(self.position)
@@ -366,6 +378,10 @@ class SpriteData(object):
         n = np.product(shape)
         self.indices = (start, start+n)
         self.shape = shape
+        self._position = None
+        self._sprite = None
+        self._fgcolor = None
+        self._bgcolor = None
         
     @property
     def position(self):
@@ -374,6 +390,7 @@ class SpriteData(object):
     
     @position.setter
     def position(self, p):
+        self._position = p
         start, stop = self.indices
         self.position[:] = p
         self.sprites.shared_program['position'][start:stop] = self.position.view(dtype=[('position', 'float32', 3)]).reshape(stop-start)
@@ -386,6 +403,7 @@ class SpriteData(object):
     
     @sprite.setter
     def sprite(self, p):
+        self._sprite = p
         start, stop = self.indices
         self.sprite[:] = p
         self.sprites.shared_program['sprite'][start:stop] = self.sprite.reshape(stop-start).astype('float32')
@@ -398,6 +416,7 @@ class SpriteData(object):
     
     @fgcolor.setter
     def fgcolor(self, p):
+        self._fgcolor = p
         start, stop = self.indices
         self.fgcolor[:] = p
         self.sprites.shared_program['fgcolor'][start:stop] = self.fgcolor.view(dtype=[('fgcolor', 'float32', 4)]).reshape(stop-start)
@@ -410,11 +429,28 @@ class SpriteData(object):
     
     @bgcolor.setter
     def bgcolor(self, p):
+        self._bgcolor = p
         start, stop = self.indices
         self.bgcolor[:] = p
         self.sprites.shared_program['bgcolor'][start:stop] = self.bgcolor.view(dtype=[('bgcolor', 'float32', 4)]).reshape(stop-start)
         self.sprites.update()
+
+    def set_start(self, start):
+        n = np.product(self.shape)
+        self.indices = (start, start+n)
+        if self._position is not None:
+            self.position = self._position
+            self.sprite = self._sprite
+            self.fgcolor = self._fgcolor
+            self.bgcolor = self._bgcolor
         
+    def set_shape(self, shape):
+        self.shape = shape
+        self._position = None
+        self._sprite = None
+        self._fgcolor = None
+        self._bgcolor = None
+        self.sprites.data_changed_shape()
 
 
 import pyqtgraph as pg
@@ -1015,61 +1051,3 @@ class MemoryRenderer(object):
         
         if read:
             return img[::-1]
-
-
-class TextBox(object):
-    def __init__(self, shape):
-        self.shape = shape
-
-        self.view = vispy.scene.widgets.ViewBox(border_color=(1, 1, 1, 0.2), bgcolor=(0, 0, 0, 0.4))
-        self.view.camera = 'panzoom'
-        self.view.camera.rect = vispy.geometry.Rect(-0.7, -0.7, shape[1], shape[0])
-        self.view.padding = 0
-        self.view.margin = 1
-
-        # generate a texture for each character we need
-        self.atlas = CharAtlas(size=12)
-        ascii_chars = [chr(i) for i in range(0x20, 128)]
-        self.atlas.add_chars(ascii_chars)
-
-        # create sprites visual
-        self.txt = Sprites(self.atlas, sprite_size=(1, 1), point_cs='visual', parent=self.view.scene)
-        self.txt.update_gl_state(depth_test=False)
-
-        self.txt_sprites = self.txt.add_sprites(shape)
-        self.txt_sprites.sprite = 0
-
-        pos = np.zeros(shape + (3,), dtype='float32')
-        pos[...,:2] = np.mgrid[0:shape[1], 0:shape[0]].transpose(2, 1, 0)
-        self.txt_sprites.position = pos
-
-        fgcolor = np.ones(shape + (4,), dtype='float32')
-        fgcolor[...,3] = 0.5
-        self.txt_sprites.fgcolor = fgcolor
-
-        bgcolor = np.ones(shape + (4,), dtype='float32')
-        bgcolor[..., 3] = 0
-        self.txt_sprites.bgcolor = bgcolor
-
-        self.lines = []
-
-    def write(self, txt):
-        self.lines.extend(txt.split('\n'))
-        self.update_text()
-
-    def set_last_line(self, line):
-        self.lines[-1] = line
-        self.update_text()
-
-    def remove_last_line(self):
-        self.lines.pop(-1)
-        self.update_text()
-
-    def update_text(self):
-        sprites = np.zeros(self.shape, dtype='uint8')
-        sprites[:] = ord(' ')
-        for i in range(min(self.shape[0], len(self.lines))):
-            # todo: line wrapping
-            line = np.fromstring(self.lines[-i-1].encode('ascii'), dtype='ubyte')
-            sprites[i, :len(line)] = line[:self.shape[1]]
-        self.txt_sprites.sprite = sprites - 0x20

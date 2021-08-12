@@ -2,8 +2,8 @@ import numpy as np
 import vispy.scene, vispy.app
 import vispy.util.ptime as ptime
 
+from .graphics import CharAtlas, Sprites
 from .input import InputDispatcher, CommandInputHandler
-from .graphics import TextBox
 from .console import CommandInterpreter
 
 
@@ -24,7 +24,7 @@ class MainWindow:
 
         # setup UI
         self.view = self.canvas.central_widget.add_view()
-        self.view.camera = 'panzoom'
+        self.view.camera = Camera()
         self.view.camera.rect = [0, -5, 120, 60]
         self.view.camera.aspect = 0.6
         self.view.events.key_press.disconnect()
@@ -48,19 +48,13 @@ class MainWindow:
         self.info_box.view.height_max = 200
         self.stats_box.view.stretch = (1, 1)
 
-        self.console = TextBox((15, 80))
+        self.console = Console((15, 80))
         self.console_grid.add_widget(self.console.view, 2, 1)
-        self.console.view.stretch = (1, 10)
-        # self.console.view.parent = self.canvas.scene
-        self.console.view.rect = vispy.geometry.Rect(30, 620, 1350, 250)
-        self.console.transform = vispy.visuals.transforms.STTransform((0, 0, -0.5))
-        # self.console.view.camera.aspect = 0.6
 
         self.console.view.height_max = 200
 
         self.console.write('Hello?')
         self.console.write('Is anybody\n    there?')
-        self.console.write(''.join([chr(i) for i in range(0x20, 128)]))
         # self.console.view.camera.rect = [-1, -1, 30, 3]
 
         self.command = CommandInterpreter(self)
@@ -125,3 +119,81 @@ class MainWindow:
 
     def quit(self):
         self.canvas.close()
+
+
+class TextBox(object):
+    def __init__(self, shape):
+        self.shape = shape
+
+        self.view = vispy.scene.widgets.ViewBox(border_color=(1, 1, 1, 0.2), bgcolor=(0, 0, 0, 0.4))
+        self.view.camera = Camera()
+        self.view.camera.rect = vispy.geometry.Rect(-0.7, -0.7, shape[1], shape[0])
+        self.view.padding = 0
+        self.view.margin = 1
+
+        # generate a texture for each character we need
+        self.atlas = CharAtlas(size=12)
+        ascii_chars = [chr(i) for i in range(0x20, 128)]
+        self.atlas.add_chars(ascii_chars)
+
+        # create sprites visual
+        self.txt = Sprites(self.atlas, sprite_size=(1, 1), point_cs='visual', parent=self.view.scene)
+        self.txt.update_gl_state(depth_test=False)
+
+        self.txt_sprites = self.txt.add_sprites(shape)
+        self.txt_sprites.sprite = 0
+
+        pos = np.zeros(shape + (3,), dtype='float32')
+        pos[...,:2] = np.mgrid[0:shape[1], 0:shape[0]].transpose(2, 1, 0)
+        self.txt_sprites.position = pos
+
+        fgcolor = np.ones(shape + (4,), dtype='float32')
+        fgcolor[...,3] = 0.5
+        self.txt_sprites.fgcolor = fgcolor
+
+        bgcolor = np.ones(shape + (4,), dtype='float32')
+        bgcolor[..., 3] = 0
+        self.txt_sprites.bgcolor = bgcolor
+
+        self.lines = []
+
+    def write(self, txt):
+        self.lines.extend(txt.split('\n'))
+        self.update_text()
+
+    def set_last_line(self, line):
+        self.lines[-1] = line
+        self.update_text()
+
+    def remove_last_line(self):
+        self.lines.pop(-1)
+        self.update_text()
+
+    def update_text(self):
+        sprites = np.zeros(self.shape, dtype='uint8')
+        sprites[:] = ord(' ')
+        for i in range(min(self.shape[0], len(self.lines))):
+            # todo: line wrapping
+            line = np.fromstring(self.lines[-i-1].encode('ascii'), dtype='ubyte')
+            sprites[i, :len(line)] = line[:self.shape[1]]
+        self.txt_sprites.sprite = sprites - 0x20
+
+
+class Console(TextBox):
+    def __init__(self, shape):
+        TextBox.__init__(self, shape)
+        self.view.stretch = (1, 10)
+        # self.console.view.parent = self.canvas.scene
+        self.view.rect = vispy.geometry.Rect(30, 620, 1350, 250)
+        self.transform = vispy.visuals.transforms.STTransform((0, 0, -0.5))
+        # self.console.view.camera.aspect = 0.6
+
+
+
+
+class Camera(vispy.scene.cameras.PanZoomCamera):
+    """Pan/zoom camera with all default keyboard interaction disabled"""
+    def viewbox_key_event(self, ev):
+        pass
+
+
