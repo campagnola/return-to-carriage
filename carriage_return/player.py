@@ -12,7 +12,7 @@ class Player(Entity):
 
         self.inventory = Inventory(self, slot_type=str, max_weight=40, max_length=100, allowed_slots=['right hand', 'left hand'])
         self.location = Location(self, None, None)
-        self.sprite = SingleCharSprite(self, zval=-0.1, char='&')
+        self.sprite = SingleCharSprite(self, zval=-0.1, char='&', layer='actors')
 
         scene.player = self
 

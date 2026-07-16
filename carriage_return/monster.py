@@ -1,20 +1,18 @@
 # coding: utf8
-import vispy.scene, vispy.app
-import numpy as np
 
 
 class Monster(object):
     def __init__(self, position, scene):
         self._position = None
         self.scene = scene
-        
-        self.sprite = scene.txt.add_sprites((1,))        
+
+        self.sprite = scene.sprite_layers['actors'].add_sprites((1,))
         self.sprite.fgcolor = (0.6, 0.6, 0.6, 1)
         self.sprite.bgcolor = (0, 0, 0, 1)
-        self.sprite.sprite = scene.atlas[u'Y']
-        
+        self.sprite.glyph = scene.glyphs[u'Y']
+
         self.position = position
-    
+
     def take_turn(self):
         l = list(self.position)
         l[1] -= 1
@@ -23,7 +21,7 @@ class Monster(object):
     @property
     def position(self):
         return self._position
-    
+
     @position.setter
     def position(self, pos):
         old_pos = self._position

@@ -2,7 +2,9 @@
 import numpy as np
 import vispy.scene, vispy.app
 
-from .graphics import CharAtlas, Sprites, TextureMaskFilter, ShadowRenderer
+from .graphics import TextureMaskFilter, ShadowRenderer
+from .layers import GlyphRegistry, SpriteLayer
+from .render_vispy import VispyLayerRenderer
 from .maze import Maze
 from .array_cache import ArraySumCache
 from .entity import Entity
@@ -15,21 +17,22 @@ class Scene(Entity):
         Entity.__init__(self, entity_type='scene')
         self._player = None
 
-        # generate a texture for each character we need
-        self.atlas = CharAtlas()
-
-        # create sprites visual
-        self.txt = Sprites(self.atlas, sprite_size=(1, 1), point_cs='visual', parent=ui.view.scene)
+        # game-owned render layers: the bridge between game state and renderers
+        self.glyphs = GlyphRegistry()
+        self.sprite_layers = {name: SpriteLayer(name) for name in ('scenery', 'items', 'actors')}
 
         # create maze
         self.maze = Maze.load_image('level1.png')
 
-        # add sprites for drawing maze
-        self.maze.add_sprites(self.atlas, self.txt)
+        # add scenery sprites for drawing maze
+        self.maze.add_scenery(self.glyphs, self.sprite_layers['scenery'])
+
+        # rendering backend consumes the layers
+        self.renderer = VispyLayerRenderer(ui, self.glyphs, list(self.sprite_layers.values()))
 
         # line-of-sight computation
         opacity = self.maze.opacity.astype('float32')
-        tr = self.txt.transforms.get_transform('framebuffer', 'visual')
+        tr = self.renderer.txt.transforms.get_transform('framebuffer', 'visual')
         
         ms = self.maze.shape
         self.supersample = 4
@@ -46,7 +49,7 @@ class Scene(Entity):
         # filters scene for lighting, line of sight, and memory
         self.sight_texture =  vispy.gloo.Texture2D(shape=self.texture_shape, format='rgb', interpolation='linear', wrapping='repeat')
         self.sight_filter = TextureMaskFilter(self.sight_texture, tr, scale=(1./ms[1], 1./ms[0]))
-        self.txt.attach(self.sight_filter)
+        self.renderer.txt.attach(self.sight_filter)
 
         # track all items
         self.items = []

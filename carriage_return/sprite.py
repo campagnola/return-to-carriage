@@ -7,14 +7,17 @@ class SingleCharSprite(Component):
     - Reacts to location changes
     - Hides when not visible
     - Assumes background color from maze
+
+    Writes into one of the scene's game-owned sprite layers; no rendering
+    library is touched here.
     """
-    def __init__(self, entity, zval, char, fg_color=(1, 1, 1, 1), bg_color=None):
+    def __init__(self, entity, zval, char, fg_color=(1, 1, 1, 1), bg_color=None, layer='items'):
         Component.__init__(self, entity, component_type='single_char_sprite')
         self.zval = zval
         self.bg_color = bg_color
         self.fg_color = fg_color
-        self.sprite = entity.scene.txt.add_sprites((1,))
-        self.sprite.sprite = entity.scene.atlas.add_chars(char)
+        self.sprite = entity.scene.sprite_layers[layer].add_sprites((1,))
+        self.sprite.glyph = entity.scene.glyphs.add_chars(char)
         self.sprite.fgcolor = fg_color
         self.sprite.bgcolor = bg_color
 

@@ -26,7 +26,7 @@ class Item(Entity):
 
         self.inventory = Inventory(self, allowed_slots=[])
         self.location = Location(self, None, None)
-        self.sprite = SingleCharSprite(self, zval=-0.1, char=self.char, fg_color=self.fg_color)
+        self.sprite = SingleCharSprite(self, zval=-0.1, char=self.char, fg_color=self.fg_color, layer='items')
 
         scene.add_item(self)
 

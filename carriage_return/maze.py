@@ -69,8 +69,24 @@ class Maze(Entity):
         maze_blocks[maze_blocks==0] = blocktypes.id_of('path')
         return cls(maze_blocks, blocktypes)
 
-    def add_sprites(self, char_atlas, txt):
-        self.sprites = MazeSprites(self, char_atlas, txt)
+    def add_scenery(self, glyphs, layer):
+        """Fill a scenery SpriteLayer with this maze's blocks.
+
+        *glyphs* is the scene's GlyphRegistry, *layer* the scenery SpriteLayer.
+        """
+        first_id = glyphs.add_chars(self.blocktypes.all_chars)
+        self.scenery = layer.add_sprites(self.shape)
+        self.scenery.glyph = self.blocks + first_id
+
+        # set positions
+        shape = self.shape
+        pos = np.zeros(shape + (3,), dtype='float32')
+        pos[..., :2] = np.mgrid[0:shape[1], 0:shape[0]].transpose(2, 1, 0)
+        self.scenery.position = pos
+
+        # set colors
+        self.scenery.fgcolor = self.fg_color
+        self.scenery.bgcolor = self.bg_color
 
     def opaque_geometry(self):
         """Return a list of vertex loops defining the boundaries of objects that block line-of-sight.
@@ -97,25 +113,3 @@ class Maze(Entity):
         opaque_mask[2::3, 2::3] = padded[2:,   2:] & opaque_mask[2::3, 1::3] & opaque_mask[1::3, 2::3]
 
         return opaque_mask
-        
-
-
-class MazeSprites:
-    def __init__(self, maze, char_atlas, txt):
-        self._txt = txt
-        self._maze = maze
-        self._char_atlas = char_atlas
-        char_atlas.add_chars(maze.blocktypes.all_chars)
-
-        self.sprites = txt.add_sprites(maze.shape)
-        self.sprites.sprite = maze.blocks
-
-        # set positions
-        shape = maze.shape
-        pos = np.zeros(shape + (3,), dtype='float32')
-        pos[...,:2] = np.mgrid[0:shape[1], 0:shape[0]].transpose(2, 1, 0)
-        self.sprites.position = pos
-
-        # set colors
-        self.sprites.fgcolor = maze.fg_color
-        self.sprites.bgcolor = maze.bg_color
