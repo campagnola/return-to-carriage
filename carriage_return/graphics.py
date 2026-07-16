@@ -277,8 +277,8 @@ class SpritesVisual(vispy.visuals.Visual):
         if not isinstance(shape, tuple):
             raise TypeError("shape must be a tuple (got %r)" % shape)
         n = np.product(shape)
-        i = self._resize(self.position.shape[0] + n)
-        sd = SpriteData(self, i, shape)
+        old_size = self._resize(self.position.shape[0] + n)
+        sd = SpriteData(self, start=old_size, shape=shape)
         self.sprite_data_items.append(sd)
         return sd
 
@@ -375,14 +375,12 @@ class SpriteData(object):
     """
     def __init__(self, sprites, start, shape):
         self.sprites = sprites
-        n = np.product(shape)
-        self.indices = (start, start+n)
-        self.shape = shape
-        self._position = None
-        self._sprite = None
-        self._fgcolor = None
-        self._bgcolor = None
-        
+        self.set_shape(shape, inform_parent=False)
+        self.set_start(start)
+
+    def __len__(self):
+        return np.product(self.shape)
+
     @property
     def position(self):
         start, stop = self.indices
@@ -436,21 +434,21 @@ class SpriteData(object):
         self.sprites.update()
 
     def set_start(self, start):
-        n = np.product(self.shape)
-        self.indices = (start, start+n)
+        self.indices = (start, start + len(self))
         if self._position is not None:
             self.position = self._position
             self.sprite = self._sprite
             self.fgcolor = self._fgcolor
             self.bgcolor = self._bgcolor
-        
-    def set_shape(self, shape):
+
+    def set_shape(self, shape, inform_parent=True):
         self.shape = shape
         self._position = None
         self._sprite = None
         self._fgcolor = None
         self._bgcolor = None
-        self.sprites.data_changed_shape()
+        if inform_parent:
+            self.sprites.data_changed_shape()
 
 
 import pyqtgraph as pg

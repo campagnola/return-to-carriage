@@ -4,7 +4,7 @@ import vispy.util.ptime as ptime
 
 from .graphics import CharAtlas, Sprites
 from .input import InputDispatcher, CommandInputHandler
-from .console import CommandInterpreter
+from .interpreter import CommandInterpreter
 
 
 class MainWindow:
@@ -35,20 +35,22 @@ class MainWindow:
 
         self.console_grid = self.canvas.central_widget.add_grid()
 
-        self.stats_box = TextBox((2, 160))
+        char_size = (10, 16)
+
+        self.stats_box = TextBox(char_size)
         self.console_grid.add_widget(self.stats_box.view, 1, 0, 1, 2)
         self.stats_box.write(
             "HP:17/33   Food:56%  Water:34%  Sleep:65%   Weight:207(45)    Level:3  Int:12  Str:9  Wis:11  Cha:2")
         self.stats_box.view.height_max = 30
         self.stats_box.view.stretch = (1, 10)
 
-        self.info_box = TextBox((15, 80))
+        self.info_box = TextBox(char_size)
         self.console_grid.add_widget(self.info_box.view, 2, 0)
         self.info_box.write("There is a scroll of infinite recursion here.")
         self.info_box.view.height_max = 200
         self.stats_box.view.stretch = (1, 1)
 
-        self.console = Console((15, 80))
+        self.console = Console(char_size)
         self.console_grid.add_widget(self.console.view, 2, 1)
 
         self.console.view.height_max = 200
@@ -122,12 +124,12 @@ class MainWindow:
 
 
 class TextBox(object):
-    def __init__(self, shape):
-        self.shape = shape
+    def __init__(self, char_size):
+        self.char_size = char_size
 
         self.view = vispy.scene.widgets.ViewBox(border_color=(1, 1, 1, 0.2), bgcolor=(0, 0, 0, 0.4))
         self.view.camera = Camera()
-        self.view.camera.rect = vispy.geometry.Rect(-0.7, -0.7, shape[1], shape[0])
+        self.update_camera()
         self.view.padding = 0
         self.view.margin = 1
 
@@ -140,9 +142,24 @@ class TextBox(object):
         self.txt = Sprites(self.atlas, sprite_size=(1, 1), point_cs='visual', parent=self.view.scene)
         self.txt.update_gl_state(depth_test=False)
 
-        self.txt_sprites = self.txt.add_sprites(shape)
+        self.txt_sprites = self.txt.add_sprites(self.shape)
         self.txt_sprites.sprite = 0
 
+        self.init_arrays()
+
+        self.lines = []
+
+        self.view.events.resize.connect(self.on_resize)
+
+    @property
+    def shape(self):
+        return (
+            int(self.size[1] / self.char_size[1]),
+            int(self.size[0] / self.char_size[0]),
+        )
+
+    def init_arrays(self):
+        shape = self.shape
         pos = np.zeros(shape + (3,), dtype='float32')
         pos[...,:2] = np.mgrid[0:shape[1], 0:shape[0]].transpose(2, 1, 0)
         self.txt_sprites.position = pos
@@ -155,7 +172,16 @@ class TextBox(object):
         bgcolor[..., 3] = 0
         self.txt_sprites.bgcolor = bgcolor
 
-        self.lines = []
+    @property
+    def size(self):
+        return self.view.size
+
+    def update_camera(self):
+        # size the rect in fractional character units so one cell always maps
+        # to exactly char_size pixels, regardless of integer grid truncation
+        w = self.size[0] / self.char_size[0]
+        h = self.size[1] / self.char_size[1]
+        self.view.camera.rect = vispy.geometry.Rect(-0.7, -0.7, w, h)
 
     def write(self, txt):
         self.lines.extend(txt.split('\n'))
@@ -178,10 +204,16 @@ class TextBox(object):
             sprites[i, :len(line)] = line[:self.shape[1]]
         self.txt_sprites.sprite = sprites - 0x20
 
+    def on_resize(self, event):
+        self.txt_sprites.set_shape(self.shape)
+        self.update_camera()
+        self.init_arrays()
+        self.update_text()
+
 
 class Console(TextBox):
-    def __init__(self, shape):
-        TextBox.__init__(self, shape)
+    def __init__(self, char_size):
+        TextBox.__init__(self, char_size)
         self.view.stretch = (1, 10)
         # self.console.view.parent = self.canvas.scene
         self.view.rect = vispy.geometry.Rect(30, 620, 1350, 250)
