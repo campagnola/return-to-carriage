@@ -1,4 +1,4 @@
-from vispy.util.event import EventEmitter, Event
+from carriage_return.events import EventEmitter, Event
 
 from carriage_return.entity import Component
 

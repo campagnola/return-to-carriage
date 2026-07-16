@@ -1,7 +1,7 @@
 import numpy as np
-import vispy
 from PIL import Image
 from .blocktypes import BlockTypes
+from .geometry import isocurve
 from .entity import Entity
 from .inventory import Inventory
 from .location import Location
@@ -76,7 +76,7 @@ class Maze(Entity):
         """Return a list of vertex loops defining the boundaries of objects that block line-of-sight.
         """
         m = self._opaque_geometry_mask()
-        return vispy.geometry.isocurve.isocurve(m.astype(float), level=0.5, connected=True)
+        return isocurve(m.astype(float), level=0.5, connected=True)
 
     def _opaque_geometry_mask(self):
         opaque = self.opacity > 0.5
