@@ -25,9 +25,12 @@ class SingleCharSprite(Component):
 
     def _update_location(self, event):
         container = self.parent_entity.location.container
-        if container.type.isa('maze'):
+        if container is not None and container.type.isa('maze'):
             pos = self.parent_entity.location.slot
             self.sprite.position = pos + (self.zval,)
             self.sprite.bgcolor = self.bg_color or container.bg_color[pos[1], pos[0]]
         else:
-            self.sprite.position = (float('nan'),) * 3
+            self.hide()
+
+    def hide(self):
+        self.sprite.position = (float('nan'),) * 3

@@ -4,6 +4,7 @@ faulthandler.enable()
 
 from carriage_return.ui import MainWindow
 from carriage_return.scene import Scene
+from carriage_return.render_vispy import VispySceneRenderer
 from carriage_return.dm import DungeonMaster
 from carriage_return.player import Player
 from carriage_return.monster import Monster
@@ -18,7 +19,9 @@ import vispy.app
 if __name__ == '__main__':
 
     ui = MainWindow()
-    scene = Scene(ui)
+    scene = Scene()
+    renderer = VispySceneRenderer(ui, scene)
+    scene.messages.connect(lambda event: ui.console.write(event.message))
     dm = DungeonMaster(scene)
 
     player = Player(scene)

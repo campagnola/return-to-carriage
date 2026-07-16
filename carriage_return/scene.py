@@ -1,19 +1,35 @@
 # coding: utf8
 import numpy as np
-import vispy.scene, vispy.app
 
-from .graphics import TextureMaskFilter, ShadowRenderer
-from .layers import GlyphRegistry, SpriteLayer
-from .render_vispy import VispyLayerRenderer
+from .events import EventEmitter
+from .layers import GlyphRegistry, SpriteLayer, FieldLayer
 from .maze import Maze
 from .array_cache import ArraySumCache
 from .entity import Entity
 
 
 class Scene(Entity):
-    """Central organizing class for managing UI, landscape, player, items, and mobs
+    """Game state: the landscape, player, items, and mobs.
+
+    Contains no rendering code. What should be displayed is written into
+    game-owned render layers (see layers.py):
+
+    - ``glyphs`` and ``sprite_layers`` ('scenery', 'items', 'actors') carry
+      character sprites; entities write into them as they move.
+    - ``sight`` is a FieldLayer holding the composited lighting * line-of-sight
+      + memory field, updated by update_sight().
+
+    A rendering backend (e.g. render_vispy.VispySceneRenderer) consumes these
+    layers and injects ``visibility``: an object with
+    ``render(pos, read=True) -> (h, w, >=3) array`` that computes a shadow map
+    for a light/viewer at a maze position.
     """
-    def __init__(self, ui):
+
+    # sight memory fades to this fraction of itself per second (equivalent to
+    # the historical 0.999-per-frame decay at 60 fps)
+    MEMORY_DECAY_RATE = 0.999 ** 60
+
+    def __init__(self):
         Entity.__init__(self, entity_type='scene')
         self._player = None
 
@@ -27,39 +43,32 @@ class Scene(Entity):
         # add scenery sprites for drawing maze
         self.maze.add_scenery(self.glyphs, self.sprite_layers['scenery'])
 
-        # rendering backend consumes the layers
-        self.renderer = VispyLayerRenderer(ui, self.glyphs, list(self.sprite_layers.values()))
+        # visibility provider (see class docstring); injected by the rendering
+        # backend or by headless test code
+        self.visibility = None
 
-        # line-of-sight computation
-        opacity = self.maze.opacity.astype('float32')
-        tr = self.renderer.txt.transforms.get_transform('framebuffer', 'visual')
-        
         ms = self.maze.shape
         self.supersample = 4
-        self.texture_shape = (ms[0] * self.supersample, ms[1] * self.supersample, 3)
+        self.field_shape = (ms[0] * self.supersample, ms[1] * self.supersample, 3)
 
-        self.shadow_renderer = ShadowRenderer(self.maze, ui.canvas, supersample=self.supersample)
         self.norm_light = None
-
         self.light_cache = ArraySumCache()
 
-        self.memory = np.zeros(self.texture_shape, dtype='float32')
-        self.sight = np.zeros(self.texture_shape, dtype='float32')
-        
-        # filters scene for lighting, line of sight, and memory
-        self.sight_texture =  vispy.gloo.Texture2D(shape=self.texture_shape, format='rgb', interpolation='linear', wrapping='repeat')
-        self.sight_filter = TextureMaskFilter(self.sight_texture, tr, scale=(1./ms[1], 1./ms[0]))
-        self.renderer.txt.attach(self.sight_filter)
+        self.memory = np.zeros(self.field_shape, dtype='float32')
+        self.line_of_sight = np.zeros(self.field_shape, dtype='float32')
+
+        # composited sight field consumed by renderers
+        self.sight = FieldLayer('sight', shape=self.field_shape)
+
+        # messages to be shown to the user; UI code connects to this
+        self.messages = EventEmitter(source=self, type='message')
 
         # track all items
         self.items = []
-        
+
         # track monsters by location
         self.monsters = {}
 
-        self._need_los_update = True
-
-        ui.canvas.events.draw.connect(self.on_draw)
         self._need_los_update = True
 
     @property
@@ -81,30 +90,39 @@ class Scene(Entity):
         if old_pos is not None:
             self.monsters[tuple(old_pos)].remove(mon)
         self.monsters.setdefault(tuple(mon.position), []).append(mon)
-        
+
     def add_item(self, item):
         self.items.append(item)
+
+    def write(self, message):
+        """Display a message to the user."""
+        self.messages(message=message)
 
     def request_player_action(self, action):
         if action == 'take':
             items = self.items_at(self.player.location.slot)
             if len(items) == 0:
-                self.console.write("Nothing to take here.")
+                self.write("Nothing to take here.")
             else:
                 for item in items:
                     self.player.take(item)
-                    self.console.write("Taken: %s" % item.name)
+                    self.write("Taken: %s" % item.name)
         elif action == 'read':
             self.player.read_item()
 
     def user_request_item(self, message, items, callback):
         """Ask the user to select an item from a list.
         """
-        self.console.write(message)
-        while True:
-            ev = get_keypress()
+        self.write(message)
+        raise NotImplementedError("interactive item selection not implemented")
 
-    def on_draw(self, ev):
+    def update_sight(self, dt):
+        """Advance the sight/memory field by *dt* seconds and write the result
+        into the ``sight`` FieldLayer.
+
+        Called once per rendered frame by the display backend. LOS and lighting
+        are recomputed only when invalidated (player moved, lights changed).
+        """
         # render new line of sight
         if self._need_los_update:
             self.line_of_sight = self.player.line_of_sight()
@@ -123,22 +141,17 @@ class Scene(Entity):
                 if item_light is None:
                     continue
                 lights.append(item_light)
-            # light = np.zeros(self.texture_shape, dtype='float32')
             light = self.light_cache.sum_arrays(lights)
             log_light = np.log(np.clip(light*10, 1, np.inf))
             self.norm_light = log_light / log_light.max()
 
         # current sight is combination of lighting and LOS
-        self.sight = self.line_of_sight * self.norm_light
+        sight = self.line_of_sight * self.norm_light
 
-        self.sight_with_memory = self.memory * (1 - self.line_of_sight) + self.sight
-
-        self.sight_texture.set_data(self.sight_with_memory.astype('float32'))
+        self.sight.set_data(self.memory * (1 - self.line_of_sight) + sight)
 
         # forget
-        self.memory *= 0.999
+        self.memory *= self.MEMORY_DECAY_RATE ** dt
 
         # add sight to memory
-        self.memory[:, :, 2] = np.maximum(self.memory[:, :, 2], self.sight.max(axis=2))
-
-
+        self.memory[:, :, 2] = np.maximum(self.memory[:, :, 2], sight.max(axis=2))

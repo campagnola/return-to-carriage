@@ -19,6 +19,7 @@ os.chdir(project_root)  # level1.png is loaded from cwd
 
 from carriage_return.ui import MainWindow
 from carriage_return.scene import Scene
+from carriage_return.render_vispy import VispySceneRenderer
 from carriage_return.dm import DungeonMaster
 from carriage_return.player import Player
 from carriage_return.monster import Monster
@@ -27,7 +28,9 @@ from carriage_return.item import Scroll, Torch
 
 def build_game():
     ui = MainWindow()
-    scene = Scene(ui)
+    scene = Scene()
+    renderer = VispySceneRenderer(ui, scene)
+    scene.messages.connect(lambda event: ui.console.write(event.message))
     dm = DungeonMaster(scene)
 
     player = Player(scene)
@@ -47,19 +50,20 @@ def build_game():
     held_torch.light_color = (10000, 5000, 1000)
 
     yeti = Monster(position=(8, 40), scene=scene)
-    return ui, scene, player
+    return ui, scene, renderer, player
 
 
 def main():
     out_path = sys.argv[1]
-    ui, scene, player = build_game()
+    ui, scene, renderer, player = build_game()
 
     # SceneCanvas.render() draws the scene directly without emitting
-    # events.draw, so the game's per-draw update (LOS/lighting -> sight
-    # texture) must be invoked explicitly. Two rounds reach steady state.
+    # events.draw, so the renderer's per-draw update (LOS/lighting -> sight
+    # texture) must be invoked explicitly; a fixed dt keeps the memory decay
+    # deterministic. Two rounds reach steady state.
     ui.canvas.set_current()
     for _ in range(2):
-        scene.on_draw(None)
+        renderer.update(dt=1/60.)
         img = ui.canvas.render()
 
     import PIL.Image

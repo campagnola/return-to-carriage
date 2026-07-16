@@ -59,17 +59,13 @@ class Item(Entity):
     def destroy(self):
         """Remove this item from the game.
         """
-        self.sprite.position = (float('nan'),) * 3
-        loc = self._location
-        if isinstance(loc, (tuple, list, np.ndarray)):
-            self.scene.items[self._location].remove(self)
-        elif isinstance(loc, Player):
-            loc.lose_item(self)
-        self.location = None
+        self.scene.items.remove(self)
+        self.location.update(None, None)
+        self.sprite.hide()
 
     def shadow_map(self):
         if self._shadow_map is None:
-            smap = self.scene.shadow_renderer.render(self.location.slot, read=True)[..., :3]
+            smap = self.scene.visibility.render(self.location.slot, read=True)[..., :3]
             self.set_shadow_map(smap)
             assert self._shadow_map is not None
         return self._shadow_map
@@ -127,11 +123,6 @@ class Torch(Item):
     length = 30.0
     light_color = (10.0, 8.0, 2.0)
     fg_color = (1.0, 0.8, 0.2, 1.0)
-
-
-
-
-from .player import Player
 
 
 

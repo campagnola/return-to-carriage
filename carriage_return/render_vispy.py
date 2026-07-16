@@ -9,9 +9,11 @@ Synchronization runs inside the visual's _prepare_draw so it covers both
 on-screen draws and offscreen SceneCanvas.render() calls (which do not emit
 canvas.events.draw).
 """
-import vispy.scene
+import time
 
-from .graphics import CharAtlas, SpritesVisual
+import vispy.scene, vispy.gloo
+
+from .graphics import CharAtlas, SpritesVisual, TextureMaskFilter, ShadowRenderer
 
 
 class LayerSpritesVisual(SpritesVisual):
@@ -82,3 +84,59 @@ class VispyLayerRenderer(object):
             region.fgcolor = layer.fgcolor
             region.bgcolor = layer.bgcolor
             self._synced_versions[layer.name] = versions
+
+
+class VispySceneRenderer(object):
+    """Complete vispy/OpenGL renderer for a Scene.
+
+    Composes a VispyLayerRenderer for the sprite layers and adds the GL side
+    of the visual-field pipeline:
+
+    - constructs the GPU ShadowRenderer and injects it as scene.visibility
+    - drives scene.update_sight(dt) once per canvas draw
+    - uploads the scene's ``sight`` FieldLayer to a texture (only when its
+      version changed) and applies it to the sprites as a mask filter
+
+    As in the pre-split design, the sight update runs as a canvas draw-event
+    callback, i.e. after the scene has been drawn; the updated field is
+    rendered on the next frame. Offscreen SceneCanvas.render() calls do not
+    emit draw events, so batch/screenshot code must call update() explicitly
+    (with an explicit dt for determinism).
+    """
+    def __init__(self, ui, scene):
+        self.ui = ui
+        self.scene = scene
+
+        self.layer_renderer = VispyLayerRenderer(ui, scene.glyphs, list(scene.sprite_layers.values()))
+        self.txt = self.layer_renderer.txt
+
+        # GPU shadow-map provider for LOS/lighting computations
+        scene.visibility = ShadowRenderer(scene.maze, ui.canvas, supersample=scene.supersample)
+
+        # sight field -> texture, masking the sprites visual
+        ms = scene.maze.shape
+        self.sight_texture = vispy.gloo.Texture2D(shape=scene.field_shape, format='rgb',
+                                                  interpolation='linear', wrapping='repeat')
+        tr = self.txt.transforms.get_transform('framebuffer', 'visual')
+        self.sight_filter = TextureMaskFilter(self.sight_texture, tr, scale=(1./ms[1], 1./ms[0]))
+        self.txt.attach(self.sight_filter)
+
+        self._sight_version = None
+        self._last_update_time = None
+
+        ui.canvas.events.draw.connect(self._on_draw)
+
+    def _on_draw(self, event):
+        now = time.perf_counter()
+        dt = 0.0 if self._last_update_time is None else now - self._last_update_time
+        self._last_update_time = now
+        self.update(dt)
+
+    def update(self, dt):
+        """Advance the scene's visual-field state by *dt* seconds and upload
+        the result if it changed."""
+        self.scene.update_sight(dt)
+        sight = self.scene.sight
+        if sight.version != self._sight_version:
+            self.sight_texture.set_data(sight.data)
+            self._sight_version = sight.version
