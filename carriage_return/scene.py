@@ -99,6 +99,8 @@ class Scene(Entity):
         self.messages(message=message)
 
     def request_player_action(self, action):
+        # todo: items_at() and Player.take() don't exist yet (predates the
+        # renderer split); 'take' will raise until inventory pickup is built
         if action == 'take':
             items = self.items_at(self.player.location.slot)
             if len(items) == 0:
@@ -125,7 +127,7 @@ class Scene(Entity):
         """
         # render new line of sight
         if self._need_los_update:
-            self.line_of_sight = self.player.line_of_sight()
+            self.line_of_sight = self.player.line_of_sight().astype('float32', copy=False)
             self._need_los_update = False
 
         # calculate lighting
