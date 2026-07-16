@@ -35,6 +35,14 @@ write costs one numpy slice assignment plus an increment; backends compare
 counters once per frame and re-upload only what changed. A static scene costs
 a backend a few integer compares and zero copies/uploads per frame.
 
+Additionally, every layer has a single-slot ``observer`` callback (default
+None) invoked on any version bump. An interactive backend registers a cheap,
+coalescing "schedule a frame" function here (the vispy backend uses the
+sprite visual's ``update``) so game-state changes repaint without polling;
+sync still happens at draw time by diffing versions. Do **not** observe the
+``sight`` FieldLayer from a draw-scheduling callback — it is recomputed
+during every draw, which would schedule draws forever.
+
 ### GlyphRegistry (`scene.glyphs`)
 
 Append-only mapping char → small int glyph id, in insertion order.

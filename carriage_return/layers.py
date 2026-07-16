@@ -9,6 +9,12 @@ Change tracking is by integer version counters, not events: a write costs one
 numpy slice assignment plus an increment. Backends compare counters once per
 frame and re-upload only what changed.
 
+Each layer also has a single-slot ``observer`` callback (default None) invoked
+whenever its version is bumped. This exists so an interactive backend can
+learn "something changed, schedule a frame" without polling; it carries no
+information (backends still diff version counters at sync time) and must stay
+cheap and re-entrancy-safe (e.g. vispy's canvas update(), which coalesces).
+
 - ``version`` is bumped on any data write.
 - ``structure_version`` is additionally bumped when the underlying arrays are
   reallocated (new sprites added or a slot reshaped), meaning any references a
@@ -35,6 +41,7 @@ class GlyphRegistry(object):
         self._char_ids = {}
         self.chars = []
         self.version = 0
+        self.observer = None
 
     def __len__(self):
         return len(self.chars)
@@ -52,6 +59,8 @@ class GlyphRegistry(object):
             self._char_ids[char] = first + i
             self.chars.append(char)
         self.version += 1
+        if self.observer is not None:
+            self.observer()
         return first
 
 
@@ -71,6 +80,7 @@ class SpriteLayer(object):
         self.slots = []
         self.version = 0
         self.structure_version = 0
+        self.observer = None
 
     def __len__(self):
         return self.position.shape[0]
@@ -108,6 +118,8 @@ class SpriteLayer(object):
 
         self.version += 1
         self.structure_version += 1
+        if self.observer is not None:
+            self.observer()
         return n1
 
     def _slot_shape_changed(self):
@@ -121,6 +133,8 @@ class SpriteLayer(object):
 
     def _data_changed(self):
         self.version += 1
+        if self.observer is not None:
+            self.observer()
 
 
 class SpriteSlot(object):
@@ -210,6 +224,7 @@ class FieldLayer(object):
         else:
             self.data = np.zeros(shape, dtype='float32')
         self.version = 0
+        self.observer = None
 
     def set_data(self, data):
         """Copy *data* into the field (in place when shapes match) and bump version."""
@@ -219,7 +234,11 @@ class FieldLayer(object):
         else:
             self.data = np.ascontiguousarray(data, dtype='float32')
         self.version += 1
+        if self.observer is not None:
+            self.observer()
 
     def bump(self):
         """Declare that self.data was mutated in place."""
         self.version += 1
+        if self.observer is not None:
+            self.observer()

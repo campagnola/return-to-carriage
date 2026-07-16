@@ -53,6 +53,15 @@ class VispyLayerRenderer(object):
         self._regions = {layer.name: None for layer in self.layers}
         self._synced_versions = {layer.name: None for layer in self.layers}
 
+        # schedule a redraw whenever the game writes to a layer (update() is
+        # coalescing, so a burst of writes costs one repaint). The scene's
+        # sight FieldLayer must NOT be observed this way: it is recomputed
+        # during every draw, so observing it would schedule draws from within
+        # draws, forever.
+        self.glyphs.observer = self.txt.update
+        for layer in self.layers:
+            layer.observer = self.txt.update
+
     def sync(self):
         """Copy changed layer data into the visual; no-op when nothing changed."""
         glyphs = self.glyphs

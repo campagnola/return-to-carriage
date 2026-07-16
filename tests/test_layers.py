@@ -168,3 +168,35 @@ def test_field_layer_from_data():
     f = FieldLayer('opacity', data=src)
     assert f.data.dtype == np.dtype('float32')
     assert np.all(f.data == 1)
+
+
+def test_observer_called_on_writes():
+    """The observer single-slot callback fires on any version bump, so an
+    interactive backend can schedule a redraw when the game changes a layer."""
+    calls = []
+
+    layer = SpriteLayer('test')
+    layer.observer = lambda: calls.append('layer')
+    slot = layer.add_sprites((2,))          # resize -> observer
+    assert calls == ['layer']
+    slot.position = [(0, 0, 0), (1, 1, 0)]  # data write -> observer
+    slot.glyph = 3
+    assert calls == ['layer'] * 3
+
+    glyphs = GlyphRegistry()
+    glyphs.observer = lambda: calls.append('glyphs')
+    glyphs.add_chars('ab')
+    glyphs['c']
+    assert calls[-2:] == ['glyphs', 'glyphs']
+
+    field = FieldLayer('f', shape=(2, 2))
+    field.observer = lambda: calls.append('field')
+    field.set_data(np.ones((2, 2)))
+    field.bump()
+    assert calls[-2:] == ['field', 'field']
+
+
+def test_observer_is_optional():
+    layer = SpriteLayer('test')
+    slot = layer.add_sprites((1,))
+    slot.position = (0, 0, 0)  # no observer set: must not raise
