@@ -1,14 +1,4 @@
-"""Minimal event system for game-side code.
-
-Implements the subset of the vispy.util.event API that the game model uses,
-so that game modules do not depend on any rendering library. Semantics match
-vispy where the game relies on them: kwargs passed when emitting become
-attributes of the event, callbacks connected most recently are called first,
-duplicate connections are ignored, and delivery stops if a callback sets
-event.blocked.
-
-One deliberate difference from vispy: exceptions raised by callbacks
-propagate to the emitter's caller instead of being logged and swallowed.
+"""Minimal event system for game-side code, derived from vispy's event system.
 """
 import threading
 
@@ -18,10 +8,9 @@ class Event(object):
 
     All extra keyword arguments become attributes of the event.
     """
-    def __init__(self, type, native=None, **kwargs):
-        self._sources = []
+    def __init__(self, type, native=None, source=None, **kwargs):
+        self._source = source
         self._handled = False
-        self._blocked = False
         self._type = type
         self._native = native
         for k, v in kwargs.items():
@@ -29,7 +18,8 @@ class Event(object):
 
     @property
     def source(self):
-        return self._sources[-1] if self._sources else None
+        """The object that emitted this event, if any."""
+        return self._source
 
     @property
     def type(self):
@@ -37,79 +27,89 @@ class Event(object):
 
     @property
     def native(self):
+        """The native event that triggered this event, if any."""
         return self._native
 
     @property
     def handled(self):
+        """True if a callback has handled this event and no further processing is needed.
+        
+        Note: handled events are still propagated to all listeners; it is the listener's job
+        to check the handled flag and decide whether to act on the event.
+        """
         return self._handled
 
     @handled.setter
     def handled(self, val):
         self._handled = bool(val)
 
-    @property
-    def blocked(self):
-        return self._blocked
-
-    @blocked.setter
-    def blocked(self, val):
-        self._blocked = bool(val)
-
     def __repr__(self):
         return "<%s type=%s>" % (self.__class__.__name__, self._type)
+    
 
+class Observable:
+    """An object that invokes callbacks when events occur::
 
-class EventEmitter(object):
-    """Emits events to connected callbacks.
-
-    Calling the emitter with keyword arguments creates an ``event_class``
-    instance carrying those kwargs as attributes and delivers it to each
-    connected callback (most recently connected first).
+        some_event = Observable(source=self)
+        some_event.connect(callback)  # callback will be invoked when the event fires
+        some_event(value=42)  # invokes all callbacks with **{'value': 42, 'source': self}
+                    
     """
-    def __init__(self, source=None, type=None, event_class=Event):
-        self._callbacks = []
-        self.source = source
-        self.default_type = type
-        self.event_class = event_class
+    def __init__(self, **kwargs):
+        self.callbacks = []
+        self.kwargs = kwargs
+        self.blocked = False
 
     def connect(self, callback):
         """Add a callback; it will be invoked before previously connected ones.
 
         Connecting an already-connected callback is a no-op.
         """
-        if callback in self._callbacks:
+        if callback in self.callbacks:
             return callback
-        self._callbacks.insert(0, callback)
+        self.callbacks.insert(0, callback)
         return callback
 
     def disconnect(self, callback=None):
         """Remove a callback, or all callbacks if none is given."""
         if callback is None:
-            self._callbacks = []
+            self.callbacks = []
         else:
-            self._callbacks.remove(callback)
+            self.callbacks.remove(callback)
+
+    def __call__(self, *args, **kwargs):
+        # note: __call__ may be invoked very frequently, so we avoid all unnecessary work here.
+
+        if self.blocked or len(self.callbacks) == 0:
+            return
+
+        for callback in list(self.callbacks):
+            callback(*args, **kwargs, **self.kwargs)
+
+
+class EventEmitter(Observable):
+    """Observable that emits Event instances::
+
+        event = EventEmitter(source=self, type='my_event', event_class=MyEvent)
+        event.connect(callback)  # callback will be invoked when the event fires
+        event(value=42)  # emits MyEvent(value=42, source=self, type='my_event') to all callbacks
+    
+    """
+    def __init__(self, event_class=Event, **kwargs):
+        super().__init__(**kwargs)
+        self.event_class = event_class
 
     def __call__(self, *args, **kwargs):
         """Emit an event to all connected callbacks.
-
-        Accepts either a ready-made Event instance as the only positional
-        argument, or keyword arguments used to construct one.
         """
-        if len(args) == 1 and isinstance(args[0], Event) and not kwargs:
-            event = args[0]
-        elif args:
-            raise TypeError("EventEmitter accepts a single Event instance or kwargs, got %r" % (args,))
-        else:
-            event = self.event_class(type=self.default_type, **kwargs)
+        if self.blocked or len(self.callbacks) == 0:
+            return
 
-        event._sources.append(self.source)
-        try:
-            for callback in list(self._callbacks):
-                if event.blocked:
-                    break
-                callback(event)
-        finally:
-            event._sources.pop()
+        event = self.event_class(*args, **kwargs, **self.kwargs)
+
+        for callback in list(self.callbacks):
+            callback(event)
+
         return event
 
 

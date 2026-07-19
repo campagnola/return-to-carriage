@@ -55,14 +55,14 @@ class VispyLayerRenderer(object):
 
         # schedule a redraw whenever the game writes to a layer. Layer writes
         # can come from worker threads (gamepad input, dialog threads), so
-        # the observer only sets the window's dirty flag; the frame tick
+        # the subscriber only sets the window's dirty flag; the frame tick
         # turns a burst of writes into one repaint on the GUI thread. The
         # scene's sight FieldLayer must NOT be observed this way: it is
         # recomputed during every draw, so observing it would schedule draws
         # from within draws, forever.
-        self.glyphs.observer = ui.mark_dirty
+        self.glyphs.changed.connect(ui.mark_dirty)
         for layer in self.layers:
-            layer.observer = ui.mark_dirty
+            layer.changed.connect(ui.mark_dirty)
 
     def sync(self):
         """Copy changed layer data into the visual; no-op when nothing changed."""
@@ -138,7 +138,7 @@ class VispySceneRenderer(object):
         self._sight_version = None
         self._last_update_time = None
 
-        scene.redraw_observer = ui.mark_dirty
+        scene.redraw_requested.connect(ui.mark_dirty)
 
         ui.canvas.events.draw.connect(self._on_draw)
 

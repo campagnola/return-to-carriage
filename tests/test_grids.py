@@ -93,7 +93,7 @@ def test_clear_resets_cells(grid, registry):
 
 def test_observer_invoked_per_change(grid):
     calls = []
-    grid.observer = lambda: calls.append(grid.version)
+    grid.changed.connect(lambda: calls.append(grid.version))
     grid.write(0, 0, "a")
     grid.fill_row(0, fg=(1, 1, 1, 1))
     grid.clear()
@@ -110,7 +110,7 @@ def test_glyph_ids_come_from_registry(registry):
 def test_layer_list_membership_and_versioning():
     grids = LayerList()
     calls = []
-    grids.observer = lambda: calls.append(grids.structure_version)
+    grids.changed.connect(lambda: calls.append(grids.structure_version))
     registry = GlyphRegistry()
     a = CharGridLayer(registry, (1, 1))
     b = CharGridLayer(registry, (1, 1))
@@ -134,7 +134,7 @@ def test_sprite_layer_shares_glyph_layer_contract():
     layer = SpriteLayer('actors')
     assert isinstance(layer, GlyphLayer)
     calls = []
-    layer.observer = lambda: calls.append((layer.version, layer.structure_version))
+    layer.changed.connect(lambda: calls.append((layer.version, layer.structure_version)))
 
     slot = layer.add_sprites((2,))
     assert layer.structure_version == 1

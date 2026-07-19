@@ -3,7 +3,7 @@
 Each painter owns one screen-space grid in ``scene.grids`` and fills it from
 game state; rendering backends draw the grids generically (they cannot tell
 a console from a menu). The console repaints whenever ``scene.log`` changes
-— its ``observer`` slot belongs to the ConsolePainter.
+— the ConsolePainter subscribes to its ``changed`` event.
 
 Layout approximates the old fixed vispy widget grid: a full-width stats bar
 sitting on top of an info box (bottom-left) and the message console
@@ -41,8 +41,7 @@ class ConsolePainter(object):
         self.scene = scene
         self.grid = CharGridLayer(scene.glyphs, shape, space='screen',
                                   anchor='bottom-right', name='console')
-        self._observer = self.paint
-        scene.log.observer = self._observer
+        scene.log.changed.connect(self.paint)
         scene.grids.add(self.grid)
         self.paint()
 
@@ -65,8 +64,7 @@ class ConsolePainter(object):
             self.grid.write(i, 1, line)
 
     def close(self):
-        if self.scene.log.observer is self._observer:
-            self.scene.log.observer = None
+        self.scene.log.changed.disconnect(self.paint)
         self.scene.grids.remove(self.grid)
 
 
@@ -112,8 +110,8 @@ class Hud(object):
 
     The info box (bottom-left) and console (bottom-right) split the bottom
     rows of the canvas; the stats bar spans the full width directly above
-    them. The Hud owns ``scene.screen.observer``: a resize reshapes all
-    three grids and re-wraps their text.
+    them. The Hud subscribes to ``scene.screen.changed``: a resize reshapes
+    all three grids and re-wraps their text.
     """
     box_rows = 12       # info box and console height
     stats_rows = 3      # one text row + border ring
@@ -128,8 +126,7 @@ class Hud(object):
         self.stats = StaticTextPainter(scene, stats_shape, STATS_TEXT,
                                        anchor='bottom-left',
                                        offset=(self.box_rows, 0), name='stats')
-        self._observer = self._screen_changed
-        scene.screen.observer = self._observer
+        scene.screen.changed.connect(self._screen_changed)
 
     def _shapes(self):
         """Layout: (info, console, stats) shapes for the current screen."""
@@ -147,8 +144,7 @@ class Hud(object):
         self.stats.set_shape(stats_shape)
 
     def close(self):
-        if self.scene.screen.observer is self._observer:
-            self.scene.screen.observer = None
+        self.scene.screen.changed.disconnect(self._screen_changed)
         self.info.close()
         self.console.close()
         self.stats.close()

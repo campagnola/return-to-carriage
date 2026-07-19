@@ -1,19 +1,20 @@
 """Shared dialog foundations: the Widget model base and the painter base.
 
 ``Widget`` holds the change-tracking contract every dialog model shares (a
-``version`` counter bumped on real state changes plus a single-slot
-``observer`` callback). ``CharGridPainter`` owns a screen-space CharGridLayer
-in ``scene.grids`` and renders a bordered, padded box around content a
-subclass draws — everything visual (border, title, cursor bar, hints) is
-written into the grid as characters and cell colors, so rendering backends
-draw the grid without knowing what it means.
+``version`` counter bumped on real state changes plus a ``changed``
+Observable). ``CharGridPainter`` owns a screen-space CharGridLayer in
+``scene.grids`` and renders a bordered, padded box around content a subclass
+draws — everything visual (border, title, cursor bar, hints) is written into
+the grid as characters and cell colors, so rendering backends draw the grid
+without knowing what it means.
 
-Both are game-side and numpy-only. A painter installs itself as its model's
-``observer`` and repaints the whole grid on any change; that runs on whatever
+Both are game-side and numpy-only. A painter subscribes to its model's
+``changed`` and repaints the whole grid on any change; that runs on whatever
 thread mutates the model (dialog threads, per the session.py contract) and is
 pure numpy. Repainting everything per change is deliberate — these grids are
 tens of rows at most.
 """
+from ..events import Observable
 from ..layers import CharGridLayer
 
 
@@ -33,18 +34,17 @@ def draw_border(grid, fg, bg=None):
 
 
 class Widget(object):
-    """Base for dialog widget models: version counter + observer + done flag."""
+    """Base for dialog widget models: version counter + changed event + done flag."""
 
     def __init__(self):
         self.version = 0
-        self.observer = None
+        self.changed = Observable()
         self.done = False
         self.result = None
 
     def _changed(self):
         self.version += 1
-        if self.observer is not None:
-            self.observer()
+        self.changed()
 
 
 class CharGridPainter(object):
@@ -73,8 +73,7 @@ class CharGridPainter(object):
         grid_shape = (self.nrows + 2 * margin, self.ncols + 2 * margin)
         self.grid = CharGridLayer(scene.glyphs, grid_shape, space='screen',
                                   anchor=anchor, offset=offset)
-        self._observer = self.paint
-        model.observer = self._observer
+        model.changed.connect(self.paint)
         scene.grids.add(self.grid)
         self.paint()
 
@@ -114,6 +113,5 @@ class CharGridPainter(object):
 
     def close(self):
         """Remove the grid from the scene and stop observing the model."""
-        if self.model.observer is self._observer:
-            self.model.observer = None
+        self.model.changed.disconnect(self.paint)
         self.scene.grids.remove(self.grid)

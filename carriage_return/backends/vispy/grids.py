@@ -120,7 +120,7 @@ class GridRenderer(object):
     """Draws every screen-space CharGridLayer in ``scene.grids``.
 
     ``mark_dirty`` (a cheap, thread-safe callable — the window's dirty flag)
-    is installed as the LayerList's observer and as each grid's observer, so
+    subscribes to the LayerList's ``changed`` event and to each grid's, so
     any grid change schedules a frame; ``sync()`` then reconciles visuals
     with the list and uploads changed cell data on the GUI thread.
     """
@@ -137,7 +137,7 @@ class GridRenderer(object):
         self._visuals = {}   # CharGridLayer -> _GridVisual
         self._structure_version = None
 
-        scene.grids.observer = mark_dirty
+        scene.grids.changed.connect(mark_dirty)
         canvas.events.resize.connect(self._canvas_resized)
         self._update_screen()
         self.sync()
@@ -165,11 +165,10 @@ class GridRenderer(object):
             for grid in list(self._visuals):
                 if grid not in wanted:
                     self._visuals.pop(grid).close()
-                    if grid.observer is self.mark_dirty:
-                        grid.observer = None
+                    grid.changed.disconnect(self.mark_dirty)
             for grid in wanted:
                 if grid not in self._visuals:
-                    grid.observer = self.mark_dirty
+                    grid.changed.connect(self.mark_dirty)
                     self._visuals[grid] = _GridVisual(self.canvas, grid,
                                                       self.atlas, self.char_size)
 
@@ -179,7 +178,7 @@ class GridRenderer(object):
     def _update_screen(self):
         """Publish the canvas size in cells to the game (``scene.screen``).
 
-        Runs on the GUI thread; the screen's observer (the Hud) reshapes and
+        Runs on the GUI thread; the screen's subscriber (the Hud) reshapes and
         repaints its grids synchronously — pure numpy, so this is input
         flowing into game state, like a key event.
         """
@@ -189,7 +188,7 @@ class GridRenderer(object):
 
     def _canvas_resized(self, event=None):
         self._update_screen()
-        # reposition everything now; grids reshaped by the screen observer
+        # reposition everything now; grids reshaped by the screen subscriber
         # are also refitted (and re-placed) at the next sync
         for visual in self._visuals.values():
             visual.place()

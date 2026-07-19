@@ -2,7 +2,7 @@ import threading
 
 import pytest
 
-from carriage_return.events import Event, EventEmitter, OneShotEvent
+from carriage_return.events import Event, EventEmitter, Observable, OneShotEvent
 
 
 class MyEvent(Event):
@@ -29,13 +29,8 @@ def test_emit_creates_event_with_class_type_and_source():
     assert isinstance(ev, MyEvent)
     assert ev.type == 'location_change'
     assert ev.old_location == (None, None)
-    # source is only set while the event is being emitted
-    assert ev.source is None
-
-    sources = []
-    em.connect(lambda e: sources.append(e.source))
-    em()
-    assert sources == [src]
+    # the emitter's kwargs are baked into every event it emits
+    assert ev.source is src
 
 
 def test_connect_disconnect():
@@ -79,29 +74,45 @@ def test_most_recently_connected_called_first():
     assert order == ['b', 'a']
 
 
-def test_blocked_event_stops_delivery():
+def test_handled_does_not_stop_delivery():
+    """``handled`` is advisory: every callback still sees the event and decides
+    for itself whether to act on it."""
     em = EventEmitter(type='t')
     order = []
 
-    def blocker(ev):
-        order.append('blocker')
-        ev.blocked = True
+    def handler(ev):
+        order.append('handler')
+        ev.handled = True
 
-    em.connect(lambda ev: order.append('late'))
-    em.connect(blocker)  # called first
+    em.connect(lambda ev: order.append(('late', ev.handled)))
+    em.connect(handler)  # called first
     em()
-    assert order == ['blocker']
+    assert order == ['handler', ('late', True)]
 
 
-def test_emit_existing_event_instance():
-    em = EventEmitter(source='s', type='t')
+def test_blocked_emitter_delivers_nothing():
+    em = EventEmitter(type='t')
+    calls = []
+    em.connect(calls.append)
+
+    em.blocked = True
+    em()
+    assert calls == []
+
+    em.blocked = False
+    em()
+    assert len(calls) == 1
+
+
+def test_observable_passes_kwargs_through():
+    """Observable broadcasts plain kwargs -- no Event instance involved."""
+    obs = Observable(source='s')
     received = []
-    em.connect(received.append)
-    ev = Event(type='custom', payload=42)
-    out = em(ev)
-    assert out is ev
-    assert received == [ev]
-    assert ev.payload == 42
+    obs.connect(lambda **kw: received.append(kw))
+
+    obs(value=42)
+
+    assert received == [{'value': 42, 'source': 's'}]
 
 
 def test_callback_exception_propagates():

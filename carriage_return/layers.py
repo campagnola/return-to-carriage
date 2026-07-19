@@ -9,11 +9,12 @@ Change tracking is by integer version counters, not events: a write costs one
 numpy slice assignment plus an increment. Backends compare counters once per
 frame and re-upload only what changed.
 
-Each layer also has a single-slot ``observer`` callback (default None) invoked
-whenever its version is bumped. This exists so an interactive backend can
-learn "something changed, schedule a frame" without polling; it carries no
-information (backends still diff version counters at sync time) and must stay
-cheap and re-entrancy-safe (e.g. vispy's canvas update(), which coalesces).
+Each layer also has a ``changed`` Observable (see events.py) invoked with no
+arguments whenever its version is bumped. This exists so an interactive
+backend can learn "something changed, schedule a frame" without polling; it
+carries no information (backends still diff version counters at sync time)
+and subscribers must stay cheap and re-entrancy-safe (e.g. vispy's canvas
+update(), which coalesces).
 
 - ``version`` is bumped on any data write.
 - ``structure_version`` is additionally bumped when the underlying arrays are
@@ -28,6 +29,8 @@ Conventions:
 
 import numpy as np
 
+from .events import Observable
+
 
 class GlyphLayer(object):
     """Base for game-owned glyph layers: the shared change-tracking contract.
@@ -39,22 +42,21 @@ class GlyphLayer(object):
     - ``version`` bumps on any data write.
     - ``structure_version`` additionally bumps when the underlying arrays are
       reallocated, meaning references a backend holds into them are stale.
-    - ``observer`` is a single-slot callback (default None) invoked after any
-      version bump; it must stay cheap and thread-safe (e.g. set a dirty
-      flag) — backends still diff version counters at sync time.
+    - ``changed`` is an Observable invoked (with no arguments) after any
+      version bump; subscribers must stay cheap and thread-safe (e.g. set a
+      dirty flag) — backends still diff version counters at sync time.
     """
     def __init__(self, name=None):
         self.name = name
         self.version = 0
         self.structure_version = 0
-        self.observer = None
+        self.changed = Observable()
 
     def _changed(self, structure=False):
         self.version += 1
         if structure:
             self.structure_version += 1
-        if self.observer is not None:
-            self.observer()
+        self.changed()
 
 
 class GlyphRegistry(object):
@@ -69,7 +71,7 @@ class GlyphRegistry(object):
         self._char_ids = {}
         self.chars = []
         self.version = 0
-        self.observer = None
+        self.changed = Observable()
 
     def __len__(self):
         return len(self.chars)
@@ -87,8 +89,7 @@ class GlyphRegistry(object):
             self._char_ids[char] = first + i
             self.chars.append(char)
         self.version += 1
-        if self.observer is not None:
-            self.observer()
+        self.changed()
         return first
 
 
@@ -324,12 +325,12 @@ class LayerList(object):
 
     List order is draw order among screen-space grids (later = on top).
     ``structure_version`` bumps on add/remove so backends can diff the
-    membership at sync time; ``observer`` follows the layer contract.
+    membership at sync time; ``changed`` follows the layer contract.
     """
     def __init__(self):
         self._layers = []
         self.structure_version = 0
-        self.observer = None
+        self.changed = Observable()
 
     def __iter__(self):
         return iter(self._layers)
@@ -351,8 +352,7 @@ class LayerList(object):
 
     def _changed(self):
         self.structure_version += 1
-        if self.observer is not None:
-            self.observer()
+        self.changed()
 
 
 class FieldLayer(object):
@@ -364,7 +364,7 @@ class FieldLayer(object):
         else:
             self.data = np.zeros(shape, dtype='float32')
         self.version = 0
-        self.observer = None
+        self.changed = Observable()
 
     def set_data(self, data):
         """Copy *data* into the field (in place when shapes match) and bump version."""
@@ -374,11 +374,9 @@ class FieldLayer(object):
         else:
             self.data = np.ascontiguousarray(data, dtype='float32')
         self.version += 1
-        if self.observer is not None:
-            self.observer()
+        self.changed()
 
     def bump(self):
         """Declare that self.data was mutated in place."""
         self.version += 1
-        if self.observer is not None:
-            self.observer()
+        self.changed()

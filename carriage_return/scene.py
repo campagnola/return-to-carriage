@@ -5,21 +5,21 @@ from .layers import GlyphRegistry, SpriteLayer, FieldLayer, LayerList
 from .maze import Maze
 from .array_cache import ArraySumCache
 from .entity import Entity
+from .events import Observable
 
 
 class MessageLog(object):
     """Messages shown to the user, held as game state (``scene.log``).
 
     Follows the layer change-tracking contract: ``version`` bumps on every
-    mutation and the single-slot ``observer`` (default None) is invoked after
-    each bump. Game threads write messages; a game-side painter (hud.py)
-    renders the tail into a CharGridLayer — nothing rendering-side reads the
-    log directly.
+    mutation and the ``changed`` Observable is invoked after each bump. Game
+    threads write messages; a game-side painter (hud.py) renders the tail into
+    a CharGridLayer — nothing rendering-side reads the log directly.
     """
     def __init__(self):
         self.lines = []
         self.version = 0
-        self.observer = None
+        self.changed = Observable()
 
     def write(self, text):
         """Append *text* to the log, splitting on newlines."""
@@ -37,8 +37,7 @@ class MessageLog(object):
 
     def _changed(self):
         self.version += 1
-        if self.observer is not None:
-            self.observer()
+        self.changed()
 
 
 class Screen(object):
@@ -46,14 +45,14 @@ class Screen(object):
 
     The display backend writes it on window resize; game-side painters
     (hud.Hud) observe it and re-lay out their grids. Follows the layer
-    change-tracking contract (``version`` + single-slot ``observer``). The
+    change-tracking contract (``version`` + ``changed`` Observable). The
     default matches the default 1400x900 window at (10, 16)-pixel cells, so
     headless code sees the standard layout.
     """
     def __init__(self, shape=(56, 140)):
         self.shape = tuple(shape)
         self.version = 0
-        self.observer = None
+        self.changed = Observable()
 
     def set_shape(self, shape):
         """Record a new cell shape; no-op (and no bump) when unchanged."""
@@ -62,8 +61,7 @@ class Screen(object):
             return
         self.shape = shape
         self.version += 1
-        if self.observer is not None:
-            self.observer()
+        self.changed()
 
 
 class Scene(Entity):
@@ -105,8 +103,8 @@ class Scene(Entity):
         # canvas size in cells, backend-written; the HUD lays out against it
         self.screen = Screen()
 
-        # installed by the display backend; see request_redraw()
-        self.redraw_observer = None
+        # subscribed to by the display backend; see request_redraw()
+        self.redraw_requested = Observable()
 
         # create maze
         self.maze = Maze.load_image('level1.png')
@@ -188,12 +186,11 @@ class Scene(Entity):
         Entities call this when they change something the display derives but
         does not observe directly -- lighting, most notably, which is
         recomputed during the draw itself and so cannot be an observed layer.
-        Follows the single-slot observer contract used by the render layers:
-        the backend installs ``redraw_observer``, which only sets a dirty flag,
-        so this is safe to call from any thread.
+        Follows the observer contract used by the render layers: the backend
+        subscribes to ``redraw_requested`` with a callback that only sets a
+        dirty flag, so this is safe to call from any thread.
         """
-        if self.redraw_observer is not None:
-            self.redraw_observer()
+        self.redraw_requested()
 
     def invalidate_lighting(self):
         """Discard the composited lighting; it is rebuilt on the next draw.
