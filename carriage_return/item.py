@@ -63,9 +63,9 @@ class Item(Entity):
         self.location.update(None, None)
         self.sprite.hide()
 
-    def shadow_map(self):
+    def shadow_map(self, slot):
         if self._shadow_map is None:
-            smap = self.scene.visibility.render(self.location.slot, read=True)[..., :3]
+            smap = self.scene.visibility.render(slot, read=True)[..., :3]
             self.set_shadow_map(smap)
             assert self._shadow_map is not None
         return self._shadow_map
@@ -88,7 +88,7 @@ class Item(Entity):
             light_pos = np.array([[[y * supersample, x * supersample]]]) + (0.5 * supersample)
             dist2 = ((maze_pos - light_pos) ** 2).sum(axis=2) + 0.5  # 0.5 enforces height
 
-            self._unscaled_light_map = self.shadow_map() / dist2[:, :, None]
+            self._unscaled_light_map = self.shadow_map(ml.slot) / dist2[:, :, None]
 
         if self._light_map is None:
             self._light_map = self._unscaled_light_map * np.array(self.light_color)[None, None, :]
@@ -107,9 +107,26 @@ class Scroll(Item):
     length = 20.0
     fg_color = (0.8, 0.8, 0.8, 1.0)
 
+    # page contents shown by the 'read' action (opened as a pager below)
+    pages = [
+        "Instructions for use:\n"
+        "\n"
+        "1. Carefully unroll the scroll.\n"
+        "2. Read the instructions for use.",
+
+        "3. If the instructions are unclear,\n"
+        "   consult the instructions.\n"
+        "4. Repeat until enlightened.",
+
+        "You put the scroll down, none the\n"
+        "wiser but strangely satisfied.",
+    ]
+
     def read(self, reader):
-        self.scene.write("Unfortunately, you never learned to read. The scroll nevertheless appreciates your effort and self-destructs out of pity.") 
-        self.destroy()
+        """Show the scroll's pages in a modal pager (the joke ends on the last
+        page; the scroll is not consumed). Returns the pager session."""
+        from . import dialogs
+        return dialogs.open_pager(self.scene, self.description, self.pages)
 
 
 class Torch(Item):

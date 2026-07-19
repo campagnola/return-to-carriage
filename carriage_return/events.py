@@ -10,6 +10,7 @@ event.blocked.
 One deliberate difference from vispy: exceptions raised by callbacks
 propagate to the emitter's caller instead of being logged and swallowed.
 """
+import threading
 
 
 class Event(object):
@@ -110,3 +111,75 @@ class EventEmitter(object):
         finally:
             event._sources.pop()
         return event
+
+
+class OneShotEvent(object):
+    """Fires exactly once with a value; guarantees every callback runs.
+
+    ``connect(cb)`` registers ``cb(value)`` to run when the event fires. If
+    the event has already fired, ``cb`` runs immediately, on the calling
+    thread, instead of being registered. ``fire(value)`` invokes every
+    registered callback with ``value``, in registration order, on the firing
+    thread; firing an already-fired event is an error.
+
+    An internal lock makes the register-vs-fire race impossible: whichever
+    of ``connect`` and ``fire`` gets the lock first decides whether a given
+    callback runs from ``connect`` (already fired) or from ``fire``
+    (registered in time) — never both, never neither. No lock is exposed to
+    callers.
+
+    Like ``EventEmitter``, an exception raised by a callback propagates to
+    the caller of ``fire()`` (or ``connect()``, for the already-fired case)
+    instead of being logged and swallowed; callbacks after the failing one
+    do not run.
+    """
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._event = threading.Event()
+        self._callbacks = []
+        self._value = None
+
+    @property
+    def fired(self):
+        """True once the event has fired."""
+        return self._event.is_set()
+
+    def is_set(self):
+        """True once the event has fired (threading.Event-style call)."""
+        return self._event.is_set()
+
+    def connect(self, cb):
+        """Register ``cb(value)`` to run when the event fires.
+
+        Runs ``cb`` immediately, on the calling thread, if the event has
+        already fired.
+        """
+        with self._lock:
+            if not self._event.is_set():
+                self._callbacks.append(cb)
+                return
+        cb(self._value)
+
+    def fire(self, value):
+        """Invoke every registered callback with ``value``, on this thread.
+
+        May be called exactly once; firing an already-fired event raises
+        AssertionError.
+        """
+        with self._lock:
+            assert not self._event.is_set(), "OneShotEvent already fired"
+            self._value = value
+            callbacks, self._callbacks = self._callbacks, []
+            self._event.set()
+        for cb in callbacks:
+            cb(value)
+
+    def wait(self, timeout=None):
+        """Block the calling thread until fired, then return the value.
+
+        Raises TimeoutError if *timeout* seconds elapse first, so a timeout
+        can never be mistaken for a real (possibly None) fired value.
+        """
+        if not self._event.wait(timeout=timeout):
+            raise TimeoutError("OneShotEvent.wait timed out")
+        return self._value

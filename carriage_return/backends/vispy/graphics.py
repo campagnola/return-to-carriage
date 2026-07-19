@@ -269,7 +269,11 @@ class SpritesVisual(vispy.visuals.Visual):
         self.shared_program['fgcolor'] = vispy.gloo.VertexBuffer()
         self.shared_program['bgcolor'] = vispy.gloo.VertexBuffer()
         
-        self.update_gl_state(depth_test=True)
+        # blending must be declared here: vispy applies gl_state incrementally
+        # per visual, so relying on another visual having enabled blend leaves
+        # translucent cell backgrounds opaque depending on draw order
+        self.update_gl_state(depth_test=True, blend=True,
+                             blend_func=('src_alpha', 'one_minus_src_alpha'))
     
     def add_sprites(self, shape):
         """Expand to allow more sprites, return a SpriteData instance with the specified shape.

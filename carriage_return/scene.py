@@ -1,11 +1,69 @@
 # coding: utf8
 import numpy as np
 
-from .events import EventEmitter
-from .layers import GlyphRegistry, SpriteLayer, FieldLayer
+from .layers import GlyphRegistry, SpriteLayer, FieldLayer, LayerList
 from .maze import Maze
 from .array_cache import ArraySumCache
 from .entity import Entity
+
+
+class MessageLog(object):
+    """Messages shown to the user, held as game state (``scene.log``).
+
+    Follows the layer change-tracking contract: ``version`` bumps on every
+    mutation and the single-slot ``observer`` (default None) is invoked after
+    each bump. Game threads write messages; a game-side painter (hud.py)
+    renders the tail into a CharGridLayer — nothing rendering-side reads the
+    log directly.
+    """
+    def __init__(self):
+        self.lines = []
+        self.version = 0
+        self.observer = None
+
+    def write(self, text):
+        """Append *text* to the log, splitting on newlines."""
+        self.lines.extend(text.split('\n'))
+        self._changed()
+
+    def set_last_line(self, line):
+        """Replace the last line (command-prompt editing)."""
+        self.lines[-1] = line
+        self._changed()
+
+    def remove_last_line(self):
+        self.lines.pop(-1)
+        self._changed()
+
+    def _changed(self):
+        self.version += 1
+        if self.observer is not None:
+            self.observer()
+
+
+class Screen(object):
+    """The canvas size in character cells (rows, cols), held as game state.
+
+    The display backend writes it on window resize; game-side painters
+    (hud.Hud) observe it and re-lay out their grids. Follows the layer
+    change-tracking contract (``version`` + single-slot ``observer``). The
+    default matches the default 1400x900 window at (10, 16)-pixel cells, so
+    headless code sees the standard layout.
+    """
+    def __init__(self, shape=(56, 140)):
+        self.shape = tuple(shape)
+        self.version = 0
+        self.observer = None
+
+    def set_shape(self, shape):
+        """Record a new cell shape; no-op (and no bump) when unchanged."""
+        shape = tuple(shape)
+        if shape == self.shape:
+            return
+        self.shape = shape
+        self.version += 1
+        if self.observer is not None:
+            self.observer()
 
 
 class Scene(Entity):
@@ -19,8 +77,8 @@ class Scene(Entity):
     - ``sight`` is a FieldLayer holding the composited lighting * line-of-sight
       + memory field, updated by update_sight().
 
-    A rendering backend (e.g. render_vispy.VispySceneRenderer) consumes these
-    layers and injects ``visibility``: an object with
+    A rendering backend (e.g. backends.vispy.VispySceneRenderer) consumes
+    these layers and injects ``visibility``: an object with
     ``render(pos, read=True) -> (h, w, >=3) array`` that computes a shadow map
     for a light/viewer at a maze position.
     """
@@ -37,6 +95,16 @@ class Scene(Entity):
         self.glyphs = GlyphRegistry()
         self.sprite_layers = {name: SpriteLayer(name) for name in ('scenery', 'items', 'actors')}
 
+        # screen-space CharGridLayers (menus, pagers, console/HUD text); a
+        # backend renders each entry generically, in list order
+        self.grids = LayerList()
+
+        # messages to be shown to the user; hud.ConsolePainter renders these
+        self.log = MessageLog()
+
+        # canvas size in cells, backend-written; the HUD lays out against it
+        self.screen = Screen()
+
         # create maze
         self.maze = Maze.load_image('level1.png')
 
@@ -46,6 +114,10 @@ class Scene(Entity):
         # visibility provider (see class docstring); injected by the rendering
         # backend or by headless test code
         self.visibility = None
+
+        # set by the gameplay input handler (Escape); the display backend
+        # polls it from its frame tick and shuts down
+        self.quit_requested = False
 
         ms = self.maze.shape
         self.supersample = 4
@@ -59,9 +131,6 @@ class Scene(Entity):
 
         # composited sight field consumed by renderers
         self.sight = FieldLayer('sight', shape=self.field_shape)
-
-        # messages to be shown to the user; UI code connects to this
-        self.messages = EventEmitter(source=self, type='message')
 
         # track all items
         self.items = []
@@ -96,27 +165,11 @@ class Scene(Entity):
 
     def write(self, message):
         """Display a message to the user."""
-        self.messages(message=message)
+        self.log.write(message)
 
-    def request_player_action(self, action):
-        # todo: items_at() and Player.take() don't exist yet (predates the
-        # renderer split); 'take' will raise until inventory pickup is built
-        if action == 'take':
-            items = self.items_at(self.player.location.slot)
-            if len(items) == 0:
-                self.write("Nothing to take here.")
-            else:
-                for item in items:
-                    self.player.take(item)
-                    self.write("Taken: %s" % item.name)
-        elif action == 'read':
-            self.player.read_item()
-
-    def user_request_item(self, message, items, callback):
-        """Ask the user to select an item from a list.
-        """
-        self.write(message)
-        raise NotImplementedError("interactive item selection not implemented")
+    def items_at(self, pos):
+        """Return the items lying in the maze at *pos*."""
+        return [e for e in self.maze.inventory[tuple(pos)] if e.type.isa('item')]
 
     def update_sight(self, dt):
         """Advance the sight/memory field by *dt* seconds and write the result

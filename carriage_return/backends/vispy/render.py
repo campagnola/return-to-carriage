@@ -53,26 +53,31 @@ class VispyLayerRenderer(object):
         self._regions = {layer.name: None for layer in self.layers}
         self._synced_versions = {layer.name: None for layer in self.layers}
 
-        # schedule a redraw whenever the game writes to a layer (update() is
-        # coalescing, so a burst of writes costs one repaint). The scene's
-        # sight FieldLayer must NOT be observed this way: it is recomputed
-        # during every draw, so observing it would schedule draws from within
-        # draws, forever.
-        self.glyphs.observer = self.txt.update
+        # schedule a redraw whenever the game writes to a layer. Layer writes
+        # can come from worker threads (gamepad input, dialog threads), so
+        # the observer only sets the window's dirty flag; the frame tick
+        # turns a burst of writes into one repaint on the GUI thread. The
+        # scene's sight FieldLayer must NOT be observed this way: it is
+        # recomputed during every draw, so observing it would schedule draws
+        # from within draws, forever.
+        self.glyphs.observer = ui.mark_dirty
         for layer in self.layers:
-            layer.observer = self.txt.update
+            layer.observer = ui.mark_dirty
 
     def sync(self):
         """Copy changed layer data into the visual; no-op when nothing changed."""
         glyphs = self.glyphs
         if glyphs.version != self._glyphs_version:
+            self._glyphs_version = glyphs.version
             new_chars = glyphs.chars[self._n_chars_synced:]
             if new_chars:
                 # added in registry order, so glyph id == atlas index and the
-                # layers' glyph arrays can be uploaded as sprite indices as-is
+                # layers' glyph arrays can be uploaded as sprite indices as-is.
+                # Advance by exactly what was consumed — game threads may
+                # append to the registry between the slice and this line, and
+                # len(glyphs.chars) would silently skip those chars forever.
                 self.atlas.add_chars(new_chars)
-            self._n_chars_synced = len(glyphs.chars)
-            self._glyphs_version = glyphs.version
+                self._n_chars_synced += len(new_chars)
 
         for layer in self.layers:
             versions = (layer.version, layer.structure_version)

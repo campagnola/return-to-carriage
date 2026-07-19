@@ -29,6 +29,34 @@ Conventions:
 import numpy as np
 
 
+class GlyphLayer(object):
+    """Base for game-owned glyph layers: the shared change-tracking contract.
+
+    Every layer kind (dense CharGridLayer, sparse SpriteLayer) carries glyph
+    ids from a GlyphRegistry plus float32 fg/bg colors, and publishes changes
+    through the same three attributes:
+
+    - ``version`` bumps on any data write.
+    - ``structure_version`` additionally bumps when the underlying arrays are
+      reallocated, meaning references a backend holds into them are stale.
+    - ``observer`` is a single-slot callback (default None) invoked after any
+      version bump; it must stay cheap and thread-safe (e.g. set a dirty
+      flag) — backends still diff version counters at sync time.
+    """
+    def __init__(self, name=None):
+        self.name = name
+        self.version = 0
+        self.structure_version = 0
+        self.observer = None
+
+    def _changed(self, structure=False):
+        self.version += 1
+        if structure:
+            self.structure_version += 1
+        if self.observer is not None:
+            self.observer()
+
+
 class GlyphRegistry(object):
     """Append-only registry mapping characters to small integer glyph ids.
 
@@ -64,23 +92,21 @@ class GlyphRegistry(object):
         return first
 
 
-class SpriteLayer(object):
+class SpriteLayer(GlyphLayer):
     """A collection of positioned character sprites owned by the game.
 
+    The sparse layer kind: every sprite has its own free (x, y, z) position.
     Regions are allocated with add_sprites(), which returns a SpriteSlot
     handle used to write position/glyph/color data. All slots share one set
     of contiguous arrays so a backend can upload the layer in one call.
     """
     def __init__(self, name=None):
-        self.name = name
+        GlyphLayer.__init__(self, name=name)
         self.position = np.empty((0, 3), dtype='float32')
         self.glyph = np.empty((0,), dtype='uint32')
         self.fgcolor = np.empty((0, 4), dtype='float32')
         self.bgcolor = np.empty((0, 4), dtype='float32')
         self.slots = []
-        self.version = 0
-        self.structure_version = 0
-        self.observer = None
 
     def __len__(self):
         return self.position.shape[0]
@@ -116,10 +142,7 @@ class SpriteLayer(object):
         bgcolor[:keep] = self.bgcolor[:keep]
         self.position, self.glyph, self.fgcolor, self.bgcolor = position, glyph, fgcolor, bgcolor
 
-        self.version += 1
-        self.structure_version += 1
-        if self.observer is not None:
-            self.observer()
+        self._changed(structure=True)
         return n1
 
     def _slot_shape_changed(self):
@@ -132,9 +155,7 @@ class SpriteLayer(object):
             start += len(slot)
 
     def _data_changed(self):
-        self.version += 1
-        if self.observer is not None:
-            self.observer()
+        self._changed()
 
 
 class SpriteSlot(object):
@@ -213,6 +234,125 @@ class SpriteSlot(object):
         self._bgcolor = None
         if inform_parent:
             self.layer._slot_shape_changed()
+
+
+class CharGridLayer(GlyphLayer):
+    """A dense rows×cols block of character cells owned by the game.
+
+    The dense layer kind: menus, pagers, console and HUD text. Where the
+    grid draws is an attribute, not part of the concept — ``space`` is
+    'screen' (anchored to the canvas; the only space in use) or 'world'
+    (maze coordinates; reserved). ``anchor`` names a canvas position:
+    'center', 'top', 'bottom', 'left', 'right', or a corner ('top-left',
+    'top-right', 'bottom-left', 'bottom-right'). ``offset`` is a (rows,
+    cols) displacement in cells from the anchored edge toward the canvas
+    interior (applied as down/right for 'center').
+
+    Cell contents are glyph ids from the given GlyphRegistry. Grids have
+    fixed shapes; renderers reposition them on resize but never reshape
+    them. All meaning (borders, cursors, titles) is written into the cells
+    by game-side painters — renderers draw a rectangle of cells and nothing
+    else.
+    """
+    def __init__(self, registry, shape, space='screen', anchor='center',
+                 offset=(0, 0), name=None):
+        GlyphLayer.__init__(self, name=name)
+        self.registry = registry
+        self.shape = tuple(shape)
+        self.space = space
+        self.anchor = anchor
+        self.offset = tuple(offset)
+        self.glyph = np.full(self.shape, registry[' '], dtype='uint32')
+        self.fgcolor = np.ones(self.shape + (4,), dtype='float32')
+        self.bgcolor = np.zeros(self.shape + (4,), dtype='float32')
+
+    def reshape(self, shape):
+        """Reallocate to *shape* (rows, cols), resetting every cell to blank.
+
+        Bumps ``structure_version`` — backend references into the old arrays
+        are stale. Callers repaint the grid immediately afterwards.
+        """
+        self.shape = tuple(shape)
+        self.glyph = np.full(self.shape, self.registry[' '], dtype='uint32')
+        self.fgcolor = np.ones(self.shape + (4,), dtype='float32')
+        self.bgcolor = np.zeros(self.shape + (4,), dtype='float32')
+        self._changed(structure=True)
+
+    def write(self, row, col, text, fg=None, bg=None):
+        """Write *text* on *row* starting at *col*, clipped to the grid.
+
+        *fg*/*bg*, when given, recolor the written cells. One version bump
+        per call; writes that are entirely clipped away change nothing and
+        do not bump.
+        """
+        rows, cols = self.shape
+        if not (0 <= row < rows):
+            return
+        if col < 0:
+            text = text[-col:]
+            col = 0
+        n = min(len(text), cols - col)
+        if n <= 0:
+            return
+        self.glyph[row, col:col + n] = [self.registry[char] for char in text[:n]]
+        if fg is not None:
+            self.fgcolor[row, col:col + n] = fg
+        if bg is not None:
+            self.bgcolor[row, col:col + n] = bg
+        self._changed()
+
+    def fill_row(self, row, fg=None, bg=None):
+        """Recolor a full row (cursor highlight bars); glyphs are untouched."""
+        if fg is not None:
+            self.fgcolor[row, :] = fg
+        if bg is not None:
+            self.bgcolor[row, :] = bg
+        self._changed()
+
+    def clear(self, fg=None, bg=None):
+        """Reset every cell to a space, optionally recoloring the whole grid."""
+        self.glyph[:] = self.registry[' ']
+        if fg is not None:
+            self.fgcolor[:] = fg
+        if bg is not None:
+            self.bgcolor[:] = bg
+        self._changed()
+
+
+class LayerList(object):
+    """An ordered, versioned collection of layers (``scene.grids``).
+
+    List order is draw order among screen-space grids (later = on top).
+    ``structure_version`` bumps on add/remove so backends can diff the
+    membership at sync time; ``observer`` follows the layer contract.
+    """
+    def __init__(self):
+        self._layers = []
+        self.structure_version = 0
+        self.observer = None
+
+    def __iter__(self):
+        return iter(self._layers)
+
+    def __len__(self):
+        return len(self._layers)
+
+    def __getitem__(self, i):
+        return self._layers[i]
+
+    def add(self, layer):
+        self._layers.append(layer)
+        self._changed()
+        return layer
+
+    def remove(self, layer):
+        self._layers.remove(layer)
+        self._changed()
+
+    def _changed(self):
+        self.structure_version += 1
+        if self.observer is not None:
+            self.observer()
 
 
 class FieldLayer(object):

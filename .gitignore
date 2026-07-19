@@ -1,1 +1,6 @@
 *.pyc
+agent_helpers/
+.claude/
+.idea/
+.pytest_cache/
+/vispy/

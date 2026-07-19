@@ -54,26 +54,40 @@ def test_memory_decay_is_time_based(scene):
 
 
 def test_write_message(scene):
-    received = []
-    scene.messages.connect(lambda event: received.append(event.message))
+    n0 = len(scene.log.lines)
+    version = scene.log.version
     scene.write("hello")
-    assert received == ["hello"]
+    assert scene.log.lines[n0:] == ["hello"]
+    assert scene.log.version == version + 1
 
 
-def test_scroll_read_destroys_item(scene):
+def test_scroll_read_opens_pager(scene):
+    from carriage_return.input import InputDispatcher, KeyPress
     scroll = Scroll(location=(scene.maze, (5, 5)), scene=scene)
     assert scroll in scene.items
-    assert scroll in scene.maze.inventory[(5, 5)]
 
-    received = []
-    scene.messages.connect(lambda event: received.append(event.message))
-    scroll.read(scene.player)
+    InputDispatcher.reset()
+    dispatcher = InputDispatcher()
+    try:
+        session = scroll.read(scene.player)  # opens a pager, does not destroy
+        assert dispatcher.handlers[-1] is session
+        assert len(scene.grids) == 1
+        grid = list(scene.grids)[0]
+        text = '\n'.join(''.join(grid.registry.chars[i] for i in grid.glyph[r])
+                         for r in range(grid.shape[0]))
+        assert scroll.description in text
 
-    assert len(received) == 1
-    assert scroll not in scene.items
-    assert scroll not in scene.maze.inventory[(5, 5)]
-    assert scroll.location.container is None
-    assert np.isnan(scroll.sprite.sprite.position).all()
+        session.post(KeyPress('Escape'))
+        session.join(10)
+        assert session.finished.is_set() and session.error is None
+
+        # reading no longer consumes the scroll (the pages end the joke)
+        assert scroll in scene.items
+        assert scroll in scene.maze.inventory[(5, 5)]
+        assert len(scene.grids) == 0
+        assert dispatcher.handlers == []
+    finally:
+        InputDispatcher.reset()
 
 
 def test_game_model_is_headless():

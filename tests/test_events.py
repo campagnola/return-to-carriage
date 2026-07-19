@@ -1,6 +1,8 @@
+import threading
+
 import pytest
 
-from carriage_return.events import Event, EventEmitter
+from carriage_return.events import Event, EventEmitter, OneShotEvent
 
 
 class MyEvent(Event):
@@ -111,3 +113,75 @@ def test_callback_exception_propagates():
     em.connect(bad)
     with pytest.raises(RuntimeError):
         em()
+
+
+def test_oneshot_connect_then_fire():
+    ev = OneShotEvent()
+    received = []
+    ev.connect(received.append)
+    assert not ev.fired
+    assert not ev.is_set()
+
+    ev.fire('value')
+
+    assert received == ['value']
+    assert ev.fired
+    assert ev.is_set()
+
+
+def test_oneshot_connect_after_fire_runs_immediately():
+    ev = OneShotEvent()
+    ev.fire('value')
+
+    received = []
+    ev.connect(received.append)
+
+    assert received == ['value']
+
+
+def test_oneshot_cross_thread_wait():
+    ev = OneShotEvent()
+    fired_from = []
+
+    def fire_later():
+        fired_from.append(threading.current_thread())
+        ev.fire('done')
+
+    thread = threading.Thread(target=fire_later)
+    thread.start()
+
+    result = ev.wait(timeout=10.0)
+    thread.join(timeout=10.0)
+
+    assert result == 'done'
+    assert fired_from == [thread]
+
+
+def test_oneshot_wait_timeout_raises():
+    ev = OneShotEvent()
+    with pytest.raises(TimeoutError):
+        ev.wait(timeout=0.01)
+
+
+def test_oneshot_double_fire_is_an_error():
+    ev = OneShotEvent()
+    ev.fire('first')
+    with pytest.raises(AssertionError):
+        ev.fire('second')
+
+
+def test_oneshot_callback_exception_propagates():
+    ev = OneShotEvent()
+
+    def bad(value):
+        raise RuntimeError("boom")
+
+    ev.connect(bad)
+    with pytest.raises(RuntimeError):
+        ev.fire('value')
+
+    # already fired: a late connect that raises also propagates to the caller
+    ev2 = OneShotEvent()
+    ev2.fire('value')
+    with pytest.raises(RuntimeError):
+        ev2.connect(bad)

@@ -1,7 +1,8 @@
 """Prove the game model runs with no rendering library loaded.
 
 Builds a Scene with a fake numpy visibility provider, runs sight updates,
-exercises the message channel and item destruction, then asserts that no
+then exercises the full game-side dialog pipeline (reading a scroll opens a
+pager on its own thread, with a grid in scene.grids) and asserts that no
 rendering/GUI module was ever imported.
 
 Run: python agent_helpers/check_headless.py
@@ -18,6 +19,7 @@ os.chdir(project_root)  # level1.png is loaded from cwd
 from carriage_return.scene import Scene
 from carriage_return.player import Player
 from carriage_return.item import Scroll, Torch
+from carriage_return.input import InputDispatcher, KeyPress
 
 
 class FakeVisibility:
@@ -44,14 +46,19 @@ def main():
     assert scene.sight.version == 3
     assert scene.sight.data.max() > 0
 
-    # message channel + item destruction
-    messages = []
-    scene.messages.connect(lambda event: messages.append(event.message))
-    scroll.read(player)
-    assert len(messages) == 1 and 'scroll' in messages[0]
-    assert scroll not in scene.items
-    assert scroll not in scene.maze.inventory[(5, 5)]
-    assert np.isnan(scroll.sprite.sprite.position).all()
+    # full game-side dialog pipeline, headless: reading the scroll opens a
+    # pager (its own thread + a grid in scene.grids); it is not consumed
+    InputDispatcher.reset()
+    dispatcher = InputDispatcher()
+    session = player.read(scroll)
+    assert dispatcher.handlers[-1] is session
+    assert len(scene.grids) == 1
+    session.post(KeyPress('Escape'))
+    session.join(10)
+    assert session.finished.is_set() and session.error is None
+    assert scroll in scene.items                 # reading no longer destroys it
+    assert scroll in scene.maze.inventory[(5, 5)]
+    assert len(scene.grids) == 0
 
     forbidden = [m for m in sys.modules if m.split('.')[0] in ('vispy', 'PyQt5', 'OpenGL', 'qtpy', 'PySide2')]
     assert not forbidden, "rendering modules were imported: %s" % forbidden

@@ -3,5 +3,5 @@ class ActionError(Exception):
     """
     def __init__(self, reason):
         self.reason = reason
-        Exception.__init__(reason)
+        Exception.__init__(self, reason)
     

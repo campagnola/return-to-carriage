@@ -2,14 +2,16 @@
 import faulthandler
 faulthandler.enable()
 
-from carriage_return.ui import MainWindow
+from carriage_return.backends.vispy import MainWindow, VispySceneRenderer
 from carriage_return.scene import Scene
-from carriage_return.render_vispy import VispySceneRenderer
 from carriage_return.dm import DungeonMaster
+from carriage_return.hud import build_hud
 from carriage_return.player import Player
 from carriage_return.monster import Monster
 from carriage_return.item import Scroll, Torch
-from carriage_return.input import DefaultInputHandler
+from carriage_return.interpreter import CommandInterpreter
+from carriage_return.input import (InputDispatcher, GameplayInputHandler,
+                                   CommandInputHandler, start_gamepad)
 
 import sys
 import vispy.app
@@ -18,18 +20,26 @@ import vispy.app
 
 if __name__ == '__main__':
 
-    ui = MainWindow()
+    dispatcher = InputDispatcher()
+    ui = MainWindow(dispatcher)
     scene = Scene()
+    hud = build_hud(scene)
+    scene.write('Hello?')
+    scene.write('Is anybody\n    there?')
     renderer = VispySceneRenderer(ui, scene)
-    scene.messages.connect(lambda event: ui.console.write(event.message))
+    ui.attach_scene(scene)
     dm = DungeonMaster(scene)
 
     player = Player(scene)
     player.location.update(scene.maze, [7, 7])
     ui.follow_entity(player)
 
-    default_input_handler = DefaultInputHandler(dm, ui, player)
-    ui.input_dispatcher.add_handler(default_input_handler)
+    interp = CommandInterpreter(scene)
+    cmd_input_handler = CommandInputHandler(scene.log, interp)
+    gameplay = GameplayInputHandler(dm, player, interpreter=interp,
+                                    command_handler=cmd_input_handler)
+    gameplay.activate()
+    start_gamepad(dispatcher)
 
     scroll = Scroll(location=(scene.maze, (5, 5)), scene=scene)
     torches = [
