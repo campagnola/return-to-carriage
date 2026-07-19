@@ -13,12 +13,16 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
 class FakeVisibility:
-    """Numpy-only visibility provider: everything fully visible."""
+    """Numpy-only visibility provider: everything fully visible.
+
+    Reads the field shape per call rather than caching it, because
+    scene.set_level resizes the field when the level changes.
+    """
     def __init__(self, scene):
-        self.shape = scene.field_shape[:2] + (4,)
+        self.scene = scene
 
     def render(self, pos, read=True):
-        return np.full(self.shape, 255, dtype='ubyte')
+        return np.full(self.scene.field_shape[:2] + (4,), 255, dtype='ubyte')
 
 
 @pytest.fixture
@@ -88,6 +92,60 @@ def test_scroll_read_opens_pager(scene):
         assert dispatcher.handlers == []
     finally:
         InputDispatcher.reset()
+
+
+def _small_maze(shape=(12, 20)):
+    """A maze of open path with a wall border, independent of level1.png."""
+    from carriage_return.blocktypes import BlockTypes
+    from carriage_return.maze import Maze
+    bt = BlockTypes()
+    blocks = np.full(shape, bt.id_of('path'), dtype='int')
+    blocks[0, :] = blocks[-1, :] = bt.id_of('wall')
+    blocks[:, 0] = blocks[:, -1] = bt.id_of('wall')
+    return Maze(blocks, bt)
+
+
+def test_set_level_swaps_maze_and_resizes_fields(scene):
+    ss = scene.supersample
+    maze = _small_maze()
+
+    scene.set_level(maze)
+
+    assert scene.maze is maze
+    assert scene.field_shape == (12 * ss, 20 * ss, 3)
+    assert scene.memory.shape == scene.field_shape
+    assert scene.line_of_sight.shape == scene.field_shape
+    assert scene.sight.data.shape == scene.field_shape
+
+    # the sight pipeline still runs against the new level
+    scene.player.location.update(maze, [5, 5])
+    scene.update_sight(1 / 60.)
+    assert scene.sight.data.shape == scene.field_shape
+
+
+def test_set_level_frees_the_previous_scenery(scene):
+    """Switching levels must not leak the outgoing maze's sprites."""
+    layer = scene.sprite_layers['scenery']
+    assert len(layer) == int(np.prod(scene.maze.shape))
+
+    small = _small_maze((12, 20))
+    scene.set_level(small)
+    assert len(layer) == 12 * 20
+    assert len(layer.slots) == 1
+
+    # switching back and forth does not accumulate
+    scene.set_level(_small_maze((8, 9)))
+    assert len(layer) == 8 * 9
+    assert len(layer.slots) == 1
+
+
+def test_set_level_fires_level_changed(scene):
+    calls = []
+    scene.level_changed.connect(lambda: calls.append(scene.maze))
+    maze = _small_maze()
+    scene.set_level(maze)
+    # fired once, after scene state is already consistent
+    assert calls == [maze]
 
 
 def test_game_model_is_headless():

@@ -105,20 +105,26 @@ class Item(Entity):
         Sampled from the line-of-sight field the scene last composited, so it
         costs one array lookup and is safe to call from an animator thread
         (the field is replaced wholesale, never edited in place).
+
+        An item on a level the scene is not displaying is never in sight -- and
+        must return before the lookup, because the sight field is sized to the
+        *current* level, so another level's coordinates may not even index it.
         """
         ml = self.location.global_location
-        if ml is None:
+        if ml is None or ml.container is not self.scene.maze:
             return False
         x, y = ml.slot
         ss = self.scene.supersample
         return self.scene.line_of_sight[y * ss, x * ss].max() > 0
 
     def lightmap(self, supersample=1):
+        # A light on another level contributes nothing here, and its map would
+        # be the wrong shape anyway: the field below is sized to scene.maze.
+        ml = self.location.global_location
+        if ml is None or ml.container is not self.scene.maze:
+            return None
+
         if self._unscaled_light_map is None:
-            ml = self.location.global_location
-            if ml is None:
-                return None
-            
             (x,y) = ml.slot
 
             maze_shape = self.scene.maze.shape

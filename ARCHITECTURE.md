@@ -57,7 +57,7 @@ a backend a few integer compares and zero copies/uploads per frame.
 Every layer kind shares one base, `GlyphLayer`, which owns the contract:
 
 ```
-GlyphLayer            name, version, structure_version, observer, _changed()
+GlyphLayer            name, version, structure_version, changed, _changed()
 ├── CharGridLayer     dense rows×cols glyph/fg/bg arrays, space + anchor
 │                       screen space: menus, pagers, console/HUD text
 └── SpriteLayer       sparse per-glyph positions via slot handles, world space
@@ -68,11 +68,12 @@ GlyphLayer            name, version, structure_version, observer, _changed()
   bumps when the underlying arrays are reallocated (new sprites/slots added,
   a grid's membership in `scene.grids` changing), meaning references a
   backend holds into the old arrays/list are stale.
-- ``observer`` is a single-slot callback (default `None`) invoked after any
-  version bump. An interactive backend registers a cheap, thread-safe
-  "schedule a frame" function here (the vispy backend installs its dirty-flag
-  setter, `MainWindow.mark_dirty`) so game-state changes repaint without
-  polling; sync still happens at draw time by diffing versions. Do **not**
+- ``changed`` is an `events.Observable` invoked (with no arguments) after
+  any version bump. Any number of components may `connect()` to it. An
+  interactive backend subscribes a cheap, thread-safe "schedule a frame"
+  function (the vispy backend connects its dirty-flag setter,
+  `MainWindow.mark_dirty`) so game-state changes repaint without polling;
+  sync still happens at draw time by diffing versions. Do **not**
   observe the `sight` FieldLayer from a draw-scheduling callback — it is
   recomputed during every draw, which would schedule draws forever.
 
@@ -282,13 +283,13 @@ Two rules:
    monsters, painters). The modal stack (§ Input) guarantees exactly one of
    them is receiving input — and therefore mutating game state — at a time,
    without any lock.
-2. **The GUI thread only reads**, version-gated, at frame time. Observers
-   installed by the backend do nothing but set a dirty flag (an atomic write,
+2. **The GUI thread only reads**, version-gated, at frame time. Callbacks
+   connected by the backend do nothing but set a dirty flag (an atomic write,
    safe from any thread, no Qt involved).
 
 Redraw scheduling: the backend installs `mark_dirty` (`MainWindow.mark_dirty`,
-just `self._dirty = True`) as the observer on every layer/grid/log it
-watches. `MainWindow`'s 60 Hz timer is the **frame tick**
+just `self._dirty = True`) to the `changed` event of every layer/grid/log
+it watches. `MainWindow`'s 60 Hz timer is the **frame tick**
 (`MainWindow._frame_tick`): scroll the camera, sync the grid renderer, and —
 if `_dirty` — clear the flag and call `canvas.update()`; then check
 `scene.quit_requested` and close the canvas if it was set. A burst of writes
@@ -301,7 +302,7 @@ out of scope here.
 
 The never-observe-`sight` rule from the layer bridge section is part of the
 same discipline: `sight` is recomputed on every draw
-(`VispySceneRenderer.update`), so wiring its observer to `mark_dirty` would
+(`VispySceneRenderer.update`), so connecting `mark_dirty` to it would
 schedule a draw from inside every draw, forever.
 
 ## Dialogs (`carriage_return/dialogs/`, game-side)
@@ -317,7 +318,7 @@ display (see `tests/test_actions.py`, `agent_helpers/check_headless.py`).
 carriage_return/dialogs/
     __init__.py       # public API: open_menu(), open_pager(), DialogSession, DialogClosed
     session.py         # DialogSession (queue + thread + finished event)
-    base.py             # Widget base (version/observer/done/result), CharGridPainter base
+    base.py             # Widget base (version/changed/done/result), CharGridPainter base
     menu.py              # Menu, MenuItem, run_menu(), MenuPainter
     pager.py             # Pager, run_pager(), PagerPainter    ("book")
 ```
@@ -375,7 +376,7 @@ class MenuPainter(CharGridPainter):          # dialogs/menu.py
     def _render_content(self): ...           # title, item rows, cursor bar, hints
 ```
 
-A painter installs itself as its model's `observer` and repaints the whole
+A painter connects itself to its model's `changed` event and repaints the whole
 grid on any change — pure numpy, so it is correct to run on the dialog
 thread (the model's sole mutator while it's active); the grid's version bump
 is what wakes the renderer. Painters own their own colors (border/title/hint
@@ -439,7 +440,7 @@ Every fixed text panel — console, stats bar, info box — is a screen-space
 exactly like any other grid, with no idea any of them is "the HUD":
 
 - `ConsolePainter(scene, shape)` — observes `scene.log` (a `MessageLog`:
-  `lines`, `version`, `observer`, `write`/`set_last_line`/`remove_last_line`)
+  `lines`, `version`, `changed`, `write`/`set_last_line`/`remove_last_line`)
   and repaints its visible tail into a bottom-right-anchored grid, newest
   line last, character-wrapping lines wider than the box. The command prompt
   reaches it through `scene.log.set_last_line`, so `CommandInputHandler`
@@ -450,7 +451,7 @@ exactly like any other grid, with no idea any of them is "the HUD":
   (bottom-left).
 - `build_hud(scene)` constructs all three as a `Hud` (`.info`, `.console`,
   `.stats`, `.close()`). The `Hud` derives every shape from `scene.screen`
-  and owns its `observer`: a window resize reshapes all three grids (stats
+  and subscribes to its `changed` event: a resize reshapes all three grids (stats
   spanning the full width, info/console splitting the bottom rows 40/60)
   and repaints them with text re-wrapped.
 

@@ -9,19 +9,37 @@ from carriage_return.layers import FieldLayer, GlyphRegistry, SpriteLayer
 def test_glyph_registry_ids_are_stable_and_ordered():
     reg = GlyphRegistry()
     first = reg.add_chars('abc')
-    assert first == 0
+    assert first == {'a': 0, 'b': 1, 'c': 2}
     assert reg['a'] == 0
     assert reg['b'] == 1
     assert reg['c'] == 2
     assert reg.chars == ['a', 'b', 'c']
 
     second = reg.add_chars(['x', 'y'])
-    assert second == 3
+    assert second == {'x': 3, 'y': 4}
     assert reg['x'] == 3
     assert reg.chars[3] == 'x'
     # earlier ids unchanged
     assert reg['a'] == 0
     assert len(reg) == 5
+
+
+def test_glyph_registry_deduplicates():
+    """Re-adding a char returns its existing id instead of appending a duplicate.
+
+    The returned mapping still covers every char asked for, including the
+    already-present ones, so a caller can build a lookup table from one call
+    without tracking which chars were new.
+    """
+    reg = GlyphRegistry()
+    reg.add_chars('ab')
+    again = reg.add_chars('bc')
+
+    assert again == {'b': 1, 'c': 2}
+    assert reg.chars == ['a', 'b', 'c']
+    # ids stay in step with positions in chars -- the identity mapping the
+    # backends rely on to use a glyph id directly as an atlas index
+    assert all(reg[c] == i for i, c in enumerate(reg.chars))
 
 
 def test_glyph_registry_getitem_adds_missing():

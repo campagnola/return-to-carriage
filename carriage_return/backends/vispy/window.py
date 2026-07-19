@@ -37,6 +37,10 @@ class MainWindow:
         self.camera_target = self.view.camera.rect
         self._last_camera_update = ptime.time()
 
+        # when set, the next camera update jumps straight to the target rather
+        # than easing toward it; see _level_changed
+        self._snap_camera = False
+
         # game-state changes set this flag (from any thread); the frame tick
         # below turns it into one canvas repaint
         self._dirty = False
@@ -57,6 +61,16 @@ class MainWindow:
         """
         self.game_scene = scene
         self.grid_renderer = GridRenderer(self.canvas, scene, self.mark_dirty)
+        scene.level_changed.connect(self._level_changed)
+
+    def _level_changed(self):
+        """Snap the camera on a level change instead of scrolling to it.
+
+        The smooth scroll in _scroll_camera exists to follow a walking player.
+        A level change teleports them, and easing across that gap would swoop
+        the camera over a whole level of blackness before arriving.
+        """
+        self._snap_camera = True
 
     def mark_dirty(self):
         """Note that game state changed; a repaint follows on the frame tick.
@@ -98,10 +112,15 @@ class MainWindow:
         trv = np.array(tr.pos + tr.size, dtype='float32')
 
         if not np.any(abs(trv - crv) > 1e-2):
+            self._snap_camera = False
             return
 
-        s = np.exp(-dt / 0.4)  # 400 ms settling time constant
-        nrv = crv * s + trv * (1.0 - s)
+        if self._snap_camera:
+            self._snap_camera = False
+            nrv = trv
+        else:
+            s = np.exp(-dt / 0.4)  # 400 ms settling time constant
+            nrv = crv * s + trv * (1.0 - s)
 
         cr.pos = nrv[:2]
         cr.size = nrv[2:]

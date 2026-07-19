@@ -550,10 +550,28 @@ class TextureMaskFilter(object):
         self.scale_tr = STTransform(scale=scale) * STTransform(translate=(0.5, 0.5))
         self.fshader['transform'] = self.scale_tr * transform
         
+        self._visual = None
+        # the expression added to the visual's hook, kept so that _detach can
+        # remove the same object again -- calling self.fshader() a second time
+        # would build a different expression and remove nothing
+        self._fshader_expr = None
+
     def _attach(self, visual):
-        self._visual = visual        
+        self._visual = visual
+        self._fshader_expr = self.fshader()
         fhook = visual._get_hook('frag', 'post')
-        fhook.add(self.fshader(), position=3)
+        fhook.add(self._fshader_expr, position=3)
+
+    def _detach(self, visual):
+        """Remove this filter from *visual* (see Visual.detach).
+
+        Needed because the sight mask is sized to the maze, so switching to a
+        differently-shaped level detaches the old filter and attaches a new one.
+        """
+        if self._fshader_expr is not None:
+            visual._get_hook('frag', 'post').remove(self._fshader_expr)
+            self._fshader_expr = None
+        self._visual = None
 
 
 class ShadowRenderer(object):

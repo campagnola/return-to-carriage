@@ -124,10 +124,38 @@ class VispySceneRenderer(object):
         self.layer_renderer = VispyLayerRenderer(ui, scene.glyphs, list(scene.sprite_layers.values()))
         self.txt = self.layer_renderer.txt
 
+        self.sight_texture = None
+        self.sight_filter = None
+        self._sight_version = None
+        self._last_update_time = None
+
+        # both the shadow renderer and the sight texture are sized from the
+        # maze, so they are rebuilt on every level change (including the
+        # initial build below, which scene.set_level already fired -- but the
+        # renderer did not exist yet to hear it).
+        scene.level_changed.connect(self._rebuild_for_level)
+        self._rebuild_for_level()
+
+        scene.redraw_requested.connect(ui.mark_dirty)
+
+        ui.canvas.events.draw.connect(self._on_draw)
+
+    def _rebuild_for_level(self):
+        """Re-create the maze-sized GL resources for scene.maze.
+
+        Called for the starting level and again whenever scene.set_level
+        swaps in a differently-shaped maze.
+        """
+        scene = self.scene
+
         # GPU shadow-map provider for LOS/lighting computations
-        scene.visibility = ShadowRenderer(scene.maze, ui.canvas, supersample=scene.supersample)
+        scene.visibility = ShadowRenderer(scene.maze, self.ui.canvas,
+                                          supersample=scene.supersample)
 
         # sight field -> texture, masking the sprites visual
+        if self.sight_filter is not None:
+            self.txt.detach(self.sight_filter)
+
         ms = scene.maze.shape
         self.sight_texture = vispy.gloo.Texture2D(shape=scene.field_shape, format='rgb',
                                                   interpolation='linear', wrapping='repeat')
@@ -135,12 +163,8 @@ class VispySceneRenderer(object):
         self.sight_filter = TextureMaskFilter(self.sight_texture, tr, scale=(1./ms[1], 1./ms[0]))
         self.txt.attach(self.sight_filter)
 
+        # force the next update() to upload into the new texture
         self._sight_version = None
-        self._last_update_time = None
-
-        scene.redraw_requested.connect(ui.mark_dirty)
-
-        ui.canvas.events.draw.connect(self._on_draw)
 
     def _on_draw(self, event):
         now = time.perf_counter()

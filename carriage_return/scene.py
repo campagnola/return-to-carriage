@@ -106,11 +106,12 @@ class Scene(Entity):
         # subscribed to by the display backend; see request_redraw()
         self.redraw_requested = Observable()
 
-        # create maze
-        self.maze = Maze.load_image('level1.png')
-
-        # add scenery sprites for drawing maze
-        self.maze.add_scenery(self.glyphs, self.sprite_layers['scenery'])
+        # invoked (no arguments) after set_level() has swapped in a new maze
+        # and resized the sight fields. Subscribers rebuild whatever they
+        # sized from the old maze -- the vispy backend rebuilds its
+        # ShadowRenderer and sight texture. Fired on the calling (game)
+        # thread, after all of the scene's own state is consistent.
+        self.level_changed = Observable()
 
         # visibility provider (see class docstring); injected by the rendering
         # backend or by headless test code
@@ -120,9 +121,7 @@ class Scene(Entity):
         # polls it from its frame tick and shuts down
         self.quit_requested = False
 
-        ms = self.maze.shape
         self.supersample = 4
-        self.field_shape = (ms[0] * self.supersample, ms[1] * self.supersample, 3)
 
         self.norm_light = None
         self.light_cache = ArraySumCache()
@@ -134,11 +133,18 @@ class Scene(Entity):
         # whenever the lights themselves move.
         self._light_norm = None
 
-        self.memory = np.zeros(self.field_shape, dtype='float32')
-        self.line_of_sight = np.zeros(self.field_shape, dtype='float32')
+        # composited sight field consumed by renderers. Kept as one object for
+        # the scene's lifetime -- set_level() reshapes it in place (FieldLayer
+        # .set_data reallocates on a shape change) so a backend's reference
+        # stays valid across level switches.
+        self.sight = FieldLayer('sight', shape=(0, 0, 3))
 
-        # composited sight field consumed by renderers
-        self.sight = FieldLayer('sight', shape=self.field_shape)
+        # the visible maze and everything sized from it; set by set_level()
+        self.maze = None
+        self.field_shape = None
+        self.memory = None
+        self.line_of_sight = None
+        self._scenery = None
 
         # track all items
         self.items = []
@@ -147,6 +153,74 @@ class Scene(Entity):
         self.monsters = {}
 
         self._need_los_update = True
+
+        # the multi-level world, installed by set_world(). Until then the scene
+        # runs on a single unnamed maze, which is what the tests and the
+        # screenshot harness want -- they place things at dungeon coordinates
+        # and never travel.
+        self.world = None
+
+        self.set_level(Maze.load_image('level1.png'))
+
+    def set_world(self, world):
+        """Install *world* and switch to its current level.
+
+        The scene delegates nothing else to the world: it still holds exactly
+        one visible maze. What the world adds is the ability to ask *which
+        level is this* and *what portal is underfoot* (see dm.DungeonMaster).
+        """
+        self.world = world
+        self.set_level(world.current)
+
+    @property
+    def level(self):
+        """The Level currently displayed, or None when running world-less."""
+        if self.world is None:
+            return None
+        return self.world.current
+
+    def set_level(self, level):
+        """Make *level* visible, rebuilding everything sized from its maze.
+
+        *level* may be a :class:`~.world.Level` or a bare Maze. It is the
+        single entry point for level initialization: called once from __init__
+        for the starting level, and again for every later switch. It rebuilds
+        the scenery sprites, resizes the sight fields, drops the lighting
+        caches, and fires ``level_changed`` so the display backend can rebuild
+        what it sized from the old maze.
+
+        Callers must move the player onto the new level themselves; the scene
+        does not place entities.
+        """
+        maze = getattr(level, 'maze', level)
+        if self.world is not None and hasattr(level, 'maze'):
+            self.world.current = level
+        self.maze = maze
+
+        # rebuild the scenery sprites: free the outgoing maze's slot before
+        # allocating the new one, so the layer does not grow by a whole maze
+        # on every switch.
+        scenery_layer = self.sprite_layers['scenery']
+        if self._scenery is not None:
+            scenery_layer.remove_sprites(self._scenery)
+        self._scenery = maze.add_scenery(self.glyphs, scenery_layer)
+
+        # resize the visual field. FieldLayer.set_data reallocates on a shape
+        # change, so scene.sight keeps its identity for backends holding it.
+        ms = maze.shape
+        ss = self.supersample
+        self.field_shape = (ms[0] * ss, ms[1] * ss, 3)
+        self.memory = np.zeros(self.field_shape, dtype='float32')
+        self.line_of_sight = np.zeros(self.field_shape, dtype='float32')
+        self.sight.set_data(np.zeros(self.field_shape, dtype='float32'))
+
+        # every lighting cache is sized by, or positioned against, the maze
+        self.norm_light = None
+        self._light_norm = None
+        self.light_cache = ArraySumCache()
+        self._need_los_update = True
+
+        self.level_changed()
 
     @property
     def player(self):
@@ -226,11 +300,17 @@ class Scene(Entity):
                 if item_light is None:
                     continue
                 lights.append(item_light)
-            light = self.light_cache.sum_arrays(lights)
-            log_light = np.log(np.clip(light*10, 1, np.inf))
-            if self._light_norm is None:
-                self._light_norm = log_light.max()
-            self.norm_light = log_light / self._light_norm
+            if lights:
+                # ArraySumCache.sum_arrays asserts on an empty list, and a
+                # level may legitimately hold no light at all -- lightmap()
+                # returns None for every light that is on another level.
+                light = self.light_cache.sum_arrays(lights)
+                log_light = np.log(np.clip(light*10, 1, np.inf))
+                if self._light_norm is None:
+                    self._light_norm = log_light.max()
+                self.norm_light = log_light / self._light_norm
+            else:
+                self.norm_light = np.zeros(self.field_shape, dtype='float32')
 
         # current sight is combination of lighting and LOS
         sight = self.line_of_sight * self.norm_light

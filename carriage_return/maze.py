@@ -31,6 +31,24 @@ class Maze(Entity):
     def shape(self):
         return self.blocks.shape
 
+    def invalidate_appearance(self):
+        """Drop the cached opacity/colour arrays after ``blocks`` was edited.
+
+        The three are derived from ``blocks`` and cached on first use, so
+        anything that writes into ``blocks`` after construction -- stamping a
+        portal end, most notably -- must call this or the maze keeps drawing
+        (and casting shadows) as it looked beforehand.
+        """
+        self._opacity = None
+        self._fg_color = None
+        self._bg_color = None
+
+    @classmethod
+    def filled(cls, shape, blocktypes, blocktype='wall', obj_name=None):
+        """A maze of *shape* ``(rows, cols)`` filled with one block type."""
+        blocks = np.full(shape, blocktypes.id_of(blocktype), dtype='uint8')
+        return cls(blocks, blocktypes, obj_name=obj_name)
+
     def blocktype_at(self, i, j):
         bid = self.blocks[i, j]
         return self.blocktypes[bid]
@@ -62,31 +80,51 @@ class Maze(Entity):
         return self._bg_color
 
     @classmethod
-    def load_image(cls, filename):
-        blocktypes = BlockTypes()
+    def load_image(cls, filename, blocktypes=None, obj_name=None):
+        """Build a maze from an image: non-black pixels are wall, black is path.
+
+        *blocktypes* defaults to a fresh table, but a multi-level world passes
+        its shared one so that block ids mean the same thing on every level.
+        """
+        if blocktypes is None:
+            blocktypes = BlockTypes()
         maze_blocks = np.array(Image.open(filename))[::-1,:,0]
         maze_blocks[maze_blocks>0] = blocktypes.id_of('wall')
         maze_blocks[maze_blocks==0] = blocktypes.id_of('path')
-        return cls(maze_blocks, blocktypes)
+        return cls(maze_blocks, blocktypes, obj_name=obj_name)
 
     def add_scenery(self, glyphs, layer):
-        """Fill a scenery SpriteLayer with this maze's blocks.
+        """Fill a scenery SpriteLayer with this maze's blocks; return the slot.
 
         *glyphs* is the scene's GlyphRegistry, *layer* the scenery SpriteLayer.
+        The caller owns the returned SpriteSlot and frees it (via
+        layer.remove_sprites/clear) when this maze stops being displayed --
+        a maze may be built into more than one layer over its lifetime, so it
+        does not keep a reference of its own.
         """
-        first_id = glyphs.add_chars(self.blocktypes.all_chars)
-        self.scenery = layer.add_sprites(self.shape)
-        self.scenery.glyph = self.blocks + first_id
+        # all_chars is in blocktype-id order, so indexing the returned char->id
+        # mapping in that order gives a blocktype id -> glyph id lookup table.
+        # A table rather than a scalar offset because the registry deduplicates:
+        # glyph ids for these chars are not necessarily contiguous, and two
+        # blocktypes sharing a char correctly map to the same glyph.
+        chars = self.blocktypes.all_chars
+        char_ids = glyphs.add_chars(chars)
+        glyph_ids = np.array([char_ids[c] for c in chars], dtype='uint32')
+
+        scenery = layer.add_sprites(self.shape)
+        scenery.glyph = glyph_ids[self.blocks]
 
         # set positions
         shape = self.shape
         pos = np.zeros(shape + (3,), dtype='float32')
         pos[..., :2] = np.mgrid[0:shape[1], 0:shape[0]].transpose(2, 1, 0)
-        self.scenery.position = pos
+        scenery.position = pos
 
         # set colors
-        self.scenery.fgcolor = self.fg_color
-        self.scenery.bgcolor = self.bg_color
+        scenery.fgcolor = self.fg_color
+        scenery.bgcolor = self.bg_color
+
+        return scenery
 
     def opaque_geometry(self):
         """Return a list of vertex loops defining the boundaries of objects that block line-of-sight.

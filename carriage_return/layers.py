@@ -62,10 +62,11 @@ class GlyphLayer(object):
 class GlyphRegistry(object):
     """Append-only registry mapping characters to small integer glyph ids.
 
-    Ids are assigned in insertion order. Mirrors the CharAtlas.add_chars
-    contract (add_chars returns the first new id and appends unconditionally)
-    so that a backend feeding ``chars`` to its own atlas in order gets an
-    identity id mapping.
+    Ids are assigned in insertion order and never reused; a char already
+    present keeps its id, so ``chars[id] == char`` always holds. A backend
+    that feeds each batch of *newly appended* chars (``chars[n_synced:]``) to
+    its own atlas in order therefore gets an identity id -> atlas index
+    mapping.
     """
     def __init__(self):
         self._char_ids = {}
@@ -79,18 +80,24 @@ class GlyphRegistry(object):
     def __getitem__(self, char):
         """Return the id for *char*, adding it if not present."""
         if char not in self._char_ids:
-            return self.add_chars(char)
+            self.add_chars(char)
         return self._char_ids[char]
 
     def add_chars(self, chars):
-        """Add characters (a string or sequence of 1-char strings); return the first new id."""
-        first = len(self.chars)
+        """Add characters (a string or sequence of 1-char strings); return a dict mapping each char to its glyph id."""
+        next_id = len(self.chars)
+        lut = {}
         for i, char in enumerate(chars):
-            self._char_ids[char] = first + i
+            if char in self._char_ids:
+                lut[char] = self._char_ids[char]
+                continue
+            self._char_ids[char] = next_id
+            lut[char] = next_id
             self.chars.append(char)
+            next_id += 1
         self.version += 1
         self.changed()
-        return first
+        return lut
 
 
 class SpriteLayer(GlyphLayer):
@@ -124,6 +131,28 @@ class SpriteLayer(GlyphLayer):
         slot = SpriteSlot(self, start=old_size, shape=shape)
         self.slots.append(slot)
         return slot
+
+    def remove_sprites(self, slot):
+        """Free *slot*, repacking the remaining slots into contiguous arrays.
+
+        Bumps ``structure_version``, so a backend holding references into the
+        old arrays re-reads them at its next sync. The freed slot must not be
+        written to afterwards.
+        """
+        self.slots.remove(slot)
+        slot.layer = None
+        self._slot_shape_changed()
+
+    def clear(self):
+        """Free every slot, leaving the layer empty.
+
+        Used when the world content a layer draws is replaced wholesale --
+        switching levels rebuilds the scenery layer from the new maze.
+        """
+        for slot in self.slots:
+            slot.layer = None
+        self.slots = []
+        self._slot_shape_changed()
 
     def _resize(self, n):
         """Resize the shared arrays to n sprites, return the old size.

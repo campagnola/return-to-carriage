@@ -296,6 +296,11 @@ class GameplayInputHandler(QueuedInputHandler):
             self.interpreter.read([])
         elif ev.key == 'd':
             self.interpreter.drop([])
+        elif ev.text in ('<', '>'):
+            # matched on text, not key: these are shift+comma/period, and the
+            # vispy source lowercases single-character key names, so the key
+            # name for '>' is unreliable while the text is exactly '>'
+            self.dm.use_stairs(self.player, ev.text)
         else:
             self.keys.add(ev.key)
 
