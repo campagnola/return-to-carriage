@@ -16,8 +16,18 @@ from ...input import KeyPress, KeyRelease
 
 
 def _key_name(key):
-    """Normalize a native key object to its plain string name."""
-    return getattr(key, 'name', key)
+    """Normalize a native key object to its plain string name.
+
+    vispy names letter keys with their uppercase character ('T'), but the
+    game side compares against lowercase physical-key names ('t'); vispy Key
+    objects hid this by comparing case-insensitively, plain strings do not.
+    Lowercase single-character names so 't'/'r'/'d' etc. reach their handlers,
+    while multi-character names ('Right', 'Escape', 'Shift') pass through.
+    """
+    name = getattr(key, 'name', key)
+    if isinstance(name, str) and len(name) == 1:
+        return name.lower()
+    return name
 
 
 def _is_auto_repeat(event):
