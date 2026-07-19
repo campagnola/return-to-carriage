@@ -25,7 +25,7 @@ def test_last_line_editing():
 def test_observer_fires_per_mutation():
     log = MessageLog()
     calls = []
-    log.observer = lambda: calls.append(log.version)
+    log.changed.connect(lambda: calls.append(log.version))
     log.write("a")
     log.set_last_line("b")
     log.remove_last_line()

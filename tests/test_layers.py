@@ -171,32 +171,49 @@ def test_field_layer_from_data():
 
 
 def test_observer_called_on_writes():
-    """The observer single-slot callback fires on any version bump, so an
-    interactive backend can schedule a redraw when the game changes a layer."""
+    """The ``changed`` event fires on any version bump, so an interactive
+    backend can schedule a redraw when the game changes a layer."""
     calls = []
 
     layer = SpriteLayer('test')
-    layer.observer = lambda: calls.append('layer')
-    slot = layer.add_sprites((2,))          # resize -> observer
+    layer.changed.connect(lambda: calls.append('layer'))
+    slot = layer.add_sprites((2,))          # resize -> changed
     assert calls == ['layer']
-    slot.position = [(0, 0, 0), (1, 1, 0)]  # data write -> observer
+    slot.position = [(0, 0, 0), (1, 1, 0)]  # data write -> changed
     slot.glyph = 3
     assert calls == ['layer'] * 3
 
     glyphs = GlyphRegistry()
-    glyphs.observer = lambda: calls.append('glyphs')
+    glyphs.changed.connect(lambda: calls.append('glyphs'))
     glyphs.add_chars('ab')
     glyphs['c']
     assert calls[-2:] == ['glyphs', 'glyphs']
 
     field = FieldLayer('f', shape=(2, 2))
-    field.observer = lambda: calls.append('field')
+    field.changed.connect(lambda: calls.append('field'))
     field.set_data(np.ones((2, 2)))
     field.bump()
     assert calls[-2:] == ['field', 'field']
 
 
+def test_multiple_subscribers_all_notified():
+    """``changed`` is an Observable, so independent components (e.g. a backend
+    scheduling a redraw and a painter repainting) can each subscribe."""
+    calls = []
+    layer = SpriteLayer('test')
+    layer.changed.connect(lambda: calls.append('a'))
+    layer.changed.connect(lambda: calls.append('b'))
+
+    slot = layer.add_sprites((1,))
+    assert sorted(calls) == ['a', 'b']
+
+    calls.clear()
+    layer.changed.disconnect(layer.changed.callbacks[0])
+    slot.glyph = 1
+    assert len(calls) == 1
+
+
 def test_observer_is_optional():
     layer = SpriteLayer('test')
     slot = layer.add_sprites((1,))
-    slot.position = (0, 0, 0)  # no observer set: must not raise
+    slot.position = (0, 0, 0)  # nothing connected: must not raise

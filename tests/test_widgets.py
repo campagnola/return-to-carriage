@@ -10,7 +10,7 @@ class VersionWatcher(object):
     def __init__(self, widget):
         self.widget = widget
         self.calls = 0
-        widget.observer = self._called
+        widget.changed.connect(self._called)
 
     def _called(self):
         self.calls += 1

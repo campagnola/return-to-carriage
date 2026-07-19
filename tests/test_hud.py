@@ -112,5 +112,5 @@ def test_hud_close_removes_grids_and_observers(scene):
     hud = build_hud(scene)
     hud.close()
     assert len(scene.grids) == 0
-    assert scene.log.observer is None
-    assert scene.screen.observer is None
+    assert scene.log.changed.callbacks == []
+    assert scene.screen.changed.callbacks == []

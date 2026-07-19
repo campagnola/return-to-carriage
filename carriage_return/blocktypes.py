@@ -53,4 +53,4 @@ class BlockTypes:
 
     @property
     def all_chars(self):
-        return self.data['char'].tostring().decode()
+        return self.data['char'].tobytes().decode()

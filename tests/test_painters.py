@@ -83,7 +83,7 @@ def test_painter_close_detaches(scene):
     assert len(scene.grids) == 1
     painter.close()
     assert len(scene.grids) == 0
-    assert menu.observer is None
+    assert menu.changed.callbacks == []
     # further model changes must not touch the removed grid
     version = painter.grid.version
     menu.move(0)
