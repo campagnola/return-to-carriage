@@ -17,7 +17,7 @@ sys.path.insert(0, project_root)
 os.chdir(project_root)
 
 from render_screenshot import build_game  # noqa: E402  (agent_helpers sibling)
-import carriage_return.graphics as graphics  # noqa: E402
+import carriage_return.backends.vispy.graphics as graphics  # noqa: E402
 
 counter = {'writes': 0}
 

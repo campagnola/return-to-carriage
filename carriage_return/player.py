@@ -54,11 +54,13 @@ class Player(Entity):
 
     def line_of_sight(self):
         pos = self.location.global_location.slot
-        los = self.scene.visibility.render(pos, read=True)[:, :, :3] / 255.0
+        smap = self.scene.visibility.render(pos, read=True)[:, :, :3]
+        # carried lights share the player's shadow map; they expect it in the
+        # same 0-255 scale that Item.shadow_map() renders for itself
         for item in self.inventory.all_entities():
             if isinstance(item, Item) and item.light_source:
-                item.set_shadow_map(los)
-        return los
+                item.set_shadow_map(smap)
+        return smap / 255.0
 
 
 from .item import Item

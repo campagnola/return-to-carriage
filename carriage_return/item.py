@@ -1,4 +1,8 @@
 # coding: utf8
+import threading
+import time
+import weakref
+
 import numpy as np
 
 from .entity import Entity
@@ -34,6 +38,7 @@ class Item(Entity):
         self._shadow_map = None
         self._unscaled_light_map = None
         self._light_map = None
+        self._brightness = 1.0
         self.location.global_changed.connect(self._location_changed)
 
         if location is not None:
@@ -43,6 +48,25 @@ class Item(Entity):
         self._shadow_map = None
         self._unscaled_light_map = None
         self._light_map = None
+
+    @property
+    def brightness(self):
+        """Scale applied to ``light_color``; 1.0 is this item's nominal output.
+
+        Setting it discards only the colour scaling of the cached light map --
+        the shadow map and distance falloff underneath survive -- then tells
+        the scene its lighting is stale and asks the display to repaint.
+        """
+        return self._brightness
+
+    @brightness.setter
+    def brightness(self, value):
+        if value == self._brightness:
+            return
+        self._brightness = value
+        self._light_map = None
+        self.scene.invalidate_lighting()
+        self.scene.request_redraw()
 
     @property
     def weight(self):
@@ -75,6 +99,20 @@ class Item(Entity):
         self._unscaled_light_map = None
         self._light_map = None
 
+    def in_player_sight(self):
+        """True if the player can currently see the cell this item occupies.
+
+        Sampled from the line-of-sight field the scene last composited, so it
+        costs one array lookup and is safe to call from an animator thread
+        (the field is replaced wholesale, never edited in place).
+        """
+        ml = self.location.global_location
+        if ml is None:
+            return False
+        x, y = ml.slot
+        ss = self.scene.supersample
+        return self.scene.line_of_sight[y * ss, x * ss].max() > 0
+
     def lightmap(self, supersample=1):
         if self._unscaled_light_map is None:
             ml = self.location.global_location
@@ -87,13 +125,23 @@ class Item(Entity):
             maze_pos = np.mgrid[0:maze_shape[0]*supersample, 0:maze_shape[1]*supersample].transpose(1, 2, 0)
             light_pos = np.array([[[y * supersample, x * supersample]]]) + (0.5 * supersample)
             dist2 = ((maze_pos - light_pos) ** 2).sum(axis=2) + 0.5  # 0.5 enforces height
+            dist2 = dist2.astype('float32')
 
+            # float32 throughout: these maps are rescaled and composited every
+            # frame for flickering lights, and float64 doubles that cost
             self._unscaled_light_map = self.shadow_map(ml.slot) / dist2[:, :, None]
 
-        if self._light_map is None:
-            self._light_map = self._unscaled_light_map * np.array(self.light_color)[None, None, :]
+        # The shadow map and distance falloff above are cached until the item
+        # moves; a brightness change only rescales that cached map. Held in a
+        # local because an animator thread may null the cache at any moment --
+        # the worst that costs is one frame at the previous brightness.
+        light_map = self._light_map
+        if light_map is None:
+            color = np.array(self.light_color, dtype='float32') * self._brightness
+            light_map = self._unscaled_light_map * color[None, None, :]
+            self._light_map = light_map
 
-        return self._light_map
+        return light_map
 
 
 class Scroll(Item):
@@ -130,6 +178,14 @@ class Scroll(Item):
 
 
 class Torch(Item):
+    """A burning torch, which lights its surroundings and flickers as it burns.
+
+    Every torch in the game is flickered by one shared background thread,
+    started by the first torch that exists and left running from then on. The
+    flame is game state like any other: it advances on its own clock whether or
+    not anything is displaying it, and setting ``brightness`` pushes the
+    resulting redraw request out through the scene.
+    """
 
     name = "torch"
     char = 't'
@@ -140,6 +196,70 @@ class Torch(Item):
     length = 30.0
     light_color = (10.0, 8.0, 2.0)
     fg_color = (1.0, 0.8, 0.2, 1.0)
+
+    # Flicker. The flame's log-brightness wanders around 0 as a random walk
+    # pulled back to centre (Ornstein-Uhlenbeck), so brightness is log-normal:
+    # it never reaches zero, never drifts far, and has no audible period.
+    # Working in log units matters because the scene tone-maps lighting with a
+    # log as well, so FLICKER_DEPTH lands on screen as a roughly proportional
+    # brightness swing rather than being compressed away.
+    FLICKER_DEPTH = 1.0     # std dev of log-brightness per kick
+    FLICKER_RATE = 4.0      # 1/s; how quickly it wanders (higher = twitchier)
+    FLICKER_INTERVAL = 1 / 10.   # seconds between flame updates
+
+    # class default so a torch is well-formed the moment it is created; the
+    # flame's state becomes per-instance on its first step
+    _log_brightness = 0.0
+
+    # every living torch, weakly held so that dropping one lets it go
+    _torches = weakref.WeakSet()
+    _flicker_thread = None
+    _flicker_lock = threading.Lock()
+
+    def __init__(self, *args, **kwds):
+        Item.__init__(self, *args, **kwds)
+        with Torch._flicker_lock:
+            Torch._torches.add(self)
+            if Torch._flicker_thread is None:
+                Torch._flicker_thread = threading.Thread(
+                    target=Torch._flicker_loop, name='TorchFlicker', daemon=True)
+                Torch._flicker_thread.start()
+
+    @staticmethod
+    def _flicker_loop():
+        """Burn every torch in the game, forever, on this thread."""
+        last = time.perf_counter()
+        while True:
+            time.sleep(Torch.FLICKER_INTERVAL)
+            now = time.perf_counter()
+            dt, last = now - last, now
+            Torch._flicker_all(dt)
+
+    @staticmethod
+    def _flicker_all(dt):
+        """Advance every visible flame by *dt* seconds, all in one step.
+
+        Torches the player cannot see are skipped: an unwatched flame needs no
+        simulating, and skipping it also spares the scene a full-field rescale
+        of that torch's light map. The rest advance as a single vectorised
+        update, so a tick costs one numpy operation no matter how many torches
+        the level holds.
+        """
+        lit = [t for t in Torch._torches if t.in_player_sight()]
+        if not lit:
+            return
+
+        # depth and rate are read per torch, so a subclass can burn differently
+        log_b = np.array([t._log_brightness for t in lit])
+        depth = np.array([t.FLICKER_DEPTH for t in lit])
+        rate = np.array([t.FLICKER_RATE for t in lit])
+
+        k = np.minimum(rate * dt, 1.0)
+        log_b += k * (np.random.normal(0, 1, size=len(lit)) * depth - log_b)
+
+        for torch, lb in zip(lit, log_b):
+            torch._log_brightness = lb
+            torch.brightness = float(np.exp(lb))  # pushes redraw + invalidation
 
 
 

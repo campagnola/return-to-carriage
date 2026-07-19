@@ -138,6 +138,8 @@ class VispySceneRenderer(object):
         self._sight_version = None
         self._last_update_time = None
 
+        scene.redraw_observer = ui.mark_dirty
+
         ui.canvas.events.draw.connect(self._on_draw)
 
     def _on_draw(self, event):

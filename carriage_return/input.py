@@ -237,7 +237,7 @@ class GameplayInputHandler(QueuedInputHandler):
     def __init__(self, dm, player, interpreter=None, command_handler=None,
                  clock=time.monotonic, start_thread=True):
         QueuedInputHandler.__init__(self)
-        self.dm = dm
+        self.dm: 'DungeonMaster' = dm
         self.player = player
         self.interpreter = interpreter
         self.command_handler = command_handler
@@ -365,7 +365,7 @@ class GameplayInputHandler(QueuedInputHandler):
         newpos = pos + np.clip(np.trunc(float_pos - pos), -1, 1)
         if (newpos == pos).all():
             return
-        self.dm.request_player_move(self.player, newpos.astype('uint'))
+        self.dm.request_player_move(self.player, newpos)
         # the DM may have refused an axis (a wall); follow where we ended up so
         # the float position cannot burrow into rock
         self.float_pos += np.array(self.player.location.slot) - newpos

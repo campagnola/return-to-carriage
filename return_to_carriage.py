@@ -65,6 +65,6 @@ if __name__ == '__main__':
     held_torch.light_color = (10000, 5000, 1000)
 
     yeti = Monster(position=(8, 40), scene=scene)
-    
+
     if sys.flags.interactive == 0:
         vispy.app.run()

@@ -10,6 +10,7 @@ class DungeonMaster:
     def request_player_move(self, player, newpos):
         """Attempt to move the player to newpos.
         """
+        newpos = newpos.astype(int)
         pos = player.location.slot
         j, i = newpos
         j0, i0 = player.location.slot
