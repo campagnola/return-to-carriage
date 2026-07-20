@@ -56,11 +56,9 @@ class Player(Entity):
         pos = self.location.global_location.slot
         smap = self.scene.visibility.render(pos, read=True)[:, :, :3]
         # carried lights share the player's shadow map; they expect it in the
-        # same 0-255 scale that Item.shadow_map() renders for itself
+        # same 0-255 scale that Light.shadow_map() renders for itself
         for item in self.inventory.all_entities():
-            if isinstance(item, Item) and item.light_source:
-                item.set_shadow_map(smap)
+            light = getattr(item, 'light', None)
+            if light is not None:
+                light.set_shadow_map(smap)
         return smap / 255.0
-
-
-from .item import Item

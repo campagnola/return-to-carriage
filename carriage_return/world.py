@@ -16,7 +16,15 @@ and the opposite of numpy's ``maze.blocks[y, x]`` indexing.
 
 Game-side module: no rendering library may be imported here.
 """
+import numpy as np
+
 from .blocktypes import BlockTypes
+
+
+#: Resolution of the sight fields relative to maze cells. One number, shared by
+#: Level (which allocates the fields) and Scene (which composites them), so the
+#: two cannot disagree about how big a level's fields are.
+SIGHT_SUPERSAMPLE = 4
 
 
 #: Block types that act as soon as you walk onto them; the rest need a command.
@@ -27,12 +35,48 @@ _BLOCK_COMMANDS = {'stairs_down': '>', 'stairs_up': '<'}
 
 
 class Level:
-    """One maze, under a name, belonging to a world."""
+    """One maze, under a name, plus everything sized against that maze.
 
-    def __init__(self, name, maze):
+    The level owns its sight fields rather than the scene owning "whichever
+    level is current". That distinction is what makes the fields safe to read
+    from another thread: ``level.line_of_sight`` is sized to ``level.maze`` by
+    construction, so no interleaving of reads can produce a field and a maze
+    that disagree. A reader that arrives during a level switch sees a stale
+    field, never a mismatched one.
+
+    ``memory`` is per level for the same reason it is useful: what you saw of
+    a level is a fact about that level, and survives going elsewhere and
+    coming back.
+    """
+
+    def __init__(self, name, maze, supersample=SIGHT_SUPERSAMPLE):
         self.name = name
         self.maze = maze
         self.world = None
+        self.supersample = supersample
+
+        # let anything holding a maze find the level it belongs to; this is
+        # the hop that lets an entity ask about *its own* level's sight
+        maze.level = self
+
+        ms = maze.shape
+        self.field_shape = (ms[0] * supersample, ms[1] * supersample, 3)
+        self.memory = np.zeros(self.field_shape, dtype='float32')
+        self.line_of_sight = np.zeros(self.field_shape, dtype='float32')
+
+        # Light components whose global location is on this level; each Light
+        # adds and removes itself as its host moves (see Light._register).
+        self.lights = []
+
+    def clear_line_of_sight(self):
+        """Nothing on this level is in sight; the viewer has gone elsewhere.
+
+        Written in place, so the array a concurrent reader holds stays the
+        right shape throughout. Called when the level stops being displayed:
+        with no player here, no torch on this level is being watched, which is
+        what stops the flicker thread burning flames nobody can see.
+        """
+        self.line_of_sight[:] = 0
 
     def __repr__(self):
         return "<Level %r %dx%d>" % ((self.name,) + self.maze.shape)

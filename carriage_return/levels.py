@@ -1,19 +1,27 @@
 """Builders for the levels the game ships with, and the world that joins them.
 
-Each builder takes the world's shared :class:`~.blocktypes.BlockTypes` table
-and returns a maze plus whatever positions the caller has to place things at
-(portal mouths, torch stands). Positions are ``(x, y)``, matching entity
+Each per-level builder takes the world's shared :class:`~.blocktypes.BlockTypes`
+table and returns a maze plus whatever positions the caller has to place things
+at (portal mouths, torch stands). Positions are ``(x, y)``, matching entity
 location slots.
 
-:func:`build_world` assembles the three levels and the portals between them:
+:func:`build_world` assembles the three levels, the portals between them,
 
     home --(hole, one way)--> sewer --(stairs)--> dungeon
+
+and everything that belongs to the map: the scroll, the torches, the shaft of
+daylight in the sewer, and the monster. All that content lives here so it is
+not mirror-edited across the game and the screenshot harness. Only the player
+and its inventory are placed by the caller (see :func:`.game.new_game`).
 
 Game-side module: no rendering library may be imported here.
 """
 import numpy as np
 
+from .light import Light
 from .maze import Maze
+from .monster import Monster
+from .item import Scroll, Torch
 from .world import Level, World
 
 
@@ -22,6 +30,27 @@ HOME_START = (3, 5)
 
 #: Where the sewer stairs land in the dungeon -- the game's historical start.
 DUNGEON_ARRIVAL = (7, 7)
+
+#: Torch positions (dungeon ``(row, col)`` cells). Torch count and placement
+#: change the lighting and therefore the rendered image, so this list is also
+#: the screenshot regression baseline.
+TORCH_POSITIONS = [
+    (17, 8),
+    (3, 8),
+    (9, 30),
+    (32, 41),
+    (32, 45),
+    (43, 39),
+
+    (15, 75),
+    (28, 75),
+    (40, 75),
+    (52, 75),
+    (15, 82),
+    (28, 82),
+    (40, 82),
+    (52, 82),
+]
 
 
 def build_home(blocktypes):
@@ -100,8 +129,13 @@ def build_dungeon(blocktypes):
     return maze, DUNGEON_ARRIVAL
 
 
-def build_world():
-    """Build the three levels and the portals joining them.
+def build_world(scene):
+    """Build the three levels, wire the portals, and populate the map.
+
+    Assembles the home/sewer/dungeon levels, links them, installs the world on
+    *scene*, then places everything that belongs to the map: the scroll, the
+    torches (at :data:`TORCH_POSITIONS`), the sewer's shaft of daylight, and the
+    monster.
 
     Returns the :class:`~.world.World`, with 'home' current -- it is added
     first, and the first level added is where the game begins.
@@ -125,5 +159,24 @@ def build_world():
 
     world.link('sewer', sewer_stairs, 'stairs_down',
                'dungeon', dungeon_arrival, 'stairs_up')
+
+    scene.set_world(world)
+
+    sewer, dungeon = sewer_maze, dungeon_maze
+
+    Scroll(location=(dungeon, (5, 5)), scene=scene)
+    torches = [Torch(location=(dungeon, pos), scene=scene)
+               for pos in TORCH_POSITIONS]
+    torches[0].light.color = (10000, 5000, 1000)
+
+    # The sewer is lit at its two landmarks so each is findable from a
+    # distance. The stairs down get a torch; the shaft the player fell down
+    # gets a shaft of cold daylight from the hole overhead -- a light that
+    # belongs to the map itself, pinned to its cell, not to anything standing
+    # there.
+    sewer.add_light(Light(sewer, scene, color=(4000, 5000, 8000)), pos=sewer_hole)
+    Torch(location=(sewer, sewer_stairs), scene=scene)
+
+    Monster(position=(8, 40), scene=scene, maze=dungeon)
 
     return world

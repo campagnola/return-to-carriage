@@ -7,6 +7,7 @@ import numpy as np
 
 from .entity import Entity
 from .inventory import Inventory
+from .light import Light
 from .location import Location
 from .sprite import SingleCharSprite
 
@@ -21,8 +22,6 @@ class Item(Entity):
     takeable = False
     fg_color = (0, 0, 0.8, 1)
     bg_color = None
-    light_source = False
-    light_color = (10, 10, 10)
 
     def __init__(self, location, scene, obj_name=None):
         Entity.__init__(self, entity_type='item.' + self.name, obj_name=obj_name)
@@ -32,41 +31,16 @@ class Item(Entity):
         self.location = Location(self, None, None)
         self.sprite = SingleCharSprite(self, zval=-0.1, char=self.char, fg_color=self.fg_color, layer='items')
 
-        scene.add_item(self)
+        # A plain item emits no light. An item that shines builds its own
+        # Light in its __init__ (see Torch) and drives its colour/brightness;
+        # the Light handles the rest of being a light source -- level tracking,
+        # shadow maps, the emitted map.
+        self.light = None
 
-        # for handling light sources
-        self._shadow_map = None
-        self._unscaled_light_map = None
-        self._light_map = None
-        self._brightness = 1.0
-        self.location.global_changed.connect(self._location_changed)
+        scene.add_item(self)
 
         if location is not None:
             self.location.update(*location)
-
-    def _location_changed(self, event):
-        self._shadow_map = None
-        self._unscaled_light_map = None
-        self._light_map = None
-
-    @property
-    def brightness(self):
-        """Scale applied to ``light_color``; 1.0 is this item's nominal output.
-
-        Setting it discards only the colour scaling of the cached light map --
-        the shadow map and distance falloff underneath survive -- then tells
-        the scene its lighting is stale and asks the display to repaint.
-        """
-        return self._brightness
-
-    @brightness.setter
-    def brightness(self, value):
-        if value == self._brightness:
-            return
-        self._brightness = value
-        self._light_map = None
-        self.scene.invalidate_lighting()
-        self.scene.request_redraw()
 
     @property
     def weight(self):
@@ -84,70 +58,10 @@ class Item(Entity):
         """Remove this item from the game.
         """
         self.scene.items.remove(self)
+        if self.light is not None:
+            self.light.destroy()
         self.location.update(None, None)
         self.sprite.hide()
-
-    def shadow_map(self, slot):
-        if self._shadow_map is None:
-            smap = self.scene.visibility.render(slot, read=True)[..., :3]
-            self.set_shadow_map(smap)
-            assert self._shadow_map is not None
-        return self._shadow_map
-
-    def set_shadow_map(self, smap):
-        self._shadow_map = smap
-        self._unscaled_light_map = None
-        self._light_map = None
-
-    def in_player_sight(self):
-        """True if the player can currently see the cell this item occupies.
-
-        Sampled from the line-of-sight field the scene last composited, so it
-        costs one array lookup and is safe to call from an animator thread
-        (the field is replaced wholesale, never edited in place).
-
-        An item on a level the scene is not displaying is never in sight -- and
-        must return before the lookup, because the sight field is sized to the
-        *current* level, so another level's coordinates may not even index it.
-        """
-        ml = self.location.global_location
-        if ml is None or ml.container is not self.scene.maze:
-            return False
-        x, y = ml.slot
-        ss = self.scene.supersample
-        return self.scene.line_of_sight[y * ss, x * ss].max() > 0
-
-    def lightmap(self, supersample=1):
-        # A light on another level contributes nothing here, and its map would
-        # be the wrong shape anyway: the field below is sized to scene.maze.
-        ml = self.location.global_location
-        if ml is None or ml.container is not self.scene.maze:
-            return None
-
-        if self._unscaled_light_map is None:
-            (x,y) = ml.slot
-
-            maze_shape = self.scene.maze.shape
-            maze_pos = np.mgrid[0:maze_shape[0]*supersample, 0:maze_shape[1]*supersample].transpose(1, 2, 0)
-            light_pos = np.array([[[y * supersample, x * supersample]]]) + (0.5 * supersample)
-            dist2 = ((maze_pos - light_pos) ** 2).sum(axis=2) + 0.5  # 0.5 enforces height
-            dist2 = dist2.astype('float32')
-
-            # float32 throughout: these maps are rescaled and composited every
-            # frame for flickering lights, and float64 doubles that cost
-            self._unscaled_light_map = self.shadow_map(ml.slot) / dist2[:, :, None]
-
-        # The shadow map and distance falloff above are cached until the item
-        # moves; a brightness change only rescales that cached map. Held in a
-        # local because an animator thread may null the cache at any moment --
-        # the worst that costs is one frame at the previous brightness.
-        light_map = self._light_map
-        if light_map is None:
-            color = np.array(self.light_color, dtype='float32') * self._brightness
-            light_map = self._unscaled_light_map * color[None, None, :]
-            self._light_map = light_map
-
-        return light_map
 
 
 class Scroll(Item):
@@ -156,7 +70,6 @@ class Scroll(Item):
     char = u'次'
     readable = True
     takeable = True
-    light_source = False
     mass = 0.05
     length = 20.0
     fg_color = (0.8, 0.8, 0.8, 1.0)
@@ -189,18 +102,22 @@ class Torch(Item):
     Every torch in the game is flickered by one shared background thread,
     started by the first torch that exists and left running from then on. The
     flame is game state like any other: it advances on its own clock whether or
-    not anything is displaying it, and setting ``brightness`` pushes the
-    resulting redraw request out through the scene.
+    not anything is displaying it, and setting the light's ``brightness`` pushes
+    the resulting redraw request out through the scene.
+
+    A torch owns a :class:`~.light.Light`; the torch decides the flame's colour
+    and drives its brightness, while the light handles the rest of being a light
+    source (level tracking, shadow maps, the emitted map).
     """
 
     name = "torch"
     char = 't'
     readable = False
     takeable = True
-    light_source = True
     mass = 0.5
     length = 30.0
-    light_color = (10.0, 8.0, 2.0)
+    #: the flame's colour, handed to this torch's Light at construction
+    LIGHT_COLOR = (10.0, 8.0, 2.0)
     fg_color = (1.0, 0.8, 0.2, 1.0)
 
     # Flicker. The flame's log-brightness wanders around 0 as a random walk
@@ -224,6 +141,7 @@ class Torch(Item):
 
     def __init__(self, *args, **kwds):
         Item.__init__(self, *args, **kwds)
+        self.light = Light(self, self.scene, color=self.LIGHT_COLOR)
         with Torch._flicker_lock:
             Torch._torches.add(self)
             if Torch._flicker_thread is None:
@@ -251,7 +169,7 @@ class Torch(Item):
         update, so a tick costs one numpy operation no matter how many torches
         the level holds.
         """
-        lit = [t for t in Torch._torches if t.in_player_sight()]
+        lit = [t for t in Torch._torches if t.light.in_player_sight()]
         if not lit:
             return
 
@@ -265,7 +183,7 @@ class Torch(Item):
 
         for torch, lb in zip(lit, log_b):
             torch._log_brightness = lb
-            torch.brightness = float(np.exp(lb))  # pushes redraw + invalidation
+            torch.light.brightness = float(np.exp(lb))  # pushes redraw + invalidation
 
 
 

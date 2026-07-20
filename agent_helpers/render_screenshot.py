@@ -41,9 +41,7 @@ def build_game():
 
     # note: no ui.follow_entity() and no GameplayInputHandler -- camera
     # scrolling and the input threads are timing-dependent.
-    # Fewer torches than the main game on purpose: torch count and placement
-    # change the lighting, so this list is part of the screenshot baseline.
-    player = new_game(scene, torch_positions=[(17, 8), (3, 8), (9, 30)])[0]
+    world, player = new_game(scene)
 
     return ui, scene, renderer, player
 

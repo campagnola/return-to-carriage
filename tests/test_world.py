@@ -203,20 +203,117 @@ def test_entities_on_other_levels_are_hidden(played_world):
     assert not np.isnan(scroll.sprite.sprite.position).any()
 
 
-def test_a_light_on_another_level_does_not_light_this_one(played_world):
+def test_a_light_registers_with_the_level_it_stands_on(played_world):
     from carriage_return.item import Torch
 
     scene, world, player, dm = played_world
-    torch = Torch(location=(world.levels['upper'].maze, (2, 2)), scene=scene)
-    scene.update_sight(1 / 60.)   # in_player_sight samples the composited field
-    assert torch.lightmap(supersample=scene.supersample) is not None
-    assert torch.in_player_sight()
+    upper, lower = world.levels['upper'], world.levels['lower']
+    torch = Torch(location=(upper.maze, (2, 2)), scene=scene)
 
-    scene.set_level(world.levels['lower'])
+    assert torch.light in upper.lights
+    assert torch.light not in lower.lights
+
+    torch.location.update(lower.maze, (4, 4))
+
+    assert torch.light not in upper.lights
+    assert torch.light in lower.lights
+
+
+def test_a_carried_light_follows_its_bearer_between_levels(played_world):
+    from carriage_return.item import Torch
+
+    scene, world, player, dm = played_world
+    upper, lower = world.levels['upper'], world.levels['lower']
+    torch = Torch(location=(player, 'right hand'), scene=scene)
+    assert torch.light in upper.lights
+
+    dm.move_player(player, np.array([3, 3]))   # down the hole to 'lower'
+
+    assert torch.light not in upper.lights
+    assert torch.light in lower.lights
+
+
+def test_a_map_light_shines_from_a_fixed_cell(played_world):
+    """A light attached to the map (a hole in the ceiling) registers with its
+    level, contributes a map sized to that level, and does not move when the
+    player does."""
+    from carriage_return.light import Light
+
+    scene, world, player, dm = played_world
+    upper, lower = world.levels['upper'], world.levels['lower']
+
+    light = upper.maze.add_light(Light(upper.maze, scene, color=(9, 9, 9)), pos=(5, 5))
+    assert light in upper.lights
+    assert light not in lower.lights
+    assert light.global_place() == (upper.maze, (5, 5))
+
+    lm = light.lightmap(supersample=upper.supersample)
+    assert lm.shape == upper.field_shape
+
+    # the player walking away leaves a map light exactly where it was pinned
+    dm.move_player(player, np.array([3, 3]))   # down the hole to 'lower'
+    assert light in upper.lights
+    assert light.global_place() == (upper.maze, (5, 5))
+
+
+def test_a_light_on_another_level_does_not_light_this_one(played_world):
+    """Only the current level's lights are composited, so a light elsewhere
+    cannot contribute (nor contribute a wrongly-shaped map)."""
+    from carriage_return.item import Torch
+
+    scene, world, player, dm = played_world
+    upper, lower = world.levels['upper'], world.levels['lower']
+    Torch(location=(upper.maze, (2, 2)), scene=scene)
+
+    scene.set_level(lower)
     scene.update_sight(1 / 60.)
 
-    assert torch.lightmap(supersample=scene.supersample) is None
-    assert not torch.in_player_sight()
+    assert lower.lights == []
+    assert not scene.sight.data.any()
+
+
+def test_leaving_a_level_clears_its_line_of_sight(played_world):
+    """Nothing is in sight where the player is not, which is also what stops
+    the flicker thread burning torches nobody is watching."""
+    from carriage_return.item import Torch
+
+    scene, world, player, dm = played_world
+    upper, lower = world.levels['upper'], world.levels['lower']
+    torch = Torch(location=(upper.maze, (2, 2)), scene=scene)
+    scene.update_sight(1 / 60.)
+    assert torch.light.in_player_sight()
+
+    scene.set_level(lower)
+
+    assert not upper.line_of_sight.any()
+    assert not torch.light.in_player_sight()
+
+
+def test_a_level_keeps_its_own_memory(played_world):
+    """Memory is a fact about a level, so it survives going away and back."""
+    scene, world, player, dm = played_world
+    upper, lower = world.levels['upper'], world.levels['lower']
+    upper.memory[:] = 0.5
+
+    scene.set_level(lower)
+    assert not lower.memory.any()
+
+    scene.set_level(upper)
+    assert (upper.memory == 0.5).all()
+
+
+def test_sight_fields_are_sized_to_their_own_level(played_world):
+    """The invariant the whole design rests on: a level's field always matches
+    that level's maze, whichever level the scene is showing."""
+    scene, world, player, dm = played_world
+    world.add_level(Level('big', Maze.filled((20, 30), world.blocktypes, 'path')))
+
+    for level in world.levels.values():
+        ss = level.supersample
+        expected = (level.maze.shape[0] * ss, level.maze.shape[1] * ss, 3)
+        assert level.field_shape == expected
+        assert level.line_of_sight.shape == expected
+        assert level.memory.shape == expected
 
 
 def test_an_unlit_level_renders_dark_rather_than_failing(played_world):
@@ -278,7 +375,7 @@ def test_the_sewer_stays_inside_its_walls():
 
 
 def test_build_world_wires_the_three_levels():
-    world = build_world()
+    world = build_world(Scene())
 
     assert set(world.levels) == {'home', 'sewer', 'dungeon'}
     assert world.current is world.levels['home']
@@ -295,6 +392,6 @@ def test_build_world_wires_the_three_levels():
 
 def test_every_level_shares_one_blocktype_table():
     """Block ids must mean the same thing on every level (and glyphs register once)."""
-    world = build_world()
+    world = build_world(Scene())
     for level in world.levels.values():
         assert level.maze.blocktypes is world.blocktypes

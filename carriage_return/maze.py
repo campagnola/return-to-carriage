@@ -23,6 +23,12 @@ class Maze(Entity):
         )
         self.location = Location(self, None, None)
 
+        # the Level this maze belongs to, set by Level.__init__. The back
+        # reference is what lets an entity get from its location to the sight
+        # fields of the level it is actually standing on, rather than to
+        # whichever level the scene happens to be displaying.
+        self.level = None
+
         self._opacity = None
         self._fg_color = None
         self._bg_color = None
@@ -125,6 +131,18 @@ class Maze(Entity):
         scenery.bgcolor = self.bg_color
 
         return scenery
+
+    def add_light(self, light, pos):
+        """Attach *light* to this maze at cell *pos* ``(x, y)``.
+
+        For light that belongs to the map itself rather than to anything that
+        moves -- a shaft of daylight through a hole in the ceiling, say. The
+        light shines from *pos* for as long as this maze's level is shown,
+        whatever walks beneath it. *light* is a :class:`~.light.Light` whose
+        host entity is this maze; returns it for convenience.
+        """
+        light.pin(self, pos)
+        return light
 
     def opaque_geometry(self):
         """Return a list of vertex loops defining the boundaries of objects that block line-of-sight.

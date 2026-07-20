@@ -28,7 +28,7 @@ if __name__ == '__main__':
     ui.attach_scene(scene)
     dm = DungeonMaster(scene)
 
-    player = new_game(scene)[0]
+    world, player = new_game(scene)
 
     # application wiring -- deliberately not in game.py, since the screenshot
     # harness omits all of it

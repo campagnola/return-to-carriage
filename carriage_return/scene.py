@@ -6,6 +6,7 @@ from .maze import Maze
 from .array_cache import ArraySumCache
 from .entity import Entity
 from .events import Observable
+from .world import SIGHT_SUPERSAMPLE, Level
 
 
 class MessageLog(object):
@@ -121,7 +122,7 @@ class Scene(Entity):
         # polls it from its frame tick and shuts down
         self.quit_requested = False
 
-        self.supersample = 4
+        self.supersample = SIGHT_SUPERSAMPLE
 
         self.norm_light = None
         self.light_cache = ArraySumCache()
@@ -139,11 +140,11 @@ class Scene(Entity):
         # stays valid across level switches.
         self.sight = FieldLayer('sight', shape=(0, 0, 3))
 
-        # the visible maze and everything sized from it; set by set_level()
-        self.maze = None
-        self.field_shape = None
-        self.memory = None
-        self.line_of_sight = None
+        # the visible Level; set by set_level(). The maze and the sight fields
+        # are read through it (see the properties below) rather than copied
+        # onto the scene, so "the current level's field" is never a separate
+        # fact that can fall out of step with the current level.
+        self._level = None
         self._scenery = None
 
         # track all items
@@ -174,28 +175,53 @@ class Scene(Entity):
 
     @property
     def level(self):
-        """The Level currently displayed, or None when running world-less."""
-        if self.world is None:
-            return None
-        return self.world.current
+        """The Level currently displayed."""
+        return self._level
+
+    # The level owns these; the scene reads them through whichever level is
+    # current. They are properties rather than copies so that there is exactly
+    # one place each value lives -- copying them onto the scene is what let a
+    # maze and a sight field of the wrong size be observed together.
+    @property
+    def maze(self):
+        return self._level.maze
+
+    @property
+    def field_shape(self):
+        return self._level.field_shape
+
+    @property
+    def memory(self):
+        return self._level.memory
+
+    @property
+    def line_of_sight(self):
+        return self._level.line_of_sight
 
     def set_level(self, level):
         """Make *level* visible, rebuilding everything sized from its maze.
 
-        *level* may be a :class:`~.world.Level` or a bare Maze. It is the
-        single entry point for level initialization: called once from __init__
-        for the starting level, and again for every later switch. It rebuilds
-        the scenery sprites, resizes the sight fields, drops the lighting
-        caches, and fires ``level_changed`` so the display backend can rebuild
-        what it sized from the old maze.
+        *level* may be a :class:`~.world.Level` or a bare Maze, which is
+        wrapped in an anonymous Level -- so the scene always has a level, and
+        the delegating properties above always have somewhere to point. It is
+        the single entry point for level initialization: called once from
+        __init__ for the starting level, and again for every later switch.
 
         Callers must move the player onto the new level themselves; the scene
         does not place entities.
         """
-        maze = getattr(level, 'maze', level)
-        if self.world is not None and hasattr(level, 'maze'):
+        if not isinstance(level, Level):
+            level = level.level or Level(level.obj_name or 'level', level,
+                                         supersample=self.supersample)
+
+        # the outgoing level has no viewer any more, so nothing on it is in
+        # sight; its memory is left alone, being what the player remembers
+        if self._level is not None and self._level is not level:
+            self._level.clear_line_of_sight()
+
+        self._level = level
+        if self.world is not None and level.name in self.world.levels:
             self.world.current = level
-        self.maze = maze
 
         # rebuild the scenery sprites: free the outgoing maze's slot before
         # allocating the new one, so the layer does not grow by a whole maze
@@ -203,16 +229,11 @@ class Scene(Entity):
         scenery_layer = self.sprite_layers['scenery']
         if self._scenery is not None:
             scenery_layer.remove_sprites(self._scenery)
-        self._scenery = maze.add_scenery(self.glyphs, scenery_layer)
+        self._scenery = level.maze.add_scenery(self.glyphs, scenery_layer)
 
-        # resize the visual field. FieldLayer.set_data reallocates on a shape
-        # change, so scene.sight keeps its identity for backends holding it.
-        ms = maze.shape
-        ss = self.supersample
-        self.field_shape = (ms[0] * ss, ms[1] * ss, 3)
-        self.memory = np.zeros(self.field_shape, dtype='float32')
-        self.line_of_sight = np.zeros(self.field_shape, dtype='float32')
-        self.sight.set_data(np.zeros(self.field_shape, dtype='float32'))
+        # FieldLayer.set_data reallocates on a shape change, so scene.sight
+        # keeps its identity for backends holding it.
+        self.sight.set_data(np.zeros(level.field_shape, dtype='float32'))
 
         # every lighting cache is sized by, or positioned against, the maze
         self.norm_light = None
@@ -281,46 +302,49 @@ class Scene(Entity):
 
         Called once per rendered frame by the display backend. LOS and lighting
         are recomputed only when invalidated (player moved, lights changed).
+
+        Everything here is read off one Level, captured once: the fields being
+        composited and the lights contributing to them then necessarily belong
+        to the same level and are all the same shape.
         """
+        level = self._level
+
         # render new line of sight
         if self._need_los_update:
-            self.line_of_sight = self.player.line_of_sight().astype('float32', copy=False)
+            level.line_of_sight = self.player.line_of_sight().astype('float32', copy=False)
             self._need_los_update = False
+        line_of_sight = level.line_of_sight
 
-        # calculate lighting
+        # calculate lighting. Only this level's lights are consulted, so their
+        # maps are all sized to this level -- no light on another level can
+        # contribute a differently-shaped array to the sum.
         if self.norm_light is None:
             lights = []
-            for item in self.items:
-                if not item.light_source:
+            for light in level.lights:
+                light_map = light.lightmap(supersample=self.supersample)
+                if light_map is None:
                     continue
-                item_visible = True  # todo
-                if not item_visible:
-                    continue
-                item_light = item.lightmap(supersample=self.supersample)
-                if item_light is None:
-                    continue
-                lights.append(item_light)
+                lights.append(light_map)
             if lights:
                 # ArraySumCache.sum_arrays asserts on an empty list, and a
-                # level may legitimately hold no light at all -- lightmap()
-                # returns None for every light that is on another level.
+                # level may legitimately hold no light at all
                 light = self.light_cache.sum_arrays(lights)
                 log_light = np.log(np.clip(light*10, 1, np.inf))
                 if self._light_norm is None:
                     self._light_norm = log_light.max()
                 self.norm_light = log_light / self._light_norm
             else:
-                self.norm_light = np.zeros(self.field_shape, dtype='float32')
+                self.norm_light = np.zeros(level.field_shape, dtype='float32')
 
         # current sight is combination of lighting and LOS
-        sight = self.line_of_sight * self.norm_light
+        sight = line_of_sight * self.norm_light
 
-        self.sight.set_data(self.memory * (1 - self.line_of_sight) + sight)
+        self.sight.set_data(level.memory * (1 - line_of_sight) + sight)
 
         # forget
-        self.memory *= self.MEMORY_DECAY_RATE ** dt
+        level.memory *= self.MEMORY_DECAY_RATE ** dt
 
         # add sight to memory. Reducing the length-3 trailing axis with
         # sight.max(axis=2) is ~20x slower than maximum() applied pairwise.
         brightest = np.maximum(np.maximum(sight[:, :, 0], sight[:, :, 1]), sight[:, :, 2])
-        self.memory[:, :, 2] = np.maximum(self.memory[:, :, 2], brightest)
+        level.memory[:, :, 2] = np.maximum(level.memory[:, :, 2], brightest)
