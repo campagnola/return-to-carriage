@@ -1,9 +1,9 @@
 """Builders for the levels the game ships with, and the world that joins them.
 
 Each per-level builder takes the world's shared :class:`~.blocktypes.BlockTypes`
-table and returns a maze plus whatever positions the caller has to place things
-at (portal mouths, torch stands). Positions are ``(x, y)``, matching entity
-location slots.
+table and returns a :class:`~.world.Level` plus whatever positions the caller
+has to place things at (portal mouths, torch stands). Positions are ``(x, y)``,
+matching entity location slots.
 
 :func:`build_world` assembles the three levels, the portals between them,
 
@@ -55,20 +55,31 @@ TORCH_POSITIONS = [
 
 
 def build_home(blocktypes):
-    """A small walled room with a hole in the floor. Returns (maze, hole_pos).
+    """A small walled room with a hole in the floor. Returns (level, hole_pos).
 
-    This is where the player starts and the only way out is down.
+    This is where the player starts and the only way out is down. The room's
+    sunlight belongs to the map, and a map light only registers with a level
+    that already exists (see :meth:`Light._register`), so the level is built
+    here, before the light is added, rather than left to :func:`build_world`.
     """
-    maze = Maze.filled((11, 15), blocktypes, 'wall', obj_name='home')
+    maze = Maze.filled((40, 120), blocktypes, 'wall', obj_name='home')
     maze.blocks[1:-1, 1:-1] = blocktypes.id_of('path')
+
     hole_pos = (11, 5)
-    return maze, hole_pos
+    level = Level('home', maze)
+
+    # The even wash of daylight through the roof. A map light: it belongs to
+    # the room, not to anything that moves, and needs no scene -- it announces
+    # any change through its own signal, which the level handles.
+    maze.add_light(AmbientLight(maze, color=(8000, 8000, 8000)), pos=(0, 0))
+
+    return level, hole_pos
 
 
 def build_sewer(blocktypes, seed=20240719):
     """Four hallways joined end to end, generated from a fixed *seed*.
 
-    Returns ``(maze, hole_pos, stairs_pos)``. The hole is at the start of the
+    Returns ``(level, hole_pos, stairs_pos)``. The hole is at the start of the
     first hallway -- the ceiling opening the player falls in through -- and the
     stairs down are at the far end of the fourth.
 
@@ -117,17 +128,17 @@ def build_sewer(blocktypes, seed=20240719):
     x0, x1 = xs.min() - 1, xs.max() + 2
     cropped = Maze(blocks[y0:y1, x0:x1].copy(), blocktypes, obj_name='sewer')
     shift = lambda p: (p[0] - x0, p[1] - y0)
-    return cropped, shift(hole_pos), shift(stairs_pos)
+    return Level('sewer', cropped), shift(hole_pos), shift(stairs_pos)
 
 
 def build_dungeon(blocktypes):
-    """The original hand-drawn level. Returns (maze, arrival_pos).
+    """The original hand-drawn level. Returns (level, arrival_pos).
 
     The stairs up are stamped where the player used to start, which is where
     the sewer's stairs come out.
     """
     maze = Maze.load_image('level1.png', blocktypes, obj_name='dungeon')
-    return maze, DUNGEON_ARRIVAL
+    return Level('dungeon', maze), DUNGEON_ARRIVAL
 
 
 def build_world(scene):
@@ -144,34 +155,27 @@ def build_world(scene):
     world = World()
     bt = world.blocktypes
 
-    home_maze, home_hole = build_home(bt)
-    sewer_maze, sewer_hole, sewer_stairs = build_sewer(bt)
-    dungeon_maze, dungeon_arrival = build_dungeon(bt)
+    home_level, home_hole = build_home(bt)
+    sewer_level, sewer_hole, sewer_stairs = build_sewer(bt)
+    dungeon_level, dungeon_arrival = build_dungeon(bt)
 
-    world.add_level(Level('home', home_maze))
-    world.add_level(Level('sewer', sewer_maze))
-    world.add_level(Level('dungeon', dungeon_maze))
+    world.add_level(home_level)
+    world.add_level(sewer_level)
+    world.add_level(dungeon_level)
 
     # The world is live before anything is placed on it, because portal ends,
     # torches and the scroll are all entities that want the scene.
     scene.set_world(world)
 
-    sewer, dungeon = sewer_maze, dungeon_maze
-
-    # The home room has no torch or portal-light of its own, so it is lit by a
-    # flat, bright white ambient fill: the whole room is evenly and fully
-    # visible the moment the player arrives. Pinned to the maze like any map
-    # light; the cell it is pinned to is irrelevant to an ambient light.
-    home_maze.add_light(AmbientLight(home_maze, scene, color=(8000, 8000, 8000)),
-                        pos=home_hole)
+    sewer, dungeon = sewer_level.maze, dungeon_level.maze
 
     # Down the hole and you cannot climb back. The home end is an ordinary hole
     # in the floor -- an 'O' you drop through. The sewer end is the ceiling
     # opening you land under: not enterable (step onto it and it still tells you
     # the way up is out of reach), and invisible (char=None) because there is no
     # hole in the sewer floor -- just the patch of floor the daylight lands on.
-    top = Hole(location=(home_maze, home_hole), scene=scene)
-    bottom = Hole(location=(sewer_maze, sewer_hole), scene=scene,
+    top = Hole(location=(home_level.maze, home_hole), scene=scene)
+    bottom = Hole(location=(sewer, sewer_hole), scene=scene,
                   enterable=False, char=None)
 
     # The daylight is the sewer hole's own light, carried by the end like a
@@ -179,17 +183,17 @@ def build_world(scene):
     # light on that one cell), and a dim, shadow-casting 1/r^2 wash for the
     # light that hit the floor there and scattered down the corridor.
     hx, hy = sewer_hole
-    spot = np.zeros(sewer_maze.shape, dtype='float32')
+    spot = np.zeros(sewer.shape, dtype='float32')
     spot[hy, hx] = 6000000.0
     bottom.lights = [
-        ArrayLight(bottom, scene, spot, color=(4000, 5000, 8000)),
-        PointLight(bottom, scene, color=(10, 20, 100), brightness=1.0),
+        ArrayLight(bottom, spot, color=(4000, 5000, 8000)),
+        PointLight(bottom, color=(10, 20, 100), brightness=1.0),
     ]
     world.link(top, bottom)
 
     # Stairs from the sewer down to the dungeon; each end draws its own glyph.
-    world.link(StairsDown(location=(sewer_maze, sewer_stairs), scene=scene),
-               StairsUp(location=(dungeon_maze, dungeon_arrival), scene=scene))
+    world.link(StairsDown(location=(sewer, sewer_stairs), scene=scene),
+               StairsUp(location=(dungeon, dungeon_arrival), scene=scene))
 
     Scroll(location=(dungeon, (5, 5)), scene=scene)
     torches = [Torch(location=(dungeon, pos), scene=scene)

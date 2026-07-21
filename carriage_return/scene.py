@@ -212,6 +212,11 @@ class Scene(Entity):
         if self.world is not None and level.name in self.world.levels:
             self.world.current = level
 
+        # a light on this level announces changes to the level, which asks the
+        # display to repaint through here; connect is idempotent, so a level
+        # re-entered many times never stacks duplicate callbacks
+        level.lighting_changed.connect(self.request_redraw)
+
         # rebuild the scenery sprites: free the outgoing maze's slot before
         # allocating the new one, so the layer does not grow by a whole maze
         # on every switch.

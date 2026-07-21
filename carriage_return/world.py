@@ -16,6 +16,7 @@ import numpy as np
 
 from .array_cache import ArraySumCache
 from .blocktypes import BlockTypes
+from .events import Observable
 from .layers import FieldLayer
 
 
@@ -72,6 +73,13 @@ class Level:
         # adds and removes itself as its host moves (see Light._register).
         self.lights = []
 
+        # Fired when a light on this level changes what it emits. The display
+        # backend connects this to its repaint (via Scene.request_redraw): the
+        # level owns the decision to recomposite, the scene owns the repaint,
+        # and neither the light nor the level needs a scene reference to reach
+        # the other. See add_light/_light_changed.
+        self.lighting_changed = Observable()
+
         # Composited lighting for this level, and its cross-frame caches. All
         # sized to this maze, all reached only through this level, so the
         # lights summed here (this level's) and the field they multiply (this
@@ -110,6 +118,35 @@ class Level:
         what stops the flicker thread burning flames nobody can see.
         """
         self.line_of_sight[:] = 0
+
+    def add_light(self, light):
+        """Register *light* as shining on this level.
+
+        Called by :meth:`Light._register` when a light's host moves onto this
+        level, or when a map light is pinned here. Besides holding the light in
+        ``lights`` for compositing, the level subscribes to the light's
+        ``changed`` signal so that a change in the light's colour or brightness
+        becomes stale lighting and a repaint here -- which is what lets a light
+        announce it changed without holding any reference to the scene.
+        """
+        self.lights.append(light)
+        light.changed.connect(self._light_changed)
+
+    def remove_light(self, light):
+        """Take *light* off this level; its host has moved elsewhere."""
+        light.changed.disconnect(self._light_changed)
+        self.lights.remove(light)
+
+    def _light_changed(self):
+        """A light on this level changed what it emits: recomposite and repaint.
+
+        Runs on whichever thread set the light -- notably the torch flicker
+        thread -- so it only nulls a reference (``invalidate_lighting``) and
+        fires an observable, both safe off the main thread, exactly as the old
+        direct calls to invalidate_lighting()/request_redraw() were.
+        """
+        self.invalidate_lighting()
+        self.lighting_changed()
 
     def invalidate_lighting(self):
         """Discard the composited lighting; it is rebuilt on the next update.

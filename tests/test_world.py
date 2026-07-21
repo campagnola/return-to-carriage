@@ -247,7 +247,7 @@ def test_a_map_light_shines_from_a_fixed_cell(played_world):
     scene, world, player, dm = played_world
     upper, lower = world.levels['upper'], world.levels['lower']
 
-    light = upper.maze.add_light(PointLight(upper.maze, scene, color=(9, 9, 9)), pos=(5, 5))
+    light = upper.maze.add_light(PointLight(upper.maze, color=(9, 9, 9)), pos=(5, 5))
     assert light in upper.lights
     assert light not in lower.lights
     assert light.global_place() == (upper.maze, (5, 5))
@@ -370,7 +370,8 @@ def test_an_unlit_level_renders_dark_rather_than_failing(played_world):
 
 def test_home_is_a_walled_room_with_a_hole():
     bt = BlockTypes()
-    maze, hole = build_home(bt)
+    level, hole = build_home(bt)
+    maze = level.maze
 
     # the hole is a portal entity placed by build_world, not terrain here
     assert maze.blocktype_at(hole[1], hole[0])['name'] == 'path'
@@ -384,14 +385,15 @@ def test_the_sewer_is_the_same_every_time():
     a, a_hole, a_stairs = build_sewer(BlockTypes())
     b, b_hole, b_stairs = build_sewer(BlockTypes())
 
-    assert (a.blocks == b.blocks).all()
+    assert (a.maze.blocks == b.maze.blocks).all()
     assert (a_hole, a_stairs) == (b_hole, b_stairs)
 
 
 def test_the_sewer_hallways_join_up():
     """The stairs must be walkable-reachable from the hole, for any seed."""
     for seed in (20240719, 1, 2, 3, 99):
-        maze, hole, stairs = build_sewer(BlockTypes(), seed=seed)
+        level, hole, stairs = build_sewer(BlockTypes(), seed=seed)
+        maze = level.maze
         walkable = maze.blocktypes['walkable'][maze.blocks]
         seen = np.zeros(maze.shape, dtype=bool)
         stack = [(hole[1], hole[0])]
@@ -409,7 +411,8 @@ def test_the_sewer_hallways_join_up():
 
 def test_the_sewer_stays_inside_its_walls():
     for seed in (20240719, 1, 2, 3, 99):
-        maze, hole, stairs = build_sewer(BlockTypes(), seed=seed)
+        level, hole, stairs = build_sewer(BlockTypes(), seed=seed)
+        maze = level.maze
         walkable = maze.blocktypes['walkable'][maze.blocks]
         assert not walkable[0].any() and not walkable[-1].any()
         assert not walkable[:, 0].any() and not walkable[:, -1].any()

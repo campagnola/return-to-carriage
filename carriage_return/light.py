@@ -2,6 +2,7 @@
 import numpy as np
 
 from .entity import Component
+from .events import Observable
 
 
 class Light(Component):
@@ -34,11 +35,17 @@ class Light(Component):
     it belongs to the map and stays put whatever walks beneath it.
     """
 
-    def __init__(self, entity, scene, color=(10, 10, 10), brightness=1.0):
+    def __init__(self, entity, color=(10, 10, 10), brightness=1.0):
         Component.__init__(self, entity, component_type='light')
-        self.scene = scene
         self._color = tuple(color)
         self._brightness = brightness
+
+        # Fired whenever this light's appearance changes (colour, brightness).
+        # The level this light stands on subscribes (see Level.add_light) and
+        # decides what to do with it -- drop its composited lighting and ask
+        # the display to repaint. Announcing the change this way is what frees a
+        # light from needing any reference to the scene.
+        self.changed = Observable()
 
         # (maze, slot) when this light is pinned to a fixed cell rather than
         # following its host's location; set by pin()/Maze.add_light.
@@ -119,15 +126,15 @@ class Light(Component):
         if level is self._light_level:
             return
         if self._light_level is not None:
-            self._light_level.lights.remove(self)
+            self._light_level.remove_light(self)
         self._light_level = level
         if level is not None:
-            level.lights.append(self)
+            level.add_light(self)
 
     def destroy(self):
         """Take this light off its level; its host is going away."""
         if self._light_level is not None:
-            self._light_level.lights.remove(self)
+            self._light_level.remove_light(self)
             self._light_level = None
 
     @property
@@ -135,8 +142,8 @@ class Light(Component):
         """The light's emitted colour; the host sets this.
 
         Changing it discards only the colour scaling of the cached light map --
-        any position-dependent map underneath survives -- then tells the level
-        its lighting is stale and asks the display to repaint.
+        any position-dependent map underneath survives -- then announces the
+        change, which the level turns into stale lighting and a repaint.
         """
         return self._color
 
@@ -147,16 +154,15 @@ class Light(Component):
             return
         self._color = value
         self._light_map = None
-        self._invalidate_level_lighting()
-        self.scene.request_redraw()
+        self.changed()
 
     @property
     def brightness(self):
         """Scale applied to ``color``; 1.0 is the light's nominal output.
 
         Setting it discards only the colour scaling of the cached light map --
-        any position-dependent map underneath survives -- then tells the level
-        its lighting is stale and asks the display to repaint.
+        any position-dependent map underneath survives -- then announces the
+        change, which the level turns into stale lighting and a repaint.
         """
         return self._brightness
 
@@ -166,18 +172,7 @@ class Light(Component):
             return
         self._brightness = value
         self._light_map = None
-        self._invalidate_level_lighting()
-        self.scene.request_redraw()
-
-    def _invalidate_level_lighting(self):
-        """Tell the level this light is on that its composited lighting is
-        stale. Scoped to the light's own level, so a flame flickering on one
-        level never invalidates another's -- and safe to call from the flicker
-        thread, since the level is read as a single reference.
-        """
-        level = self.level
-        if level is not None:
-            level.invalidate_lighting()
+        self.changed()
 
     def _scaled_color(self):
         """The emitted colour scaled by brightness, as a float32 ``(3,)`` array.
@@ -257,14 +252,14 @@ class PointLight(Light):
     without recasting shadows every frame.
     """
 
-    def __init__(self, entity, scene, color=(10, 10, 10), brightness=1.0):
+    def __init__(self, entity, color=(10, 10, 10), brightness=1.0):
         # Position-dependent caches, dropped together whenever the light moves
         # (see _invalidate_position). The shadow map and the unscaled
         # (shadow * falloff) map survive a colour or brightness change; only
         # the base's final map is rebuilt for those.
         self._shadow_map = None
         self._unscaled_light_map = None
-        Light.__init__(self, entity, scene, color=color, brightness=brightness)
+        Light.__init__(self, entity, color=color, brightness=brightness)
 
     def _invalidate_position(self):
         self._shadow_map = None
@@ -314,12 +309,12 @@ class ArrayLight(Light):
     brightness change only rescales the result.
     """
 
-    def __init__(self, entity, scene, array, color=(10, 10, 10), brightness=1.0):
+    def __init__(self, entity, array, color=(10, 10, 10), brightness=1.0):
         # The caller's pattern, at maze resolution. Upsampled lazily to the
         # field resolution in _base_map and dropped if the light changes maze.
         self._array = np.asarray(array, dtype='float32')
         self._base_map = None
-        Light.__init__(self, entity, scene, color=color, brightness=brightness)
+        Light.__init__(self, entity, color=color, brightness=brightness)
 
     def _invalidate_position(self):
         self._base_map = None
