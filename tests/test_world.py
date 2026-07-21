@@ -7,19 +7,26 @@ from carriage_return.dm import DungeonMaster
 from carriage_return.levels import build_home, build_sewer, build_world
 from carriage_return.maze import Maze
 from carriage_return.player import Player
+from carriage_return.portal import Door, Hole, StairsDown, StairsUp
 from carriage_return.scene import Scene
-from carriage_return.world import Level, LevelPortal, PortalEnd, World
+from carriage_return.world import Level, LevelPortal, World
 
 
-def _flat_world():
-    """Two bare levels joined by a hole, with nothing else on them."""
+def _flat_world(scene):
+    """Two bare levels joined by a one-way hole, with nothing else on them.
+
+    Portal ends are entities, so they want the *scene* they will draw on -- the
+    caller creates it first and passes it in.
+    """
     world = World()
     bt = world.blocktypes
     for name in ('upper', 'lower'):
         maze = Maze.filled((10, 10), bt, 'path', obj_name=name)
         world.add_level(Level(name, maze))
-    world.link('upper', (3, 3), 'hole', 'lower', (6, 6), 'hole',
-               enterable_a=True, enterable_b=False)
+    top = Hole(location=(world.levels['upper'].maze, (3, 3)), scene=scene)
+    bottom = Hole(location=(world.levels['lower'].maze, (6, 6)), scene=scene,
+                  enterable=False)
+    world.link(top, bottom)
     return world
 
 
@@ -46,7 +53,7 @@ def played_world():
     """A scene running _flat_world(), with a player on the upper level."""
     scene = Scene()
     _auto_visibility(scene)
-    world = _flat_world()
+    world = _flat_world(scene)
     scene.set_world(world)
     player = Player(scene)
     player.location.update(world.levels['upper'].maze, (1, 1))
@@ -55,45 +62,31 @@ def played_world():
 
 # -- portal structure ---------------------------------------------------------
 
-def test_portal_stamps_its_ends_into_the_mazes():
-    world = _flat_world()
-    bt = world.blocktypes
-    assert world.levels['upper'].maze.blocks[3, 3] == bt.id_of('hole')
-    assert world.levels['lower'].maze.blocks[6, 6] == bt.id_of('hole')
+def test_portal_ends_stand_on_their_cells_as_entities():
+    """An end is an entity in its maze's inventory, not a stamped block."""
+    scene = Scene()
+    world = _flat_world(scene)
+    upper = world.levels['upper'].maze
+    lower = world.levels['lower'].maze
+    top, bottom = world.portals[0].ends
+
+    assert top in upper.inventory[(3, 3)]
+    assert bottom in lower.inventory[(6, 6)]
+    # the floor underneath is untouched: portals no longer stamp terrain
+    assert upper.blocktype_at(3, 3)['name'] == 'path'
 
 
-def test_stamping_invalidates_the_cached_appearance():
-    """A maze drawn before a portal was stamped must not keep the old look."""
-    world = World()
-    bt = world.blocktypes
-    maze = Maze.filled((10, 10), bt, 'path')
-    world.add_level(Level('a', maze))
-    world.add_level(Level('b', Maze.filled((10, 10), bt, 'path')))
-    maze.opacity, maze.fg_color, maze.bg_color   # force the caches to build
-
-    world.link('a', (4, 4), 'stairs_down', 'b', (2, 2), 'stairs_up')
-
-    expected = bt.get('stairs_down')['fg_color']
-    assert np.allclose(maze.fg_color[4, 4], expected)
-
-
-def test_command_is_derived_from_the_block_type():
-    level = Level('x', Maze.filled((4, 4), BlockTypes(), 'path'))
-    assert PortalEnd(level, (0, 0), 'stairs_down').command == '>'
-    assert PortalEnd(level, (0, 0), 'stairs_up').command == '<'
-    assert PortalEnd(level, (0, 0), 'hole').command is None
-    assert PortalEnd(level, (0, 0), 'door').command is None
-
-
-def test_walk_on_ends_act_without_a_command():
-    level = Level('x', Maze.filled((4, 4), BlockTypes(), 'path'))
-    assert PortalEnd(level, (0, 0), 'hole').walk_on is True
-    assert PortalEnd(level, (0, 0), 'door').walk_on is True
-    assert PortalEnd(level, (0, 0), 'stairs_down').walk_on is False
+def test_each_kind_of_end_knows_how_it_is_operated():
+    """Behaviour is a class default of the kind, so placing one respells nothing."""
+    assert StairsDown.command == '>' and StairsDown.walk_on is False
+    assert StairsUp.command == '<' and StairsUp.walk_on is False
+    assert Hole.command is None and Hole.walk_on is True
+    assert Door.command is None and Door.walk_on is True
 
 
 def test_other_returns_the_opposite_end():
-    world = _flat_world()
+    scene = Scene()
+    world = _flat_world(scene)
     portal = world.portals[0]
     a, b = portal.ends
     assert portal.other(a) is b
@@ -101,16 +94,18 @@ def test_other_returns_the_opposite_end():
 
 
 def test_other_rejects_a_foreign_end():
-    world = _flat_world()
-    stranger = PortalEnd(world.levels['upper'], (0, 0), 'door')
+    scene = Scene()
+    world = _flat_world(scene)
+    stranger = Door(location=(world.levels['upper'].maze, (0, 0)), scene=scene)
     with pytest.raises(ValueError):
         world.portals[0].other(stranger)
 
 
 def test_portal_end_at_finds_ends_by_level_name_or_maze():
-    world = _flat_world()
+    scene = Scene()
+    world = _flat_world(scene)
     upper = world.levels['upper']
-    assert world.portal_end_at('upper', (3, 3)).blocktype == 'hole'
+    assert isinstance(world.portal_end_at('upper', (3, 3)), Hole)
     assert world.portal_end_at(upper, (3, 3)) is not None
     assert world.portal_end_at(upper.maze, (3, 3)) is not None
     assert world.portal_end_at(upper, (9, 9)) is None
@@ -143,7 +138,7 @@ def test_a_one_way_portal_refuses_the_return_trip(played_world):
     dm.move_player(player, np.array([3, 3]))
     lower_end = world.portal_end_at('lower', (6, 6))
 
-    assert dm.traverse(player, lower_end) is False
+    assert dm.request_traverse(player, lower_end) is False
     assert scene.level is world.levels['lower']
     assert 'no way back up' in scene.log.lines[-1]
 
@@ -155,7 +150,8 @@ def test_stairs_need_the_matching_command():
     bt = world.blocktypes
     for name in ('top', 'bottom'):
         world.add_level(Level(name, Maze.filled((10, 10), bt, 'path', obj_name=name)))
-    world.link('top', (4, 4), 'stairs_down', 'bottom', (2, 2), 'stairs_up')
+    world.link(StairsDown(location=(world.levels['top'].maze, (4, 4)), scene=scene),
+               StairsUp(location=(world.levels['bottom'].maze, (2, 2)), scene=scene))
     scene.set_world(world)
     player = Player(scene)
     dm = DungeonMaster(scene)
@@ -376,7 +372,8 @@ def test_home_is_a_walled_room_with_a_hole():
     bt = BlockTypes()
     maze, hole = build_home(bt)
 
-    assert maze.blocktype_at(hole[1], hole[0])['name'] in ('path', 'hole')
+    # the hole is a portal entity placed by build_world, not terrain here
+    assert maze.blocktype_at(hole[1], hole[0])['name'] == 'path'
     border = np.concatenate([maze.blocks[0], maze.blocks[-1],
                              maze.blocks[:, 0], maze.blocks[:, -1]])
     assert (border == bt.id_of('wall')).all()
@@ -429,8 +426,8 @@ def test_build_world_wires_the_three_levels():
     assert hole_sewer.level.name == 'sewer' and not hole_sewer.enterable
 
     down, up = world.portals[1].ends
-    assert (down.level.name, down.blocktype, down.command) == ('sewer', 'stairs_down', '>')
-    assert (up.level.name, up.blocktype, up.command) == ('dungeon', 'stairs_up', '<')
+    assert (down.level.name, down.command) == ('sewer', '>')
+    assert (up.level.name, up.command) == ('dungeon', '<')
     assert up.pos == (7, 7)
 
 

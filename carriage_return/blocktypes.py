@@ -21,13 +21,6 @@ _default_blocktypes = np.array([
     (0,  'void',            ' ',  False,    0,      (.00, .00, .00, 1.0), (.00, .00, .00, 1.0), {}),
     (1,  'path',            '.',  True,     0,      (.20, .20, .20, 1.0), (.10, .10, .10, 1.0), {'bg_color_var': 0.005}),
     (2,  'wall',            '#',  False,    1,      (.00, .00, .00, 1.0), (.40, .40, .40, 1.0), {'bg_color_var': 0.03}),
-
-    # portal ends (see world.LevelPortal). All are walkable: what a portal end
-    # does when you step on it is decided by PortalEnd, not by the block.
-    (3,  'hole',            'O',  True,     0,      (.05, .05, .05, 1.0), (.00, .00, .00, 1.0), {}),
-    (4,  'stairs_down',     '>',  True,     0,      (.70, .70, .60, 1.0), (.12, .12, .10, 1.0), {}),
-    (5,  'stairs_up',       '<',  True,     0,      (.70, .70, .60, 1.0), (.12, .12, .10, 1.0), {}),
-    (6,  'door',            '+',  True,     0,      (.60, .40, .15, 1.0), (.15, .10, .05, 1.0), {}),
 ], dtype=blocktype_dtype)
 
 

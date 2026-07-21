@@ -18,10 +18,11 @@ Game-side module: no rendering library may be imported here.
 """
 import numpy as np
 
-from .light import AmbientLight, PointLight
+from .light import AmbientLight, ArrayLight, PointLight
 from .maze import Maze
 from .monster import Monster
 from .item import Scroll, Torch
+from .portal import Hole, StairsDown, StairsUp
 from .world import Level, World
 
 
@@ -151,15 +152,8 @@ def build_world(scene):
     world.add_level(Level('sewer', sewer_maze))
     world.add_level(Level('dungeon', dungeon_maze))
 
-    # Down the hole and you cannot climb back: the sewer end is a ceiling
-    # opening, so it is not enterable from below.
-    world.link('home', home_hole, 'hole',
-               'sewer', sewer_hole, 'hole',
-               enterable_a=True, enterable_b=False)
-
-    world.link('sewer', sewer_stairs, 'stairs_down',
-               'dungeon', dungeon_arrival, 'stairs_up')
-
+    # The world is live before anything is placed on it, because portal ends,
+    # torches and the scroll are all entities that want the scene.
     scene.set_world(world)
 
     sewer, dungeon = sewer_maze, dungeon_maze
@@ -171,17 +165,39 @@ def build_world(scene):
     home_maze.add_light(AmbientLight(home_maze, scene, color=(8000, 8000, 8000)),
                         pos=home_hole)
 
+    # Down the hole and you cannot climb back. The home end is an ordinary hole
+    # in the floor -- an 'O' you drop through. The sewer end is the ceiling
+    # opening you land under: not enterable (step onto it and it still tells you
+    # the way up is out of reach), and invisible (char=None) because there is no
+    # hole in the sewer floor -- just the patch of floor the daylight lands on.
+    top = Hole(location=(home_maze, home_hole), scene=scene)
+    bottom = Hole(location=(sewer_maze, sewer_hole), scene=scene,
+                  enterable=False, char=None)
+
+    # The daylight is the sewer hole's own light, carried by the end like a
+    # torch's flame: a bright spot where the shaft strikes the floor (an array
+    # light on that one cell), and a dim, shadow-casting 1/r^2 wash for the
+    # light that hit the floor there and scattered down the corridor.
+    hx, hy = sewer_hole
+    spot = np.zeros(sewer_maze.shape, dtype='float32')
+    spot[hy, hx] = 6000000.0
+    bottom.lights = [
+        ArrayLight(bottom, scene, spot, color=(4000, 5000, 8000)),
+        PointLight(bottom, scene, color=(10, 20, 100), brightness=1.0),
+    ]
+    world.link(top, bottom)
+
+    # Stairs from the sewer down to the dungeon; each end draws its own glyph.
+    world.link(StairsDown(location=(sewer_maze, sewer_stairs), scene=scene),
+               StairsUp(location=(dungeon_maze, dungeon_arrival), scene=scene))
+
     Scroll(location=(dungeon, (5, 5)), scene=scene)
     torches = [Torch(location=(dungeon, pos), scene=scene)
                for pos in TORCH_POSITIONS]
     torches[0].light.color = (10000, 5000, 1000)
 
-    # The sewer is lit at its two landmarks so each is findable from a
-    # distance. The stairs down get a torch; the shaft the player fell down
-    # gets a shaft of cold daylight from the hole overhead -- a light that
-    # belongs to the map itself, pinned to its cell, not to anything standing
-    # there.
-    sewer.add_light(PointLight(sewer, scene, color=(4000, 5000, 8000)), pos=sewer_hole)
+    # The sewer's stairs down get a torch so they are findable from a distance;
+    # the ceiling opening the player fell through is lit by its own daylight.
     Torch(location=(sewer, sewer_stairs), scene=scene)
 
     Monster(position=(8, 40), scene=scene, maze=dungeon)

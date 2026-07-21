@@ -11,65 +11,82 @@ class DungeonMaster:
         """Attempt to move the player to newpos.
         """
         newpos = newpos.astype(int)
-        pos = player.location.slot
         j, i = newpos
         j0, i0 = player.location.slot
-        if self.scene.maze.blocktype_at(i, j)['walkable']:
+        if self.walkable((j, i)):
             self.move_player(player, newpos)
-        elif self.scene.maze.blocktype_at(i0, j)['walkable']:
+        elif self.walkable((j, i0)):
             newpos[1] = i0
             self.move_player(player, newpos)
-        elif self.scene.maze.blocktype_at(i, j0)['walkable']:
+        elif self.walkable((j0, i)):
             newpos[0] = j0
             self.move_player(player, newpos)
+
+    def walkable(self, pos):
+        """True if a mover may stand on cell *pos* ``(x, y)`` of the current maze.
+
+        The terrain must be walkable *and* nothing standing on the cell may
+        block it: walkability is aggregated over the ground and every entity
+        there, so a shut door stops you on otherwise-open floor without the
+        terrain grid knowing anything about it.
+        """
+        x, y = pos
+        maze = self.scene.maze
+        if not maze.blocktype_at(y, x)['walkable']:
+            return False
+        return not any(e.blocks_movement for e in maze.inventory[(x, y)])
 
     def move_player(self, player, pos):
         player.location.update(self.scene.maze, pos)
         self.end_turn()
 
-        # Holes and doors act on arrival; stairs wait to be used (see
-        # world.PortalEnd.command). Checked after end_turn so the step that
+        # Ask whatever the player stepped onto what happens -- the dungeon
+        # master does not know a hole from a scroll, it just asks each entity on
+        # the cell. An entity may call back to request an action (a hole asks to
+        # traverse); if that carries the player off this cell there is nothing
+        # more here to react, so stop. Checked after end_turn so the step that
         # brought the player here is a complete turn in its own right.
-        end = self.portal_end_at(player.location.slot)
-        if end is not None and end.walk_on:
-            self.traverse(player, end)
+        here = player.location.place
+        maze, cell = here
+        for entity in list(maze.inventory[cell]):
+            if entity is player:
+                continue
+            entity.on_walked_on(player, self)
+            if player.location.place != here:
+                break
 
     def use_stairs(self, player, command):
-        """Act on the ``<`` or ``>`` command at the player's feet."""
-        end = self.portal_end_at(player.location.slot)
-        if end is None or end.command != command:
-            direction = "up" if command == '<' else "down"
-            self.scene.write("There are no stairs %s here." % direction)
-            return
-        self.traverse(player, end)
+        """Apply the ``<`` / ``>`` command at the player's feet.
 
-    def portal_end_at(self, pos):
-        """The PortalEnd at *pos* on the current level, or None."""
-        if self.scene.world is None:
-            return None
-        return self.scene.world.portal_end_at(self.scene.maze, pos)
+        The dungeon master does not know what a stair is: it asks each entity on
+        the cell whether it responds to the command and stops at the first that
+        does. If nothing does, it says so.
+        """
+        for entity in list(self.scene.maze.inventory[tuple(player.location.slot)]):
+            if entity is player:
+                continue
+            if entity.on_command(player, command, self):
+                return
+        direction = "up" if command == '<' else "down"
+        self.scene.write("There are no stairs %s here." % direction)
 
-    def traverse(self, player, from_end):
-        """Take *player* through the portal *from_end* belongs to.
+    def request_traverse(self, mover, from_end):
+        """A portal end's request to send *mover* through to its far side.
 
-        Refuses when the portal cannot be entered from this side -- which is
-        what makes the sewer's ceiling opening a thing you stand under rather
-        than a way back home.
+        A request, not a decision: the dungeon master has final say. A side that
+        cannot be entered is refused, with the end's own message; otherwise the
+        mover crosses to the far end, switching levels. Returns whether it
+        happened. Called *by the entity* (see :meth:`.portal.PortalEnd`), not by
+        any type-inspecting code here.
         """
         if not from_end.enterable:
-            self.scene.write(self.refusal(from_end))
+            self.scene.write(from_end.refusal)
             return False
 
         to_end = from_end.portal.other(from_end)
         self.scene.set_level(to_end.level)
-        player.location.update(to_end.level.maze, to_end.pos)
+        mover.location.update(to_end.level.maze, to_end.pos)
         return True
-
-    def refusal(self, end):
-        """The message for a portal end that cannot be entered from this side."""
-        if end.blocktype == 'hole':
-            return "The opening is far above you; there is no way back up."
-        return "You cannot go that way."
 
     def end_turn(self):
         for mlist in list(self.scene.monsters.values()):
