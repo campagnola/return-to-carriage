@@ -1,9 +1,6 @@
 # coding: utf8
-import numpy as np
-
-from .layers import GlyphRegistry, SpriteLayer, FieldLayer, LayerList
+from .layers import GlyphRegistry, SpriteLayer, LayerList
 from .maze import Maze
-from .array_cache import ArraySumCache
 from .entity import Entity
 from .events import Observable
 from .world import SIGHT_SUPERSAMPLE, Level
@@ -73,18 +70,24 @@ class Scene(Entity):
 
     - ``glyphs`` and ``sprite_layers`` ('scenery', 'items', 'actors') carry
       character sprites; entities write into them as they move.
-    - ``sight`` is a FieldLayer holding the composited lighting * line-of-sight
-      + memory field, updated by update_sight().
+    - ``level.sight`` is a FieldLayer holding the composited lighting *
+      line-of-sight + memory field, updated by ``Level.update_sight()``.
 
-    A rendering backend (e.g. backends.vispy.VispySceneRenderer) consumes
-    these layers and injects ``visibility``: an object with
+    Everything sized to a maze -- the sight fields, the composited lighting,
+    and the ``visibility`` shadow provider a backend injects -- lives on the
+    :class:`~.world.Level`, not on the scene. The scene reads the current
+    level's fields through the delegating properties below, but the level is
+    the unit of consistency: a renderer captures a level and derives every
+    shape from it, so a maze and a field of the wrong size are never observed
+    together. A rendering backend (e.g. backends.vispy.VispySceneRenderer)
+    injects each level's ``visibility``: an object with
     ``render(pos, read=True) -> (h, w, >=3) array`` that computes a shadow map
     for a light/viewer at a maze position.
     """
 
-    # sight memory fades to this fraction of itself per second (equivalent to
-    # the historical 0.999-per-frame decay at 60 fps)
-    MEMORY_DECAY_RATE = 0.999 ** 60
+    # sight memory decay now lives on the Level (which does the compositing);
+    # kept here as an alias for callers that reach for scene.MEMORY_DECAY_RATE
+    MEMORY_DECAY_RATE = Level.MEMORY_DECAY_RATE
 
     def __init__(self):
         Entity.__init__(self, entity_type='scene')
@@ -114,31 +117,11 @@ class Scene(Entity):
         # thread, after all of the scene's own state is consistent.
         self.level_changed = Observable()
 
-        # visibility provider (see class docstring); injected by the rendering
-        # backend or by headless test code
-        self.visibility = None
-
         # set by the gameplay input handler (Escape); the display backend
         # polls it from its frame tick and shuts down
         self.quit_requested = False
 
         self.supersample = SIGHT_SUPERSAMPLE
-
-        self.norm_light = None
-        self.light_cache = ArraySumCache()
-
-        # Divisor that maps the composited log-lighting into 0-1. Held across
-        # frames so that a flickering light actually modulates the output:
-        # renormalising per frame would divide the flicker straight back out
-        # (the peak would pin to 1.0 no matter how the flame behaved). Cleared
-        # whenever the lights themselves move.
-        self._light_norm = None
-
-        # composited sight field consumed by renderers. Kept as one object for
-        # the scene's lifetime -- set_level() reshapes it in place (FieldLayer
-        # .set_data reallocates on a shape change) so a backend's reference
-        # stays valid across level switches.
-        self.sight = FieldLayer('sight', shape=(0, 0, 3))
 
         # the visible Level; set by set_level(). The maze and the sight fields
         # are read through it (see the properties below) rather than copied
@@ -152,8 +135,6 @@ class Scene(Entity):
 
         # track monsters by location
         self.monsters = {}
-
-        self._need_los_update = True
 
         # the multi-level world, installed by set_world(). Until then the scene
         # runs on a single unnamed maze, which is what the tests and the
@@ -198,6 +179,11 @@ class Scene(Entity):
     def line_of_sight(self):
         return self._level.line_of_sight
 
+    @property
+    def sight(self):
+        """The composited sight field of the current level."""
+        return self._level.sight
+
     def set_level(self, level):
         """Make *level* visible, rebuilding everything sized from its maze.
 
@@ -208,7 +194,10 @@ class Scene(Entity):
         __init__ for the starting level, and again for every later switch.
 
         Callers must move the player onto the new level themselves; the scene
-        does not place entities.
+        does not place entities. The order in which this method mutates state
+        no longer matters for a concurrent draw: every maze-sized array lives
+        on the level, and the renderer composites through a captured level, so
+        it can never pair the new level's field with the old level's lighting.
         """
         if not isinstance(level, Level):
             level = level.level or Level(level.obj_name or 'level', level,
@@ -231,15 +220,9 @@ class Scene(Entity):
             scenery_layer.remove_sprites(self._scenery)
         self._scenery = level.maze.add_scenery(self.glyphs, scenery_layer)
 
-        # FieldLayer.set_data reallocates on a shape change, so scene.sight
-        # keeps its identity for backends holding it.
-        self.sight.set_data(np.zeros(level.field_shape, dtype='float32'))
-
-        # every lighting cache is sized by, or positioned against, the maze
-        self.norm_light = None
-        self._light_norm = None
-        self.light_cache = ArraySumCache()
-        self._need_los_update = True
+        # drop the level's cross-frame caches and blank its field so it is
+        # built from scratch the first time it is shown
+        level.enter()
 
         self.level_changed()
 
@@ -255,9 +238,12 @@ class Scene(Entity):
         self._player_moved()
 
     def _player_moved(self, event=None):
-        self._need_los_update = True
-        self.norm_light = None  # should have a more intelligent way to clear this cache
-        self._light_norm = None
+        # the level the player now stands on must recast sight and rescale its
+        # lighting for the new viewpoint; the level the player left had its
+        # sight cleared in set_level and needs nothing here
+        level = self._player.level if self._player is not None else None
+        if level is not None:
+            level.invalidate_sight()
 
     def monster_moved(self, mon, old_pos):
         if old_pos is not None:
@@ -287,64 +273,13 @@ class Scene(Entity):
         """
         self.redraw_requested()
 
-    def invalidate_lighting(self):
-        """Discard the composited lighting; it is rebuilt on the next draw.
-
-        Called by light sources whose emitted light changed (brightness,
-        colour). Moving a light additionally invalidates the per-light shadow
-        maps, which the item handles itself.
-        """
-        self.norm_light = None
-
     def update_sight(self, dt):
-        """Advance the sight/memory field by *dt* seconds and write the result
-        into the ``sight`` FieldLayer.
+        """Advance the current level's sight/memory field by *dt* seconds.
 
-        Called once per rendered frame by the display backend. LOS and lighting
-        are recomputed only when invalidated (player moved, lights changed).
-
-        Everything here is read off one Level, captured once: the fields being
-        composited and the lights contributing to them then necessarily belong
-        to the same level and are all the same shape.
+        A convenience for single-threaded callers (tests, the screenshot
+        harness): it composites whichever level is current. The display
+        backend does *not* go through here -- it calls ``Level.update_sight``
+        on the level it has captured, so a level switch on another thread
+        cannot change which level a frame draws (see the vispy renderer).
         """
-        level = self._level
-
-        # render new line of sight
-        if self._need_los_update:
-            level.line_of_sight = self.player.line_of_sight().astype('float32', copy=False)
-            self._need_los_update = False
-        line_of_sight = level.line_of_sight
-
-        # calculate lighting. Only this level's lights are consulted, so their
-        # maps are all sized to this level -- no light on another level can
-        # contribute a differently-shaped array to the sum.
-        if self.norm_light is None:
-            lights = []
-            for light in level.lights:
-                light_map = light.lightmap(supersample=self.supersample)
-                if light_map is None:
-                    continue
-                lights.append(light_map)
-            if lights:
-                # ArraySumCache.sum_arrays asserts on an empty list, and a
-                # level may legitimately hold no light at all
-                light = self.light_cache.sum_arrays(lights)
-                log_light = np.log(np.clip(light*10, 1, np.inf))
-                if self._light_norm is None:
-                    self._light_norm = log_light.max()
-                self.norm_light = log_light / self._light_norm
-            else:
-                self.norm_light = np.zeros(level.field_shape, dtype='float32')
-
-        # current sight is combination of lighting and LOS
-        sight = line_of_sight * self.norm_light
-
-        self.sight.set_data(level.memory * (1 - line_of_sight) + sight)
-
-        # forget
-        level.memory *= self.MEMORY_DECAY_RATE ** dt
-
-        # add sight to memory. Reducing the length-3 trailing axis with
-        # sight.max(axis=2) is ~20x slower than maximum() applied pairwise.
-        brightest = np.maximum(np.maximum(sight[:, :, 0], sight[:, :, 1]), sight[:, :, 2])
-        level.memory[:, :, 2] = np.maximum(level.memory[:, :, 2], brightest)
+        self._level.update_sight(dt, self._player)

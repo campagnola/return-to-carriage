@@ -135,7 +135,7 @@ class Light(Component):
         """The light's emitted colour; the host sets this.
 
         Changing it discards only the colour scaling of the cached light map --
-        any position-dependent map underneath survives -- then tells the scene
+        any position-dependent map underneath survives -- then tells the level
         its lighting is stale and asks the display to repaint.
         """
         return self._color
@@ -147,7 +147,7 @@ class Light(Component):
             return
         self._color = value
         self._light_map = None
-        self.scene.invalidate_lighting()
+        self._invalidate_level_lighting()
         self.scene.request_redraw()
 
     @property
@@ -155,7 +155,7 @@ class Light(Component):
         """Scale applied to ``color``; 1.0 is the light's nominal output.
 
         Setting it discards only the colour scaling of the cached light map --
-        any position-dependent map underneath survives -- then tells the scene
+        any position-dependent map underneath survives -- then tells the level
         its lighting is stale and asks the display to repaint.
         """
         return self._brightness
@@ -166,8 +166,18 @@ class Light(Component):
             return
         self._brightness = value
         self._light_map = None
-        self.scene.invalidate_lighting()
+        self._invalidate_level_lighting()
         self.scene.request_redraw()
+
+    def _invalidate_level_lighting(self):
+        """Tell the level this light is on that its composited lighting is
+        stale. Scoped to the light's own level, so a flame flickering on one
+        level never invalidates another's -- and safe to call from the flicker
+        thread, since the level is read as a single reference.
+        """
+        level = self.level
+        if level is not None:
+            level.invalidate_lighting()
 
     def _scaled_color(self):
         """The emitted colour scaled by brightness, as a float32 ``(3,)`` array.
@@ -206,8 +216,8 @@ class Light(Component):
         """This light's contribution, sized to the maze it is standing on.
 
         The shape comes from the light's own maze, so the map it returns always
-        matches the level that light is on. Scene.update_sight only sums the
-        current level's lights, so those maps are all the same shape. Returns
+        matches the level that light is on. Level.update_sight only sums that
+        level's own lights, so those maps are all the same shape. Returns
         None when the light is nowhere (its host is outside any maze).
         """
         place = self.global_place()
@@ -268,7 +278,7 @@ class PointLight(Light):
 
     def shadow_map(self, slot):
         if self._shadow_map is None:
-            smap = self.scene.visibility.render(slot, read=True)[..., :3]
+            smap = self.level.visibility.render(slot, read=True)[..., :3]
             self.set_shadow_map(smap)
             assert self._shadow_map is not None
         return self._shadow_map

@@ -53,9 +53,22 @@ class Player(Entity):
         """
         return item.read(self)
 
+    @property
+    def level(self):
+        """The Level this player is standing on, or None if nowhere.
+
+        Read as one ``(maze, slot)`` so the maze and the position always belong
+        together even while the player is being moved between levels.
+        """
+        ml = self.location.global_location
+        if ml is None:
+            return None
+        maze = ml.container
+        return None if maze is None else maze.level
+
     def line_of_sight(self):
         pos = self.location.global_location.slot
-        smap = self.scene.visibility.render(pos, read=True)[:, :, :3]
+        smap = self.level.visibility.render(pos, read=True)[:, :, :3]
         # carried point lights share the player's shadow map; they expect it in
         # the same 0-255 scale that PointLight.shadow_map() renders for itself.
         # Only point sources cast shadows -- an ambient or array light carried

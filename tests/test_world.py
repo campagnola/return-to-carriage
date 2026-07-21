@@ -32,11 +32,20 @@ class FakeVisibility:
         return np.full(self.scene.field_shape[:2] + (4,), 255, dtype='ubyte')
 
 
+def _auto_visibility(scene):
+    """Inject a FakeVisibility onto every level the scene shows, as the real
+    renderer does on level_changed -- so a test that travels between levels
+    gets each one's shadow provider without wiring it up by hand."""
+    scene.level_changed.connect(lambda: setattr(scene.level, 'visibility',
+                                                 FakeVisibility(scene)))
+    scene.level.visibility = FakeVisibility(scene)
+
+
 @pytest.fixture
 def played_world():
     """A scene running _flat_world(), with a player on the upper level."""
     scene = Scene()
-    scene.visibility = FakeVisibility(scene)
+    _auto_visibility(scene)
     world = _flat_world()
     scene.set_world(world)
     player = Player(scene)
@@ -141,7 +150,7 @@ def test_a_one_way_portal_refuses_the_return_trip(played_world):
 
 def test_stairs_need_the_matching_command():
     scene = Scene()
-    scene.visibility = FakeVisibility(scene)
+    _auto_visibility(scene)
     world = World()
     bt = world.blocktypes
     for name in ('top', 'bottom'):
@@ -287,6 +296,41 @@ def test_leaving_a_level_clears_its_line_of_sight(played_world):
 
     assert not upper.line_of_sight.any()
     assert not torch.light.in_player_sight()
+
+
+def test_compositing_a_level_the_player_has_left_uses_its_own_shape():
+    """Regression: entering a differently-shaped level must not compose the new
+    level's fields against the old level's lighting.
+
+    Reproduces the crash seen entering the dungeon from the sewer -- the draw
+    thread composited a level while the input thread was still moving the
+    player onto it. Because update_sight is a function of one level and the
+    player is not (yet) on it, the view is fully blocked: the level's own
+    (correctly shaped) memory is what shows, with no broadcast against a
+    field of the other level's shape.
+    """
+    world = World()
+    bt = world.blocktypes
+    world.add_level(Level('small', Maze.filled((8, 9), bt, 'path', obj_name='small')))
+    world.add_level(Level('big', Maze.filled((20, 30), bt, 'path', obj_name='big')))
+    small, big = world.levels['small'], world.levels['big']
+
+    scene = Scene()
+    _auto_visibility(scene)
+    scene.set_world(world)                 # current == 'small' (added first)
+    player = Player(scene)
+    player.location.update(small.maze, (1, 1))
+
+    big.memory[:] = 0.25                   # something remembered on the big level
+    remembered = big.memory.copy()         # update_sight decays memory in place
+
+    # the renderer's situation mid-transition: showing 'big' while the player
+    # is still on 'small'. This used to raise "operands could not be broadcast
+    # together" from big.line_of_sight * small.norm_light.
+    big.update_sight(1 / 60., player)
+
+    assert big.sight.data.shape == big.field_shape
+    assert np.allclose(big.sight.data, remembered)   # fully blocked -> memory only
 
 
 def test_a_level_keeps_its_own_memory(played_world):

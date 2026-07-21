@@ -106,9 +106,11 @@ class VispySceneRenderer(object):
     Composes a VispyLayerRenderer for the sprite layers and adds the GL side
     of the visual-field pipeline:
 
-    - constructs the GPU ShadowRenderer and injects it as scene.visibility
-    - drives scene.update_sight(dt) once per canvas draw
-    - uploads the scene's ``sight`` FieldLayer to a texture (only when its
+    - constructs the GPU ShadowRenderer and injects it as the level's
+      ``visibility``
+    - drives ``level.update_sight(dt, player)`` once per canvas draw, on the
+      level it has captured (never "whatever level is current")
+    - uploads the level's ``sight`` FieldLayer to a texture (only when its
       version changed) and applies it to the sprites as a mask filter
 
     As in the pre-split design, the sight update runs as a canvas draw-event
@@ -123,6 +125,12 @@ class VispySceneRenderer(object):
 
         self.layer_renderer = VispyLayerRenderer(ui, scene.glyphs, list(scene.sprite_layers.values()))
         self.txt = self.layer_renderer.txt
+
+        # the Level this renderer is currently set up for. Captured once by
+        # _rebuild_for_level and read by every draw; the renderer never asks
+        # the scene "what is the current level?" again, so a level switch on
+        # another thread cannot change which level a frame in flight is drawing.
+        self._level = None
 
         self.sight_texture = None
         self.sight_filter = None
@@ -141,23 +149,27 @@ class VispySceneRenderer(object):
         ui.canvas.events.draw.connect(self._on_draw)
 
     def _rebuild_for_level(self):
-        """Re-create the maze-sized GL resources for scene.maze.
+        """Re-create the maze-sized GL resources for the scene's current level.
 
-        Called for the starting level and again whenever scene.set_level
-        swaps in a differently-shaped maze.
+        Called for the starting level and again whenever scene.set_level swaps
+        in a differently-shaped maze. The current level is read exactly once,
+        here, and everything below is sized from that captured level -- not
+        from the scene, whose current level can change under a concurrent draw.
         """
-        scene = self.scene
+        level = self._level = self.scene.level
 
-        # GPU shadow-map provider for LOS/lighting computations
-        scene.visibility = ShadowRenderer(scene.maze, self.ui.canvas,
-                                          supersample=scene.supersample)
+        # GPU shadow-map provider for LOS/lighting computations, injected onto
+        # the level so the player and its lights reach the provider sized to
+        # their own maze -- never a provider left over from another level.
+        level.visibility = ShadowRenderer(level.maze, self.ui.canvas,
+                                          supersample=level.supersample)
 
         # sight field -> texture, masking the sprites visual
         if self.sight_filter is not None:
             self.txt.detach(self.sight_filter)
 
-        ms = scene.maze.shape
-        self.sight_texture = vispy.gloo.Texture2D(shape=scene.field_shape, format='rgb',
+        ms = level.maze.shape
+        self.sight_texture = vispy.gloo.Texture2D(shape=level.field_shape, format='rgb',
                                                   interpolation='linear', wrapping='repeat')
         tr = self.txt.transforms.get_transform('framebuffer', 'visual')
         self.sight_filter = TextureMaskFilter(self.sight_texture, tr, scale=(1./ms[1], 1./ms[0]))
@@ -173,10 +185,19 @@ class VispySceneRenderer(object):
         self.update(dt)
 
     def update(self, dt):
-        """Advance the scene's visual-field state by *dt* seconds and upload
-        the result if it changed."""
-        self.scene.update_sight(dt)
-        sight = self.scene.sight
+        """Advance the captured level's visual field by *dt* and upload it if
+        it changed.
+
+        Composites the level this renderer was built for -- reached through the
+        captured reference, so its sight field, lighting and shadow provider
+        are all the one maze's shape. When the player is not on that level
+        (the window between a level switch and the player being moved onto it),
+        Level.update_sight blocks the view and the level's remembered field is
+        what shows.
+        """
+        level = self._level
+        level.update_sight(dt, self.scene.player)
+        sight = level.sight
         if sight.version != self._sight_version:
             self.sight_texture.set_data(sight.data)
             self._sight_version = sight.version

@@ -32,6 +32,14 @@ class FakeVisibility:
         return np.full(self.shape, 255, dtype='ubyte')
 
 
+def _auto_visibility(scene):
+    """Inject a FakeVisibility onto every level the scene shows, as the real
+    renderer does on level_changed."""
+    scene.level_changed.connect(lambda: setattr(scene.level, 'visibility',
+                                                 FakeVisibility(scene)))
+    scene.level.visibility = FakeVisibility(scene)
+
+
 @pytest.fixture
 def dispatcher():
     InputDispatcher.reset()
@@ -44,7 +52,7 @@ def dispatcher():
 def scene():
     os.chdir(PROJECT_ROOT)  # level1.png is loaded from cwd
     scene = Scene()
-    scene.visibility = FakeVisibility(scene)
+    _auto_visibility(scene)
     player = Player(scene)
     player.location.update(scene.maze, [7, 7])
     return scene
