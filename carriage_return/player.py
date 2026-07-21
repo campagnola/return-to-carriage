@@ -1,6 +1,7 @@
 from .entity import Entity
 from .errors import ActionError
 from .inventory import Inventory
+from .light import PointLight
 from .location import Location
 from .sprite import SingleCharSprite
 
@@ -55,10 +56,12 @@ class Player(Entity):
     def line_of_sight(self):
         pos = self.location.global_location.slot
         smap = self.scene.visibility.render(pos, read=True)[:, :, :3]
-        # carried lights share the player's shadow map; they expect it in the
-        # same 0-255 scale that Light.shadow_map() renders for itself
+        # carried point lights share the player's shadow map; they expect it in
+        # the same 0-255 scale that PointLight.shadow_map() renders for itself.
+        # Only point sources cast shadows -- an ambient or array light carried
+        # in a pocket has no shadow map to share.
         for item in self.inventory.all_entities():
             light = getattr(item, 'light', None)
-            if light is not None:
+            if isinstance(light, PointLight):
                 light.set_shadow_map(smap)
         return smap / 255.0

@@ -237,12 +237,12 @@ def test_a_map_light_shines_from_a_fixed_cell(played_world):
     """A light attached to the map (a hole in the ceiling) registers with its
     level, contributes a map sized to that level, and does not move when the
     player does."""
-    from carriage_return.light import Light
+    from carriage_return.light import PointLight
 
     scene, world, player, dm = played_world
     upper, lower = world.levels['upper'], world.levels['lower']
 
-    light = upper.maze.add_light(Light(upper.maze, scene, color=(9, 9, 9)), pos=(5, 5))
+    light = upper.maze.add_light(PointLight(upper.maze, scene, color=(9, 9, 9)), pos=(5, 5))
     assert light in upper.lights
     assert light not in lower.lights
     assert light.global_place() == (upper.maze, (5, 5))

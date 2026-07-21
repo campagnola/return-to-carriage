@@ -7,7 +7,7 @@ import numpy as np
 
 from .entity import Entity
 from .inventory import Inventory
-from .light import Light
+from .light import PointLight
 from .location import Location
 from .sprite import SingleCharSprite
 
@@ -141,7 +141,7 @@ class Torch(Item):
 
     def __init__(self, *args, **kwds):
         Item.__init__(self, *args, **kwds)
-        self.light = Light(self, self.scene, color=self.LIGHT_COLOR)
+        self.light = PointLight(self, self.scene, color=self.LIGHT_COLOR)
         with Torch._flicker_lock:
             Torch._torches.add(self)
             if Torch._flicker_thread is None:

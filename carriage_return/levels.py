@@ -18,7 +18,7 @@ Game-side module: no rendering library may be imported here.
 """
 import numpy as np
 
-from .light import Light
+from .light import AmbientLight, PointLight
 from .maze import Maze
 from .monster import Monster
 from .item import Scroll, Torch
@@ -164,6 +164,13 @@ def build_world(scene):
 
     sewer, dungeon = sewer_maze, dungeon_maze
 
+    # The home room has no torch or portal-light of its own, so it is lit by a
+    # flat, bright white ambient fill: the whole room is evenly and fully
+    # visible the moment the player arrives. Pinned to the maze like any map
+    # light; the cell it is pinned to is irrelevant to an ambient light.
+    home_maze.add_light(AmbientLight(home_maze, scene, color=(8000, 8000, 8000)),
+                        pos=home_hole)
+
     Scroll(location=(dungeon, (5, 5)), scene=scene)
     torches = [Torch(location=(dungeon, pos), scene=scene)
                for pos in TORCH_POSITIONS]
@@ -174,7 +181,7 @@ def build_world(scene):
     # gets a shaft of cold daylight from the hole overhead -- a light that
     # belongs to the map itself, pinned to its cell, not to anything standing
     # there.
-    sewer.add_light(Light(sewer, scene, color=(4000, 5000, 8000)), pos=sewer_hole)
+    sewer.add_light(PointLight(sewer, scene, color=(4000, 5000, 8000)), pos=sewer_hole)
     Torch(location=(sewer, sewer_stairs), scene=scene)
 
     Monster(position=(8, 40), scene=scene, maze=dungeon)

@@ -35,8 +35,10 @@ def new_game(scene):
     player = Player(scene)
     player.location.update(home, HOME_START)
 
-    held_torch = Torch(location=(player, 'right hand'), scene=scene,
-                       obj_name="held torch")
-    held_torch.light.color = (10000, 5000, 1000)
+    # set player initial inventory
+    
+    # held_torch = Torch(location=(player, 'right hand'), scene=scene,
+    #                    obj_name="held torch")
+    # held_torch.light.color = (10000, 5000, 1000)
 
     return world, player
