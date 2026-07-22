@@ -18,7 +18,8 @@ class SingleCharSprite(Component):
     to ``scene.level_changed``: every sprite re-checks which maze it is on
     whenever the visible level changes.
     """
-    def __init__(self, entity, zval, char, fg_color=(1, 1, 1, 1), bg_color=None, layer='items'):
+    def __init__(self, entity, zval, char, fg_color=(1, 1, 1, 1), bg_color=None,
+                 emission=None, layer='items'):
         Component.__init__(self, entity, component_type='single_char_sprite')
         self.zval = zval
         self.bg_color = bg_color
@@ -28,6 +29,10 @@ class SingleCharSprite(Component):
         self.sprite.glyph = entity.scene.glyphs[char]
         self.sprite.fgcolor = fg_color
         self.sprite.bgcolor = bg_color
+        # Light the glyph emits on its own (RGB, linear, same units as the
+        # illuminance the light field carries), added on top of what it
+        # reflects. None/absent means a plain reflective glyph.
+        self.sprite.emission = (0, 0, 0) if emission is None else emission
 
         entity.location.global_changed.connect(self._update_location)
         entity.scene.level_changed.connect(self._level_changed)

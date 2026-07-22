@@ -16,13 +16,17 @@ drops the light's own caches but does not tell the level its lighting is stale,
 so after moving (or after building/tearing down the lights) the spell nudges
 the level to recomposite and repaint -- the same signal the flicker thread uses.
 
-Two spells ship today, both cast in a chosen cardinal direction:
+Two projectile spells ship today, both cast in a chosen cardinal direction:
 
 - :class:`Fireball` -- a single very bright, slightly-white point light (about
   ten times a torch) that flies ``*`` across the map until it strikes a wall.
 - :class:`Lightning` -- a string of ``/-\\|`` symbols that snaps into being
   along an almost-straight path, each symbol carrying a fierce cold-white point
   light, and vanishes again in under a second.
+
+A third, ``glo`` (see :data:`SPELLS`), is not a mob at all: it is self-cast,
+needs no direction, and toggles a persistent white light the player carries
+(see :meth:`.player.Player.toggle_glo`).
 
 Game-side module: no rendering library may be imported here.
 """
@@ -59,6 +63,12 @@ class Spell(Entity):
     lights can hang off, the list of pinned lights, and the one-shot teardown
     that removes every light and asks the level to repaint.
     """
+
+    #: Whether the cast prompt collects a direction before this spell is built.
+    #: Every world-cast projectile does; a self-cast spell that acts on the
+    #: player alone (see :data:`SPELLS`, ``glo``) overrides this to False so the
+    #: prompt fires the instant its name resolves.
+    NEEDS_DIRECTION = True
 
     #: kelvin dumped into a wall this spell strikes; None for a spell that
     #: leaves no heat behind (see :meth:`_strike`).
@@ -371,10 +381,28 @@ class Lightning(Spell):
         return '-' if dx else '|'
 
 
-#: Spell name -> factory ``(scene, maze, pos, direction) -> Spell``. The cast
-#: prompt matches typed text against these names; "bal" -> fireball, "lit" ->
-#: lightning (see dialogs.cast).
+def glo(scene, maze, pos, direction):
+    """Cast 'glo': toggle the player's own bright white light on or off.
+
+    Unlike the projectile spells, glo needs no direction (``pos``/``direction``
+    are ignored) and pins nothing to the map: it toggles a persistent white
+    light the player carries (see :meth:`.player.Player.toggle_glo`), so it
+    needs no inventory slot and lasts until the spell is cast again.
+    """
+    scene.player.toggle_glo()
+
+
+#: glo is self-cast on the player, so the prompt skips the direction phase.
+glo.NEEDS_DIRECTION = False
+
+
+#: Spell name -> factory ``(scene, maze, pos, direction)``. Most build a mob
+#: that flies in the given direction; a factory whose ``NEEDS_DIRECTION`` is
+#: False (``glo``) ignores ``pos``/``direction`` and the prompt casts it the
+#: moment its name resolves. The cast prompt matches typed text against these
+#: names; "bal" -> fireball, "lit" -> lightning, "glo" -> glo (see dialogs.cast).
 SPELLS = {
     'fireball': Fireball,
     'lightning': Lightning,
+    'glo': glo,
 }

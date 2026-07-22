@@ -24,6 +24,10 @@ class Item(Entity):
     takeable = False
     fg_color = (0, 0, 0.8, 1)
     bg_color = None
+    #: Light the glyph emits on its own (RGB, linear), or None for a plain
+    #: reflective item. An emitter (see Torch) glows independently of the light
+    #: falling on it rather than merely reflecting its surroundings.
+    emission = None
 
     def __init__(self, location, scene, obj_name=None):
         Entity.__init__(self, entity_type='item.' + self.name, obj_name=obj_name)
@@ -31,7 +35,9 @@ class Item(Entity):
 
         self.inventory = Inventory(self, allowed_slots=[])
         self.location = Location(self, None, None)
-        self.sprite = SingleCharSprite(self, zval=-0.1, char=self.char, fg_color=self.fg_color, layer='items')
+        self.sprite = SingleCharSprite(self, zval=-0.1, char=self.char,
+                                       fg_color=self.fg_color, emission=self.emission,
+                                       layer='items')
 
         # A plain item emits no light. An item that shines builds its own
         # Light in its __init__ (see Torch) and drives its colour/brightness;
@@ -141,6 +147,11 @@ class Torch(Item):
                    _flame_color[1] * FLAME_FLUX,
                    _flame_color[2] * FLAME_FLUX)
     fg_color = _flame_color + (1.0,)
+    #: The flame is an emitter: the glyph makes its own light rather than only
+    #: reflecting what falls on it. In the same units as the light it casts, so
+    #: the glyph glows at the flame's own colour and reads as the source of the
+    #: pool of light around it instead of a lit surface the colour of the floor.
+    emission = np.array(LIGHT_COLOR) * 3
 
     # Flicker. The flame's log-brightness wanders around 0 as a random walk
     # pulled back to centre (Ornstein-Uhlenbeck), so brightness is log-normal:

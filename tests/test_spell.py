@@ -192,6 +192,14 @@ def test_cast_prompt_ambiguous_reports():
     assert "mean" in p.message.lower()
 
 
+def test_cast_prompt_glo_skips_direction():
+    p = CastPrompt(spell.SPELLS)
+    p.text = "glo"
+    assert p.resolve() == "glo"
+    assert p.phase == "name"            # self-cast: no direction phase
+    assert not p.needs_direction()
+
+
 # -- cast prompt key loop ---------------------------------------------------
 
 def _type(session, text):
@@ -207,6 +215,15 @@ def test_run_cast_type_name_then_direction():
     session.post(KeyPress('Right'))
     session.join(timeout=JOIN_TIMEOUT)
     assert session.result == ("fireball", "Right")
+
+
+def test_run_cast_glo_needs_no_direction():
+    p = CastPrompt(spell.SPELLS)
+    session = DialogSession(lambda s: run_cast(s, p)).start()
+    _type(session, "glo")
+    session.post(KeyPress('Enter'))              # finishes without an arrow
+    session.join(timeout=JOIN_TIMEOUT)
+    assert session.result == ("glo", None)
 
 
 def test_run_cast_escape_cancels():
@@ -263,3 +280,47 @@ def test_interpreter_cast_builds_spell_at_player(scene, dispatcher, monkeypatch)
     assert bmaze is scene.maze
     assert list(bpos) == [7, 7]
     assert bdir == spell.DIRECTIONS['Left']
+
+
+# -- glo: the self-cast player light ----------------------------------------
+
+def test_glo_toggles_player_light_on_and_off(scene):
+    maze = open_room()
+    player = Player(scene)
+    player.location.update(maze, [5, 5])
+    assert player.glo is None
+
+    assert player.toggle_glo() is True           # lit
+    light = player.glo
+    assert light is not None and light in maze.level.lights
+
+    assert player.toggle_glo() is False          # snuffed
+    assert player.glo is None
+    assert light not in maze.level.lights
+
+
+def test_glo_light_follows_player_across_levels(scene):
+    here, there = open_room(), open_room()
+    player = Player(scene)
+    player.location.update(here, [5, 5])
+    player.toggle_glo()
+    assert player.glo in here.level.lights
+
+    player.location.update(there, [3, 3])        # walk to another level
+    assert player.glo in there.level.lights
+    assert player.glo not in here.level.lights
+
+
+def test_glo_stays_off_after_snuff_and_move(scene):
+    # A snuffed glo light must not revive itself: destroy() has to stop the
+    # dead light from re-registering when the player next moves.
+    maze = open_room()
+    player = Player(scene)
+    player.location.update(maze, [5, 5])
+    player.toggle_glo()
+    snuffed = player.glo
+    player.toggle_glo()                          # snuff it
+
+    player.location.update(maze, [6, 5])         # take a step
+    assert player.glo is None
+    assert snuffed not in maze.level.lights

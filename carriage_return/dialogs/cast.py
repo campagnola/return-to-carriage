@@ -54,22 +54,34 @@ class CastPrompt(Widget):
         self.text = self.text[:-1]
         self._changed()
 
+    def needs_direction(self):
+        """Whether the resolved spell wants a direction before it is cast.
+
+        A projectile spell does (the direction phase follows); a self-cast
+        spell like *glo* does not, and ``run_cast`` finishes the moment its name
+        resolves. Defaults to True for a spell that does not say (see
+        ``spell.Spell.NEEDS_DIRECTION``).
+        """
+        return getattr(self.spells[self.spell_name], 'NEEDS_DIRECTION', True)
+
     def resolve(self):
         """Match the typed text against the spell names; advance on a hit.
 
         Matching is by in-order subsequence, not contiguous substring, so a few
         characteristic letters name a spell: "bal" finds *fireball* and "lit"
-        finds *lightning*. Returns the matched name (and moves to the direction
-        phase) when exactly one spell matches; otherwise sets ``message``, stays
-        in the name phase, and returns None.
+        finds *lightning*. On a unique match the spell name is set; a spell that
+        wants a direction moves to the direction phase, a self-cast one stays in
+        the name phase for ``run_cast`` to finish at once. Otherwise sets
+        ``message``, stays in the name phase, and returns None.
         """
         typed = self.text.strip().lower()
         matches = [name for name in self.spells
                    if typed and _subsequence(typed, name)]
         if len(matches) == 1:
             self.spell_name = matches[0]
-            self.phase = 'direction'
             self.message = ""
+            if self.needs_direction():
+                self.phase = 'direction'
             self._changed()
             return matches[0]
         if not matches:
@@ -85,8 +97,10 @@ def run_cast(session, prompt):
     """Key handling for a CastPrompt; returns ``(spell_name, arrow_key)`` or None.
 
     Name phase: printable characters build the name, Backspace edits, Enter
-    resolves it. Direction phase: the next arrow key finishes. Escape cancels at
-    either phase. Key releases and unknown keys are ignored.
+    resolves it. A self-cast spell (no direction) finishes right there with a
+    None direction; a projectile spell advances to the direction phase, where
+    the next arrow key finishes. Escape cancels at either phase. Key releases
+    and unknown keys are ignored.
     """
     while True:
         event = session.get()
@@ -96,7 +110,8 @@ def run_cast(session, prompt):
             return None
         if prompt.phase == 'name':
             if event.key in ('Enter', 'Return'):
-                prompt.resolve()
+                if prompt.resolve() is not None and not prompt.needs_direction():
+                    return (prompt.spell_name, None)
             elif event.key == 'Backspace':
                 prompt.backspace()
             elif event.text and len(event.text) == 1 and event.text.isprintable():

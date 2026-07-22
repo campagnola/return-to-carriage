@@ -147,7 +147,13 @@ class Light(Component):
             level.add_light(self)
 
     def destroy(self):
-        """Take this light off its level; its host is going away."""
+        """Take this light off its level for good; its host is going away.
+
+        Stops listening to the host's movement first: otherwise the next time
+        the host moves, ``_host_moved`` would re-register this dead light with
+        whatever level the host is on and it would light up again.
+        """
+        self.parent_entity.location.global_changed.disconnect(self._host_moved)
         if self._light_level is not None:
             self._light_level.remove_light(self)
             self._light_level = None

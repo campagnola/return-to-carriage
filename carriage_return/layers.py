@@ -114,6 +114,9 @@ class SpriteLayer(GlyphLayer):
         self.glyph = np.empty((0,), dtype='uint32')
         self.fgcolor = np.empty((0, 4), dtype='float32')
         self.bgcolor = np.empty((0, 4), dtype='float32')
+        # Linear emitted radiance per sprite (RGB); 0 for a plain reflective
+        # glyph, non-zero for an emitter such as a torch flame.
+        self.emission = np.empty((0, 3), dtype='float32')
         self.slots = []
 
     def __len__(self):
@@ -166,11 +169,14 @@ class SpriteLayer(GlyphLayer):
         glyph = np.zeros((n,), dtype='uint32')
         fgcolor = np.zeros((n, 4), dtype='float32')
         bgcolor = np.zeros((n, 4), dtype='float32')
+        emission = np.zeros((n, 3), dtype='float32')
         position[:keep] = self.position[:keep]
         glyph[:keep] = self.glyph[:keep]
         fgcolor[:keep] = self.fgcolor[:keep]
         bgcolor[:keep] = self.bgcolor[:keep]
+        emission[:keep] = self.emission[:keep]
         self.position, self.glyph, self.fgcolor, self.bgcolor = position, glyph, fgcolor, bgcolor
+        self.emission = emission
 
         self._changed(structure=True)
         return n1
@@ -248,6 +254,17 @@ class SpriteSlot(object):
         self.bgcolor[:] = p
         self.layer._data_changed()
 
+    @property
+    def emission(self):
+        start, stop = self.indices
+        return self.layer.emission[start:stop].reshape(self.shape + (3,))
+
+    @emission.setter
+    def emission(self, p):
+        self._emission = p
+        self.emission[:] = p
+        self.layer._data_changed()
+
     def set_start(self, start):
         self.indices = (start, start + len(self))
         if self._position is not None:
@@ -255,6 +272,10 @@ class SpriteSlot(object):
             self.glyph = self._glyph
             self.fgcolor = self._fgcolor
             self.bgcolor = self._bgcolor
+            # optional: only slots that emit ever set it; others keep the 0 the
+            # layer's arrays default to after a repack
+            if self._emission is not None:
+                self.emission = self._emission
 
     def set_shape(self, shape, inform_parent=True):
         self.shape = shape
@@ -262,6 +283,7 @@ class SpriteSlot(object):
         self._glyph = None
         self._fgcolor = None
         self._bgcolor = None
+        self._emission = None
         if inform_parent:
             self.layer._slot_shape_changed()
 

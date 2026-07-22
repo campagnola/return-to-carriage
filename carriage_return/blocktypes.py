@@ -21,6 +21,10 @@ _default_blocktypes = np.array([
     (0,  'void',            ' ',  False,    0,      (.00, .00, .00, 1.0), (.00, .00, .00, 1.0), {}),
     (1,  'path',            '.',  True,     0,      (.20, .20, .20, 1.0), (.10, .10, .10, 1.0), {'bg_color_var': 0.005}),
     (2,  'wall',            '#',  False,    1,      (.00, .00, .00, 1.0), (.40, .40, .40, 1.0), {'bg_color_var': 0.03}),
+    # A barred window to the outside: impassable, but not opaque -- you see the
+    # bright sky through the bars, and daylight streams past them. Dark bars
+    # (fg) silhouette against a bright cool-sky background.
+    (3,  'grate',           '#',  False,    0,      (.05, .05, .07, 1.0), (.55, .70, 1.0, 1.0), {}),
 ], dtype=blocktype_dtype)
 
 

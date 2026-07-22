@@ -78,58 +78,132 @@ def build_home(blocktypes):
 
 
 def build_sewer(blocktypes, seed=20240719):
-    """Four hallways joined end to end, generated from a fixed *seed*.
+    """Six hallways forming a rough grid, generated from a fixed *seed*.
 
-    Returns ``(level, hole_pos, stairs_pos)``. The hole is at the start of the
-    first hallway -- the ceiling opening the player falls in through -- and the
-    stairs down are at the far end of the fourth.
+    Returns ``(level, hole_pos, stairs_pos)``. The hole is at the west end of
+    Hall 1 -- the ceiling opening the player falls in through -- and the stairs
+    down are at the far end of Hall 6. The layout, in the order it is carved:
 
-    The hallways alternate horizontal and vertical, so each one turns off the
-    last, and their lengths come from the seeded generator. Bounds are not left
-    to chance: lengths are clamped so a corridor cannot run off the edge, which
-    keeps the layout valid for any seed rather than only for this one.
+    - **Hall 1** -- the long E-W spine; the player drops in at its west end.
+    - **Halls 2, 3** -- N-S corridors crossing Hall 1 at random-ish points
+      (Hall 2 at 20-50% of its length, Hall 3 at 70-90%), each running a
+      random distance both north and south of the spine.
+    - **Hall 4** -- a long E-W run at the southmost row either N-S hall reaches,
+      so it meets at least the corridor that runs furthest south.
+    - **Hall 5** -- a long E-W run at the northmost row that still meets *both*
+      N-S halls (as far north as the shorter northern arm reaches). Its east
+      end is capped by an impassable grate open to the daylight outside, which
+      streams down the hall (lights added below).
+    - **Hall 6** -- a N-S corridor dropping south off Hall 4 (and nothing else)
+      to a dead end holding the stairs down.
+
+    Lengths come from the seeded generator and are clamped so nothing runs off
+    the edge, keeping the layout valid for any seed rather than only for this
+    one. Connectivity is by construction: every hall meets the spine, directly
+    or through another hall, so the stairs are always reachable from the hole.
     """
     rng = np.random.RandomState(seed)
-    shape = (31, 71)          # rows, cols
+    shape = (91, 141)         # rows, cols; a generous canvas, cropped at the end
+    rows, cols = shape
     half = 1                  # hallways are 2*half+1 cells wide
     margin = half + 1         # never carve into the outer wall
 
     maze = Maze.filled(shape, blocktypes, 'wall', obj_name='sewer')
     blocks = maze.blocks
     path = blocktypes.id_of('path')
+    grate = blocktypes.id_of('grate')
 
-    x, y = 4, 15
-    hole_pos = (x, y)
-    blocks[y - half:y + half + 1, x - half:x + half + 1] = path
+    def carve_h(y, xa, xb):
+        lo, hi = min(xa, xb), max(xa, xb)
+        blocks[y - half:y + half + 1, lo:hi + 1] = path
 
-    for n in range(4):
-        if n % 2 == 0:                      # horizontal, always rightward
-            room = shape[1] - margin - 1 - x
-            length = min(int(rng.randint(12, 19)), room)
-            nx = x + length
-            blocks[y - half:y + half + 1, x:nx + 1] = path
-            x = nx
-        else:                               # vertical, up or down
-            step = 1 if rng.rand() < 0.5 else -1
-            room = (shape[0] - margin - 1 - y) if step > 0 else (y - margin)
-            length = min(int(rng.randint(6, 11)), room)
-            ny = y + step * length
-            lo, hi = min(y, ny), max(y, ny)
-            blocks[lo:hi + 1, x - half:x + half + 1] = path
-            y = ny
+    def carve_v(x, ya, yb):
+        lo, hi = min(ya, yb), max(ya, yb)
+        blocks[lo:hi + 1, x - half:x + half + 1] = path
 
-    stairs_pos = (x, y)
+    # Hall 1: the E-W spine. The hole drops in at the west end.
+    y1 = rows // 2
+    x_w = margin + 2
+    len1 = min(int(rng.randint(60, 90)), cols - margin - 1 - x_w)
+    x_e = x_w + len1
+    carve_h(y1, x_w, x_e)
+    hole_pos = (x_w, y1)
 
-    # Crop to the carved area plus a one-cell wall margin. The generator works
-    # on a canvas big enough for any seed, but the level that survives should
-    # not be mostly solid rock: the sight field is supersampled per maze cell,
-    # so unreachable rock costs real memory and time every frame.
-    ys, xs = np.nonzero(blocks == path)
-    y0, y1 = ys.min() - 1, ys.max() + 2
-    x0, x1 = xs.min() - 1, xs.max() + 2
-    cropped = Maze(blocks[y0:y1, x0:x1].copy(), blocktypes, obj_name='sewer')
-    shift = lambda p: (p[0] - x0, p[1] - y0)
-    return Level('sewer', cropped), shift(hole_pos), shift(stairs_pos)
+    # Halls 2, 3: N-S, crossing Hall 1 at 20-50% and 70-90% of its length, each
+    # running a random distance both north and south of the spine.
+    x2 = x_w + int(len1 * rng.uniform(0.20, 0.50))
+    x3 = x_w + int(len1 * rng.uniform(0.70, 0.90))
+    n2 = min(int(rng.randint(10, 22)), y1 - margin)
+    s2 = min(int(rng.randint(10, 22)), rows - margin - 1 - y1)
+    n3 = min(int(rng.randint(10, 22)), y1 - margin)
+    s3 = min(int(rng.randint(10, 22)), rows - margin - 1 - y1)
+    north2, south2 = y1 - n2, y1 + s2
+    north3, south3 = y1 - n3, y1 + s3
+    carve_v(x2, north2, south2)
+    carve_v(x3, north3, south3)
+
+    # Hall 4: long E-W, at the southmost point either N-S hall reaches, so it
+    # meets at least the corridor running furthest south.
+    y4 = max(south2, south3)
+    x4_w = max(margin + 1, min(x2, x3) - int(rng.randint(6, 14)))
+    x4_e = min(cols - margin - 1, max(x2, x3) + int(rng.randint(6, 14)))
+    carve_h(y4, x4_w, x4_e)
+
+    # Hall 5: long E-W, at the northmost row that still meets both N-S halls --
+    # as far north as the shorter of the two northern arms reaches -- running
+    # east past Hall 3 to a barred window on the outside.
+    y5 = max(north2, north3)
+    x5_w = min(x2, x3)
+    x5_e = min(cols - margin - 2, max(x2, x3) + int(rng.randint(12, 20)))
+    carve_h(y5, x5_w, x5_e)
+
+    # The grate capping Hall 5: '#' bars a little taller than the hallway, so it
+    # reads as a window. Impassable, but see-through (opacity 0), and cropped
+    # in below with the floor so its bright bars survive the crop.
+    grate_x = x5_e + 1
+    blocks[y5 - half - 1:y5 + half + 2, grate_x] = grate
+
+    # Hall 6: N-S, dropping south off Hall 4 (and crossing nothing else, since
+    # everything else lies at or north of Hall 4) to a dead end with the stairs.
+    x6 = (x2 + x3) // 2
+    if x6 in (x2, x3):
+        x6 += 2
+    len6 = min(int(rng.randint(8, 16)), rows - margin - 1 - y4)
+    y6 = y4 + len6
+    carve_v(x6, y4, y6)
+    stairs_pos = (x6, y6)
+
+    # Crop to the carved area (floor *and* grate) plus a one-cell wall margin.
+    # The generator works on a canvas big enough for any seed, but the level
+    # that survives should not be mostly solid rock: the sight field is
+    # supersampled per maze cell, so unreachable rock costs real memory and time
+    # every frame. The grate is included in the mask so its bright bars are not
+    # cropped away with the surrounding wall.
+    mask = (blocks == path) | (blocks == grate)
+    ys, xs = np.nonzero(mask)
+    y_lo, y_hi = ys.min() - 1, ys.max() + 2
+    x_lo, x_hi = xs.min() - 1, xs.max() + 2
+    cropped = Maze(blocks[y_lo:y_hi, x_lo:x_hi].copy(), blocktypes, obj_name='sewer')
+    shift = lambda p: (p[0] - x_lo, p[1] - y_lo)
+    level = Level('sewer', cropped)
+
+    # Daylight through the grate: the same cool sky as the hole shaft (see
+    # build_world) but a far wider aperture, pouring in and streaming down Hall
+    # 5. Two lights mirror the hole's model -- an ArrayLight for the bright
+    # patch the sky strikes (the bars and the floor just inside them), and a
+    # PointLight, much brighter than the hole's, for the wash down the hall.
+    # These belong to the map, not to anything that moves, so they are pinned
+    # here like the home level's daylight rather than carried by a portal.
+    gx, gy = shift((grate_x, y5))
+    xb = shift((x5_e - 2, 0))[0]
+    spot = np.zeros(cropped.shape, dtype='float32')
+    spot[gy - half:gy + half + 1, xb:gx + 1] = 1.0     # floor just inside the bars
+    spot[gy - half - 1:gy + half + 2, gx] = 1.0        # the barred window itself
+    sky = np.array([0.8, 0.9, 1.0])
+    cropped.add_light(ArrayLight(cropped, spot, color=sky * 100 * lx), pos=(gx, gy))
+    cropped.add_light(PointLight(cropped, color=sky * 300 * lm, brightness=1.0), pos=(gx, gy))
+
+    return level, shift(hole_pos), shift(stairs_pos)
 
 
 def build_dungeon(blocktypes):

@@ -17,8 +17,14 @@ from .graphics import CharAtlas, SpritesVisual, TextureMaskFilter, ShadowRendere
 
 
 class LayerSpritesVisual(SpritesVisual):
-    """SpritesVisual that pulls pending game-layer data just before drawing."""
+    """SpritesVisual that pulls pending game-layer data just before drawing.
+
+    Draws the world's glyphs, which are tone-mapped against the sight field by
+    a TextureMaskFilter, so it emits: its fragment shader stores each glyph's
+    emission for that filter to add on top of the reflected light.
+    """
     _layer_sync = None
+    emits = True
 
     def _prepare_draw(self, view):
         if self._layer_sync is not None:
@@ -97,6 +103,7 @@ class VispyLayerRenderer(object):
             region.sprite = layer.glyph
             region.fgcolor = layer.fgcolor
             region.bgcolor = layer.bgcolor
+            region.emission = layer.emission
             self._synced_versions[layer.name] = versions
 
 

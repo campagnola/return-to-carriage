@@ -38,16 +38,19 @@ class SpritesVisual(vispy.visuals.Visual):
         attribute float sprite;
         attribute vec4 fgcolor;
         attribute vec4 bgcolor;
+        attribute vec3 emission;
 
         varying float v_sprite;
         varying vec4 v_fgcolor;
         varying vec4 v_bgcolor;
+        varying vec3 v_emission;
         varying vec2 v_point_coord_scale;
         varying vec2 v_point_size;
 
         void main (void) {
             v_fgcolor = fgcolor;
             v_bgcolor = bgcolor;
+            v_emission = emission;
             v_sprite = sprite;
 
             // Map sprite location to the coordinate system where the size of
@@ -81,14 +84,15 @@ class SpritesVisual(vispy.visuals.Visual):
         #version 120
         varying vec4 v_fgcolor;
         varying vec4 v_bgcolor;
+        varying vec3 v_emission;
         varying float v_sprite;
         varying vec2 v_point_coord_scale;
         varying vec2 v_point_size;
-        
+
         uniform sampler2D atlas;
         uniform sampler1D atlas_map;
         uniform float n_sprites;
-        
+
         void main()
         {
             gl_FragColor = vec4(0, 0, 0, 0);
@@ -111,6 +115,7 @@ class SpritesVisual(vispy.visuals.Visual):
             }
             
             gl_FragColor = v_fgcolor * alpha + v_bgcolor * (1-alpha);
+            //EMISSION_WRITE v_emission
         }
     """
 
@@ -121,15 +126,18 @@ class SpritesVisual(vispy.visuals.Visual):
         in float sprite;
         in vec4 fgcolor;
         in vec4 bgcolor;
+        in vec3 emission;
 
         out float v_sprite;
         out vec4 v_fgcolor;
         out vec4 v_bgcolor;
+        out vec3 v_emission;
         out vec2 v_sprite_size;
 
         void main (void) {
             v_fgcolor = fgcolor;
             v_bgcolor = bgcolor;
+            v_emission = emission;
             v_sprite = sprite;
             v_sprite_size = $sprite_size;
 
@@ -146,20 +154,23 @@ class SpritesVisual(vispy.visuals.Visual):
         in float v_sprite[];
         in vec4 v_fgcolor[];
         in vec4 v_bgcolor[];
+        in vec3 v_emission[];
         in vec2 v_sprite_size[];
 
         out float f_sprite;
         out vec4 f_fgcolor;
         out vec4 f_bgcolor;
+        out vec3 f_emission;
         out vec2 point_coord;
         out vec2 point_size;
-        
+
         uniform vec2 scale;
 
         void main(void) {
             f_sprite = v_sprite[0];
             f_fgcolor = v_fgcolor[0];
             f_bgcolor = v_bgcolor[0];
+            f_emission = v_emission[0];
         
             // Map sprite location to the coordinate system where the size of
             // the sprite is specified
@@ -205,14 +216,15 @@ class SpritesVisual(vispy.visuals.Visual):
         uniform float size;
         in vec4 f_fgcolor;
         in vec4 f_bgcolor;
+        in vec3 f_emission;
         in float f_sprite;
         in vec2 point_coord;
         in vec2 point_size;
-        
+
         uniform sampler2D atlas;
         uniform sampler1D atlas_map;
         uniform float n_sprites;
-        
+
         void main()
         {
             gl_FragColor = vec4(0, 0, 0, 0);
@@ -233,9 +245,18 @@ class SpritesVisual(vispy.visuals.Visual):
             }
             
             gl_FragColor = f_fgcolor * alpha + f_bgcolor * (1-alpha);
+            //EMISSION_WRITE f_emission
         }
     """
-    
+
+    #: Whether this visual's fragment shader stores per-fragment emission for a
+    #: tone-mapping filter to read. Off by default (HUD grids draw their glyphs
+    #: raw, with no filter attached); the world layer visual turns it on -- see
+    #: LayerSpritesVisual -- so an emitter such as a torch flame glows. The
+    #: shared global the write targets is declared by TextureMaskFilter, which
+    #: is why the write is emitted only when that filter is in play.
+    emits = False
+
     def __init__(self, atlas, sprite_size=(16, 16), point_cs='pixel', method=None):
         if method is None:
             if 'GL_GEOMETRY_SHADER' in vispy.gloo.gl.__dict__:
@@ -255,7 +276,10 @@ class SpritesVisual(vispy.visuals.Visual):
         self.sprite_size = sprite_size
         self.fgcolor = np.empty((0, 4), dtype='float32')
         self.bgcolor = np.empty((0, 4), dtype='float32')
-        
+        # Linear emitted radiance per sprite (RGB, no alpha); 0 for a plain
+        # reflective glyph, non-zero for an emitter such as a torch flame.
+        self.emission = np.empty((0, 3), dtype='float32')
+
         self._atlas_tex = vispy.gloo.Texture2D(shape=(1,1,4), format='rgba', interpolation='nearest')
         self._atlas_map_tex = vispy.gloo.Texture1D(shape=(1,4), format='rgba', internalformat='rgba32f', interpolation='nearest')
         self._need_data_upload = False
@@ -269,6 +293,7 @@ class SpritesVisual(vispy.visuals.Visual):
             shaders = self.vertex_shader_3, self.fragment_shader_3, self.geometry_shader_3
         else:
             raise ValueError('method must be "point_sprite" or "geometry"')
+        shaders = tuple(self._resolve_emission(src) for src in shaders)
         vispy.visuals.Visual.__init__(self, *shaders)
 
         self._draw_mode = 'points'
@@ -276,13 +301,32 @@ class SpritesVisual(vispy.visuals.Visual):
         self.shared_program['sprite'] = vispy.gloo.VertexBuffer()
         self.shared_program['fgcolor'] = vispy.gloo.VertexBuffer()
         self.shared_program['bgcolor'] = vispy.gloo.VertexBuffer()
+        self.shared_program['emission'] = vispy.gloo.VertexBuffer()
         
         # blending must be declared here: vispy applies gl_state incrementally
         # per visual, so relying on another visual having enabled blend leaves
         # translucent cell backgrounds opaque depending on draw order
         self.update_gl_state(depth_test=True, blend=True,
                              blend_func=('src_alpha', 'one_minus_src_alpha'))
-    
+
+    def _resolve_emission(self, src):
+        """Fill in the fragment shader's ``//EMISSION_WRITE <varying>`` marker.
+
+        A visual that emits (``emits`` True) turns the marker into a statement
+        that stashes the coverage-scaled emission colour in ``sprite_emission``
+        for the tone-mapping filter to read; the filter is what declares that
+        global, so the write is emitted only when a filter is in play. A visual
+        that does not emit (the HUD grids) leaves the marker as the comment it
+        already is, so it draws its glyphs with no emission and no filter.
+        """
+        marker = '//EMISSION_WRITE '
+        i = src.find(marker)
+        if i < 0 or not self.emits:
+            return src
+        varying = src[i + len(marker):].split()[0]
+        return src.replace(marker + varying,
+                           'sprite_emission = %s * alpha;' % varying)
+
     def add_sprites(self, shape):
         """Expand to allow more sprites, return a SpriteData instance with the specified shape.
         """
@@ -301,7 +345,8 @@ class SpritesVisual(vispy.visuals.Visual):
         self.position = np.resize(self.position, (n, 3))
         self.sprite = np.resize(self.sprite, (n,))
         self.fgcolor = np.resize(self.fgcolor, (n, 4))
-        self.bgcolor = np.resize(self.bgcolor, (n, 4))        
+        self.bgcolor = np.resize(self.bgcolor, (n, 4))
+        self.emission = np.resize(self.emission, (n, 3))
         self._upload_data()
         return n1
 
@@ -318,6 +363,7 @@ class SpritesVisual(vispy.visuals.Visual):
         self.shared_program['sprite'].set_data(self.sprite.astype('float32'))
         self.shared_program['fgcolor'].set_data(self.fgcolor)
         self.shared_program['bgcolor'].set_data(self.bgcolor)
+        self.shared_program['emission'].set_data(self.emission)
         self.shared_program.vert['sprite_size'] = tuple(self.sprite_size)
             
         self._need_data_upload = False
@@ -445,6 +491,19 @@ class SpriteData(object):
         self.sprites.shared_program['bgcolor'][start:stop] = self.bgcolor.view(dtype=[('bgcolor', 'float32', 4)]).reshape(stop-start)
         self.sprites.update()
 
+    @property
+    def emission(self):
+        start, stop = self.indices
+        return self.sprites.emission[start:stop].reshape(self.shape + (3,))
+
+    @emission.setter
+    def emission(self, p):
+        self._emission = p
+        start, stop = self.indices
+        self.emission[:] = p
+        self.sprites.shared_program['emission'][start:stop] = self.emission.view(dtype=[('emission', 'float32', 3)]).reshape(stop-start)
+        self.sprites.update()
+
     def set_start(self, start):
         self.indices = (start, start + len(self))
         if self._position is not None:
@@ -452,6 +511,10 @@ class SpriteData(object):
             self.sprite = self._sprite
             self.fgcolor = self._fgcolor
             self.bgcolor = self._bgcolor
+            # optional: only emitting regions ever set it; others keep the 0
+            # the visual's arrays default to after a resize
+            if self._emission is not None:
+                self.emission = self._emission
 
     def set_shape(self, shape, inform_parent=True):
         self.shape = shape
@@ -459,6 +522,7 @@ class SpriteData(object):
         self._sprite = None
         self._fgcolor = None
         self._bgcolor = None
+        self._emission = None
         if inform_parent:
             self.sprites.data_changed_shape()
 
@@ -550,20 +614,40 @@ class TextureMaskFilter(object):
     been composited: gl_FragColor.rgb is the material color fg*alpha+bg*(1-alpha)
     (treated as linear reflectance) and gl_FragColor.a is coverage. The sight
     texture supplies linear HDR light in rgb and a display-space memory overlay
-    in a. We expose the reflected luminance (albedo*light*exposure) and run it
-    through a Reinhard curve + display gamma, so bright light physically blows a
-    surface toward white rather than capping at its albedo. Exposure is driven by
-    the player's eye adaptation (set_exposure, once per frame).
+    in a. The fragment's outgoing luminance is reflected plus emitted --
+    ``albedo*light + emission`` -- exposed and run through a Reinhard curve +
+    display gamma together, so an emitter (a torch flame) adds its own light on
+    top of what it reflects and bright light physically blows a surface toward
+    white rather than capping at its albedo. Emission rides on the sprite as
+    ``sprite_emission`` (coverage-scaled linear radiance the sprite shader
+    leaves in a shared global) and is gated by line of sight, approximated by
+    the presence of visible light: outside the player's view the sight rgb is
+    zero, so a torch behind a wall neither reflects nor glows -- only its
+    remembered overlay shows. Exposure is driven by the player's eye adaptation
+    (set_exposure, once per frame).
     """
     def __init__(self, texture, transform, scale):
         self.fshader = Function("""
+            // Coverage-scaled linear emitted radiance, written by the sprite
+            // fragment shader's main() and read here. Declared in this filter
+            // (a dependency, emitted ahead of main) so it is in scope by the
+            // time main writes it; a sprite drawn without this filter attached
+            // (the HUD grids) simply never has its value read.
+            vec3 sprite_emission;
+
             void apply_texture_mask() {
                 vec4 tex_pos = $transform(gl_FragCoord);
                 tex_pos /= tex_pos.w;
                 vec4 tex = texture2D($texture, tex_pos.xy);   // rgb = linear HDR light, a = display-space memory
                 vec3 albedo = gl_FragColor.rgb;
-                vec3 refl = albedo * tex.rgb * $exposure;     // reflected luminance, exposed (Reinhard input)
-                vec3 lit = refl / (1.0 + refl);               // Reinhard tone curve
+                vec3 refl = albedo * tex.rgb;                 // reflected luminance (linear)
+                // Emission is light the glyph makes, not light it reflects, so
+                // it bypasses the *light multiply. Gate it by whether this cell
+                // is in view: any visible light means it is, and an emitter's
+                // own source lights its own cell, so a hidden torch stays dark.
+                float vis = smoothstep(0.0, 0.02, max(tex.r, max(tex.g, tex.b)));
+                vec3 out_lum = (refl + sprite_emission * vis) * $exposure;   // exposed outgoing luminance
+                vec3 lit = out_lum / (1.0 + out_lum);         // Reinhard tone curve
                 lit = pow(lit, vec3(1.0/2.2));                // display gamma / OETF
                 vec3 mem = vec3(0.0, 0.0, tex.a);             // dim blue memory overlay (already display-encoded)
                 gl_FragColor = vec4(lit + mem, gl_FragColor.a);

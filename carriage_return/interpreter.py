@@ -123,9 +123,11 @@ class CommandInterpreter(object):
 
         The prompt captures all input while open (a modal DialogSession); when
         it completes with a ``(spell, arrow)`` pair the spell is created at the
-        player's feet, flying in the chosen direction. Cancelled with Escape --
-        or resolved to no spell -- it does nothing. The cast happens on the
-        dialog thread, the sole game-state mutator while the prompt is up.
+        player's feet, flying in the chosen direction. A self-cast spell (glo)
+        completes with ``arrow`` None and acts on the player alone. Cancelled
+        with Escape -- or resolved to no spell -- it does nothing. The cast
+        happens on the dialog thread, the sole game-state mutator while the
+        prompt is up.
         """
         session = dialogs.open_cast(self.scene, spell.SPELLS)
         session.finished.connect(
@@ -135,11 +137,13 @@ class CommandInterpreter(object):
     def _cast(self, spell_name, arrow):
         """Create *spell_name* at the player, flying toward *arrow*.
 
-        *arrow* is an arrow-key name from the prompt; ``spell.DIRECTIONS`` maps
-        it to a maze vector. The spell places itself and begins animating.
+        *arrow* is an arrow-key name from the prompt, mapped to a maze vector by
+        ``spell.DIRECTIONS``; it is None for a self-cast spell, which ignores
+        the direction. The spell places itself and begins animating.
         """
         maze, pos = self.player.location.place
-        spell.SPELLS[spell_name](self.scene, maze, pos, spell.DIRECTIONS[arrow])
+        direction = spell.DIRECTIONS[arrow] if arrow is not None else None
+        spell.SPELLS[spell_name](self.scene, maze, pos, direction)
 
     # -- read ---------------------------------------------------------------
 
