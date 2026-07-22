@@ -6,10 +6,12 @@ import weakref
 import numpy as np
 
 from .entity import Entity
+from .heat import blackbody_color
 from .inventory import Inventory
 from .light import PointLight
 from .location import Location
 from .sprite import SingleCharSprite
+from .units import K, lm
 
 
 class Item(Entity):
@@ -116,15 +118,29 @@ class Torch(Item):
     takeable = True
     mass = 0.5
     length = 30.0
-    #: The flame's colour, handed to this torch's Light at construction, on the
-    #: game's absolute light scale (home daylight = 100 per channel; see
-    #: adaptation.OUTDOOR_ILLUMINANCE). A torch is far dimmer than daylight: its
-    #: PointLight map is shadow(0..255)/dist2 * color, so with the warm 5:4:1
-    #: ratio kept, (1.0, 0.8, 0.2) blows the core toward white while the wash a
-    #: few cells out is only a few units -- well under OUTDOOR_ILLUMINANCE.
-    #: Magnitude tunable in a later visual pass; ratio sets the warm colour.
-    LIGHT_COLOR = (1.0, 0.8, 0.2)
-    fg_color = (1.0, 0.8, 0.2, 1.0)
+    #: Colour temperature of the flame, in kelvin. A wood torch burns low and
+    #: sooty -- roughly candle-hot -- so it sits well down the blackbody locus,
+    #: deep in the orange. The flame's colour, for both the glyph and the light
+    #: it casts, is derived from this rather than hand-picked, so warming or
+    #: cooling the flame is a single number (see :func:`~.heat.blackbody_color`).
+    FLAME_TEMP = 1800 * K
+
+    #: Peak per-channel luminous flux of the flame, in lumens, that the (0..1)
+    #: blackbody hue is scaled up to (see :class:`~.light.PointLight`, which
+    #: reads a point light's colour as lumens and paints the lux it produces). A
+    #: hand torch is candle-dim -- ~15 lm -- so the player leans on dark
+    #: adaptation to see much beyond the next cell. Brightness (flickered around
+    #: 1.0) scales it further. Tunable in the visual pass.
+    FLAME_FLUX = 15 * lm
+
+    #: Flame colour on the blackbody locus at FLAME_TEMP: an orange whose
+    #: brightest channel is ~1, scaled to lumens for the cast light and used
+    #: as-is (with full alpha) for the glyph.
+    _flame_color = blackbody_color(FLAME_TEMP)
+    LIGHT_COLOR = (_flame_color[0] * FLAME_FLUX,
+                   _flame_color[1] * FLAME_FLUX,
+                   _flame_color[2] * FLAME_FLUX)
+    fg_color = _flame_color + (1.0,)
 
     # Flicker. The flame's log-brightness wanders around 0 as a random walk
     # pulled back to centre (Ornstein-Uhlenbeck), so brightness is log-normal:
@@ -137,8 +153,9 @@ class Torch(Item):
     FLICKER_INTERVAL = 1 / 10.   # seconds between flame updates
 
     # class default so a torch is well-formed the moment it is created; the
-    # flame's state becomes per-instance on its first step
-    brightness = 0.01
+    # flame's state becomes per-instance on its first step. 1.0 is the nominal
+    # flux (the lumens live in LIGHT_COLOR); the flicker wanders around it.
+    brightness = 1.0
 
     # every living torch, weakly held so that dropping one lets it go
     _torches = weakref.WeakSet()

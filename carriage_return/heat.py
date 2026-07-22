@@ -29,6 +29,7 @@ import numpy as np
 from .entity import Entity
 from .light import PointLight
 from .location import Location
+from .units import lm
 
 
 #: Ambient ("room") temperature in kelvin. A cell cools toward this and, once it
@@ -89,8 +90,10 @@ class Heat(Entity):
     #: so a merely-hot fireball strike and a far hotter lightning strike both top
     #: out at a believable glow rather than the bolt washing out the screen.
     REF_TEMP = 3000.0
-    #: peak point-light brightness (a torch is ~1.0; a fireball ~10)
-    PEAK_BRIGHTNESS = 6.0
+    #: peak luminous flux of the glow, in lumens, reached at REF_TEMP: the
+    #: blackbody colour (0..1 per channel) is scaled by this, so a hot strike
+    #: peaks ~10x a torch (a torch is ~15 lm; see :class:`~.light.PointLight`).
+    PEAK_BRIGHTNESS = 150 * lm
     #: real-time cooling tick
     STEP_INTERVAL = 1 / 30.
 

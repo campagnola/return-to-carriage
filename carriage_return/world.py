@@ -35,8 +35,9 @@ LUMINANCE_WEIGHTS = np.array([0.2126, 0.7152, 0.0722], dtype='float32')
 #: deliberately independent of the player's live adaptation: a remembered area
 #: is a faint recollection, not something that should brighten just because the
 #: eye is now dark-adapted. MEMORY_STRENGTH caps how bright the recollection
-#: gets on screen.
-MEMORY_REF_LUMINANCE = 2.0
+#: gets on screen. In reflected-luminance units (cd/m^2), on the same scale as
+#: the eye's adaptation; tunable in the visual pass.
+MEMORY_REF_LUMINANCE = 0.64
 MEMORY_STRENGTH = 1.0
 
 
@@ -289,9 +290,12 @@ class Level:
             E_vis = line_of_sight * illuminance
             los_scalar = line_of_sight.max(axis=2)
 
-            # Reflected luminance per cell: what the eye and memory respond to.
+            # Reflected luminance per cell (cd/m^2): what the eye and memory
+            # respond to. illuminance is lux; a Lambertian surface of reflectance
+            # rho lit by E lux has luminance rho*E/pi, so the 1/pi turns arriving
+            # light into light leaving the surface toward the eye.
             lumE = illuminance @ LUMINANCE_WEIGHTS
-            Y_refl = self._albedo_lum[:, :, 0] * lumE
+            Y_refl = self._albedo_lum[:, :, 0] * lumE / np.pi
 
             # Drive eye adaptation from the line-of-sight-weighted mean reflected
             # luminance in a +/-5 maze-cell window around the player. Nothing

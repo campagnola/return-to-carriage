@@ -40,16 +40,16 @@ numpy, were it needed) is used.
 import math
 
 
-#: The darkest luminance the eye will dark-adapt to -- a fixed point on the
-#: shared absolute scale (not derived from the measured reference). A real eye
-#: does not open up without limit: below some level nothing more is gained and
-#: true darkness stays dark. This floor caps the exposure
-#: (``key / MIN_ADAPT_LUMINANCE`` is the most the tone-mapper will ever brighten
-#: a scene), so the dim sewer settles to "the shaft, and not much else" rather
-#: than amplifying every corner to grey. It is the main knob for how much is
-#: eventually visible in the dark: raise it to keep dark areas darker, lower it
-#: to let the eye open up further.
-MIN_ADAPT_LUMINANCE = 1.0
+#: The darkest reflected luminance the eye will dark-adapt to, in cd/m^2 -- a
+#: fixed point on the shared physical scale (not derived from the measured
+#: reference). A real eye does not open up without limit: below some level
+#: nothing more is gained and true darkness stays dark. This floor caps the
+#: exposure (``key / MIN_ADAPT_LUMINANCE`` is the most the tone-mapper will ever
+#: brighten a scene), so the dim sewer settles to "the shaft, and not much else"
+#: rather than amplifying every corner to grey. It is the main knob for how much
+#: is eventually visible in the dark: raise it to keep dark areas darker, lower
+#: it to let the eye open up further. Tunable in the visual pass.
+MIN_ADAPT_LUMINANCE = 2.0
 
 #: Clamp applied before any ``log``; a truly black scene has zero luminance and
 #: ``log(0)`` is undefined, so adaptation targets are floored to this.

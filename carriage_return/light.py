@@ -3,6 +3,21 @@ import numpy as np
 
 from .entity import Component
 from .events import Observable
+from .units import CELL_SIZE_M, m
+
+
+#: A point light floats this far above the floor plane, in metres. It replaces
+#: the old distance-squared fudge factor: the light's own cell is
+#: POINT_LIGHT_HEIGHT_M away, not zero, so 1/r^2 stays finite directly under the
+#: source. ~0.5 m reads as a torch or a glowing mob held roughly waist-high.
+POINT_LIGHT_HEIGHT_M = 0.5 * m
+
+#: Full solid angle of a sphere. An isotropic point source of luminous flux
+#: ``Phi`` (lumens) produces illuminance ``E = Phi / (4*pi*r^2)`` (lux) on a
+#: surface at distance ``r`` (metres). This 4*pi is what turns a source's lumen
+#: rating into the lux field a :class:`PointLight` paints -- see
+#: :meth:`PointLight._render_light_map`.
+FOUR_PI = 4.0 * np.pi
 
 
 class Light(Component):
@@ -244,12 +259,19 @@ class Light(Component):
 class PointLight(Light):
     """An omnidirectional point source: casts shadows, falls off as 1/r^2.
 
-    This is the light of a torch or a glowing mob. Its map is the product of a
-    shadow map cast from the light's cell (computed by the scene's visibility
-    provider) and a 1/r^2 distance falloff, tinted by the light's colour.
-    Moving the light throws both away; a colour or brightness change keeps them
-    and only rescales the cheap final map, which is what lets a flame flicker
-    without recasting shadows every frame.
+    This is the light of a torch or a glowing mob. Its ``color`` (times
+    ``brightness``) is the source's **luminous flux in lumens, per channel** --
+    a torch is ~15 lm -- and the map it paints is the **illuminance in lux** that
+    flux produces: an isotropic source spreads ``Phi`` lumens over a sphere, so a
+    surface at distance ``r`` metres receives ``E = Phi / (4*pi*r^2)`` lux (see
+    :data:`FOUR_PI`, :data:`POINT_LIGHT_HEIGHT_M`). That lux field is further
+    gated by a shadow map cast from the light's cell (the scene's visibility
+    provider), taken as a 0..1 occlusion.
+
+    Moving the light throws the shadow map and the distance falloff away; a
+    colour or brightness change keeps them and only rescales the cheap final
+    map, which is what lets a flame flicker without recasting shadows every
+    frame.
     """
 
     def __init__(self, entity, color=(1, 1, 1), brightness=1.0):
@@ -287,9 +309,21 @@ class PointLight(Light):
             maze_shape = maze.shape
             maze_pos = np.mgrid[0:maze_shape[0]*supersample, 0:maze_shape[1]*supersample].transpose(1, 2, 0)
             light_pos = np.array([[[y * supersample, x * supersample]]]) + (0.5 * supersample)
-            dist2 = ((maze_pos - light_pos) ** 2).sum(axis=2) + 0.5  # 0.5 enforces height
-            dist2 = dist2.astype('float32')
-            unscaled = self.shadow_map(slot) / dist2[:, :, None]
+
+            # Distance from the light, in metres. mgrid counts field cells; one
+            # field cell is CELL_SIZE_M / supersample metres, and the light
+            # floats POINT_LIGHT_HEIGHT_M above the floor, so its own cell sits a
+            # real (finite) distance away -- this is what the old ``+ 0.5`` fudge
+            # stood in for, now a physical height.
+            m_per_field = CELL_SIZE_M / supersample
+            d2_m = ((maze_pos - light_pos) ** 2).sum(axis=2) * (m_per_field ** 2)
+            r2_m = (d2_m + POINT_LIGHT_HEIGHT_M ** 2).astype('float32')
+
+            # lux per lumen of source flux: 1 / (4*pi*r^2), gated by the shadow
+            # map taken from its 0..255 render to a 0..1 occlusion. Multiplying
+            # by the source's per-channel lumens (``_scaled_color``) yields lux.
+            occlusion = self.shadow_map(slot) / 255.0
+            unscaled = occlusion / (FOUR_PI * r2_m[:, :, None])
             self._unscaled_light_map = unscaled
         return unscaled * self._scaled_color()[None, None, :]
 

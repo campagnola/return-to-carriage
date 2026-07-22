@@ -35,6 +35,7 @@ from .entity import Entity
 from .heat import Heat
 from .light import PointLight
 from .location import Location
+from .units import lm
 
 
 #: Arrow-key name -> unit ``(dx, dy)`` on the maze, matching the movement
@@ -177,9 +178,10 @@ class Fireball(Spell):
     """
 
     GLYPH = '*'
-    #: ~10x a torch (``Torch.LIGHT_COLOR`` = (1.0, 0.8, 0.2)) with the blue
-    #: channel lifted so the fierce core reads warm-white, not orange.
-    COLOR = (10.0, 9.0, 5.0)
+    #: Luminous flux per channel, in lumens (see :class:`~.light.PointLight`).
+    #: ~10x a torch (``Torch.LIGHT_COLOR`` = (15, 12, 3)) with the blue channel
+    #: lifted so the fierce core reads warm-white, not orange.
+    COLOR = (150*lm, 135*lm, 75*lm)
     FG = (1.0, 0.95, 0.8, 1.0)
     SPEED = 30.0            # cells / second
     STEP_INTERVAL = 1 / 60.
@@ -262,8 +264,9 @@ class Lightning(Spell):
     """
 
     LENGTH = 10
-    #: fierce cold white: blue >= green > red, very bright per symbol.
-    COLOR = (12.0, 16.0, 24.0)
+    #: Luminous flux per channel, in lumens (see :class:`~.light.PointLight`).
+    #: Fierce cold white: blue >= green > red, and brighter than a fireball.
+    COLOR = (180*lm, 240*lm, 360*lm)
     FG = (0.85, 0.92, 1.0, 1.0)
     #: how many quick flashes, picked per cast from ``randint(*FLASH_RANGE)``
     #: (2 or 3); each flash is ON_TIME lit + OFF_TIME dark (whole strobe < 1s).

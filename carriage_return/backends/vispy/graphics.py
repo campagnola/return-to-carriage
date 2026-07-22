@@ -12,8 +12,9 @@ vispy.gloo.gl.use_gl('gl+')
 #: pushed. The eye establishes its real reference from the first scene it sees
 #: (see :mod:`...adaptation`), and the renderer overrides this uniform every
 #: composite from ``player.adaptation.exposure``; this only has to keep a frame
-#: drawn before that first update from being black or blown out.
-_DEFAULT_EXPOSURE = 0.012
+#: drawn before that first update from being black or blown out. Order of
+#: key / (daylight-adapted reflected luminance ~ tens of cd/m^2).
+_DEFAULT_EXPOSURE = 0.002
 
 
 class SpritesVisual(vispy.visuals.Visual):
