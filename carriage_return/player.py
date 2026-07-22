@@ -14,7 +14,9 @@ class Player(Entity):
 
         self.inventory = Inventory(self, slot_type=str, max_weight=40, max_length=100, allowed_slots=['right hand', 'left hand'])
         self.location = Location(self, None, None)
-        self.sprite = SingleCharSprite(self, zval=-0.1, char='&', layer='actors')
+        # zval more negative than any other entity (monsters/items sit at -0.1)
+        # so the player always draws on top when co-located.
+        self.sprite = SingleCharSprite(self, zval=-0.2, char='&', layer='actors')
 
         # Eye adaptation is player state, not level state: it persists across
         # levels so it rides the player through the hole -- eyes stay daylight-

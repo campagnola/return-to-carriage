@@ -209,7 +209,7 @@ def build_world(scene):
     spot = np.zeros(sewer.shape, dtype='float32')
     spot[hy, hx] = 1.0
     bottom.lights = [
-        ArrayLight(bottom, spot, color=np.array([80, 95, 135]) * 0.1),
+        ArrayLight(bottom, spot, color=np.array([80, 90, 135]) * 0.1),
         PointLight(bottom, color=(0.06, 0.07, 0.10), brightness=1.0),
     ]
     world.link(top, bottom)
@@ -239,7 +239,7 @@ def build_world(scene):
 
     # The sewer's stairs down get a torch so they are findable from a distance;
     # the ceiling opening the player fell through is lit by its own daylight.
-    Torch(location=(sewer, sewer_stairs), scene=scene)
+    Torch(location=(sewer, (sewer_stairs[0]-1, sewer_stairs[1])), scene=scene)
 
     Monster(position=(8, 40), scene=scene, maze=dungeon)
 
