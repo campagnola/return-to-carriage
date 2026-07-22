@@ -267,7 +267,10 @@ class Level:
             illuminance = self.illuminance
             if illuminance is None:
                 lights = []
-                for light in self.lights:
+                # snapshot: a spell mob may add or remove lights from its own
+                # animation thread while this composite runs (see spell.py), so
+                # iterate a copy rather than the live list
+                for light in list(self.lights):
                     light_map = light.lightmap(supersample=self.supersample)
                     if light_map is None:
                         continue

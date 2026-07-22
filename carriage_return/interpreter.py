@@ -10,7 +10,7 @@ open through the game-side ``dialogs`` package.
 """
 import re
 
-from . import dialogs
+from . import dialogs, spell
 from .errors import ActionError
 
 
@@ -115,6 +115,31 @@ class CommandInterpreter(object):
                 self.player.drop(item)
             except ActionError as exc:
                 self.scene.write(exc.reason)
+
+    # -- cast ---------------------------------------------------------------
+
+    def cast(self, args):
+        """Open the spell-casting prompt: type a spell name, then a direction.
+
+        The prompt captures all input while open (a modal DialogSession); when
+        it completes with a ``(spell, arrow)`` pair the spell is created at the
+        player's feet, flying in the chosen direction. Cancelled with Escape --
+        or resolved to no spell -- it does nothing. The cast happens on the
+        dialog thread, the sole game-state mutator while the prompt is up.
+        """
+        session = dialogs.open_cast(self.scene, spell.SPELLS)
+        session.finished.connect(
+            lambda s: s.result is not None and self._cast(*s.result))
+        return session
+
+    def _cast(self, spell_name, arrow):
+        """Create *spell_name* at the player, flying toward *arrow*.
+
+        *arrow* is an arrow-key name from the prompt; ``spell.DIRECTIONS`` maps
+        it to a maze vector. The spell places itself and begins animating.
+        """
+        maze, pos = self.player.location.place
+        spell.SPELLS[spell_name](self.scene, maze, pos, spell.DIRECTIONS[arrow])
 
     # -- read ---------------------------------------------------------------
 

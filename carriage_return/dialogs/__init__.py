@@ -12,16 +12,17 @@ Callers get results via ``session.finished.connect(cb)`` (called on the
 dialog thread with the session); ``session.result`` is None on cancel.
 """
 from .base import CharGridPainter, Widget
+from .cast import CastPainter, CastPrompt, run_cast
 from .menu import Menu, MenuItem, MenuPainter, run_menu
 from .pager import Pager, PagerPainter, run_pager
 from .session import DialogClosed, DialogSession
 
 __all__ = [
-    'open_menu', 'open_pager',
+    'open_menu', 'open_pager', 'open_cast',
     'DialogSession', 'DialogClosed',
-    'Menu', 'MenuItem', 'Pager',
-    'run_menu', 'run_pager',
-    'MenuPainter', 'PagerPainter',
+    'Menu', 'MenuItem', 'Pager', 'CastPrompt',
+    'run_menu', 'run_pager', 'run_cast',
+    'MenuPainter', 'PagerPainter', 'CastPainter',
     'CharGridPainter', 'Widget',
 ]
 
@@ -67,6 +68,19 @@ def open_pager(scene, title, pages):
     pager = Pager(title, pages)
     painter = PagerPainter(scene, pager)
     return _run_dialog(lambda s: run_pager(s, pager), painter, title)
+
+
+def open_cast(scene, spells):
+    """Open the modal spell-casting prompt and return its (started) session.
+
+    *spells* is the ``{name: factory}`` registry the typed name is matched
+    against (see ``spell.SPELLS``). The session captures all input while open;
+    its result is ``(spell_name, arrow_key)`` on cast, or None if cancelled.
+    The caller (the interpreter) turns that into a spell in the world.
+    """
+    prompt = CastPrompt(spells)
+    painter = CastPainter(scene, prompt)
+    return _run_dialog(lambda s: run_cast(s, prompt), painter, "cast")
 
 
 def _run_dialog(body, painter, name):
