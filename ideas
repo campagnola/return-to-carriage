@@ -35,6 +35,30 @@ Add some more realism to combat / health
 
 -------------------
 
+Senses
+    - Touch - when you bump a wall, you touch it. Visually, this shows a line at the surface you touched.
+        Works in the dark, and you can ask to spread your arms out to touch nearby walls by default
+            (whisker mode is enabled by default in the dark) 
+        Line color indicates properties like temperature, roughness, wetness, and this information can give clues
+        Illusory walls will have no touch, invisible force fields will have only touch 
+    - Hearing
+        Visual indicators of direction + quaity of sound
+        Log gives more information about things you hear
+        Physical modeling of sound to decide what is audible where?
+        Maybe a map overlay mode that shows only sound?
+    - Temperature - in the status bar, can give clues about nearby presence of water, fire, magic, etc.
+        Also warns player about dangerous temperature situations
+    - Magic - your experience with your own magic allows you to sense other magic at a distance, like hearing
+    - Smell - shows up in the log for changes that cross perception + salience
+        Player can ask about smell, in which case you get details that are above perception and below salience
+        Smells that are either unfamiliar just below perception might come out muddled 
+            "..and something else.. is that oregano?" (no, it's kobold musk)
+        Unfamiliar smells can become familiar with experience
+    
+
+
+-------------------
+
 
 Mobs
     - Generally sparse, but potentially more dangerous
@@ -56,6 +80,8 @@ More realism to skills / memory
     - Spells / potions can improve your memory
         - magic maps draw themselves as you explore and never forget
         - SJ "Enlightenment" & "Expanded Awareness" type spells could have a wicked visual effect e.g. enlightened areas expanding out from player location
+    
+
 
 
 -------------------
@@ -88,7 +114,6 @@ Detail and perception
     - Caracters with higher perception will notice more detail, even without manually looking
     - features in the environment have both visibility (how likely you are to notice) and salience (how likely you are to care). 
         whether a feature shows up in the event log depends on (visibility * perception) * salience
-    
 
 ---------------------
 
@@ -201,6 +226,7 @@ Graphics
 
     Primarily text on a grid, especially early in the game
     Dynamic lighting (torches flicker, fireballs cast moving shadows, etc)
+    Realistic lighting model + visual adaptation to light/dark
     particles for magic effects / explosions
     Depth? 
         ground level terrain can be 3D

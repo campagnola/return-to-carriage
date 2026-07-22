@@ -1,3 +1,4 @@
+from .adaptation import EyeAdaptation
 from .entity import Entity
 from .errors import ActionError
 from .inventory import Inventory
@@ -14,6 +15,12 @@ class Player(Entity):
         self.inventory = Inventory(self, slot_type=str, max_weight=40, max_length=100, allowed_slots=['right hand', 'left hand'])
         self.location = Location(self, None, None)
         self.sprite = SingleCharSprite(self, zval=-0.1, char='&', layer='actors')
+
+        # Eye adaptation is player state, not level state: it persists across
+        # levels so it rides the player through the hole -- eyes stay daylight-
+        # adapted for the first moment in the dark sewer. Default init starts
+        # fully adapted to outdoor light (OUTDOOR_ADAPT_LUMINANCE).
+        self.adaptation = EyeAdaptation()
 
         scene.player = self
 

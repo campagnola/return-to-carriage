@@ -116,8 +116,14 @@ class Torch(Item):
     takeable = True
     mass = 0.5
     length = 30.0
-    #: the flame's colour, handed to this torch's Light at construction
-    LIGHT_COLOR = (10.0, 8.0, 2.0)
+    #: The flame's colour, handed to this torch's Light at construction, on the
+    #: game's absolute light scale (home daylight = 100 per channel; see
+    #: adaptation.OUTDOOR_ILLUMINANCE). A torch is far dimmer than daylight: its
+    #: PointLight map is shadow(0..255)/dist2 * color, so with the warm 5:4:1
+    #: ratio kept, (1.0, 0.8, 0.2) blows the core toward white while the wash a
+    #: few cells out is only a few units -- well under OUTDOOR_ILLUMINANCE.
+    #: Magnitude tunable in a later visual pass; ratio sets the warm colour.
+    LIGHT_COLOR = (1.0, 0.8, 0.2)
     fg_color = (1.0, 0.8, 0.2, 1.0)
 
     # Flicker. The flame's log-brightness wanders around 0 as a random walk
@@ -126,13 +132,13 @@ class Torch(Item):
     # Working in log units matters because the scene tone-maps lighting with a
     # log as well, so FLICKER_DEPTH lands on screen as a roughly proportional
     # brightness swing rather than being compressed away.
-    FLICKER_DEPTH = 1.0     # std dev of log-brightness per kick
-    FLICKER_RATE = 4.0      # 1/s; how quickly it wanders (higher = twitchier)
+    FLICKER_DEPTH = 2.0     # std dev of log-brightness per kick
+    FLICKER_RATE = 2.0      # 1/s; how quickly it wanders (higher = twitchier)
     FLICKER_INTERVAL = 1 / 10.   # seconds between flame updates
 
     # class default so a torch is well-formed the moment it is created; the
     # flame's state becomes per-instance on its first step
-    _log_brightness = 0.0
+    brightness = 0.01
 
     # every living torch, weakly held so that dropping one lets it go
     _torches = weakref.WeakSet()
@@ -141,7 +147,7 @@ class Torch(Item):
 
     def __init__(self, *args, **kwds):
         Item.__init__(self, *args, **kwds)
-        self.light = PointLight(self, color=self.LIGHT_COLOR)
+        self.light = PointLight(self, color=self.LIGHT_COLOR, brightness=self.brightness)
         with Torch._flicker_lock:
             Torch._torches.add(self)
             if Torch._flicker_thread is None:
@@ -174,16 +180,14 @@ class Torch(Item):
             return
 
         # depth and rate are read per torch, so a subclass can burn differently
-        log_b = np.array([t._log_brightness for t in lit])
+        base_brightness = np.array([t.brightness for t in lit])
         depth = np.array([t.FLICKER_DEPTH for t in lit])
         rate = np.array([t.FLICKER_RATE for t in lit])
 
-        k = np.minimum(rate * dt, 1.0)
-        log_b += k * (np.random.normal(0, 1, size=len(lit)) * depth - log_b)
-
-        for torch, lb in zip(lit, log_b):
-            torch._log_brightness = lb
-            torch.light.brightness = float(np.exp(lb))  # pushes redraw + invalidation
+        new_brightness = base_brightness * depth ** np.random.normal(size=len(lit))
+        next_brightness = base_brightness + (new_brightness - base_brightness) * (1 - np.exp(-rate * dt))
+        for torch, nb in zip(lit, next_brightness):
+            torch.light.brightness = nb
 
 
 

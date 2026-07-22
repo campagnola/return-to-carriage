@@ -169,7 +169,11 @@ class VispySceneRenderer(object):
             self.txt.detach(self.sight_filter)
 
         ms = level.maze.shape
-        self.sight_texture = vispy.gloo.Texture2D(shape=level.field_shape, format='rgb',
+        # RGBA float: rgb carry linear HDR light (los*illuminance, may exceed 1),
+        # a carries the display-space memory overlay. The tone map that turns
+        # this into displayable color lives in TextureMaskFilter (per fragment).
+        self.sight_texture = vispy.gloo.Texture2D(shape=(*level.field_shape[:2], 4), format='rgba',
+                                                  internalformat='rgba32f',
                                                   interpolation='linear', wrapping='repeat')
         tr = self.txt.transforms.get_transform('framebuffer', 'visual')
         self.sight_filter = TextureMaskFilter(self.sight_texture, tr, scale=(1./ms[1], 1./ms[0]))
@@ -197,6 +201,25 @@ class VispySceneRenderer(object):
         """
         level = self._level
         level.update_sight(dt, self.scene.player)
+
+        # exposure tracks the player's eye adaptation and changes every frame,
+        # so push it to the tone-mapping filter each draw (cheap uniform set).
+        # The field texture itself only re-uploads on a version change below.
+        # When there is no player, keep the last exposure -- the field rgb is
+        # ~0 in that case anyway, so only the memory overlay shows.
+        player = self.scene.player
+        if player is not None:
+            self.sight_filter.set_exposure(player.adaptation.exposure)
+            # Adaptation is time-based, so it must keep advancing even when the
+            # player stands still and nothing else marks the canvas dirty. While
+            # the eye is still settling, ask for another frame; this self-limits
+            # -- once adaptation reaches its target (settling clears) the scene
+            # goes idle again. mark_dirty only sets a flag the 60 Hz frame tick
+            # consumes, so this is not the forbidden "schedule a draw inside a
+            # draw" (which is why the sight field itself is never observed).
+            if player.adaptation.settling:
+                self.ui.mark_dirty()
+
         sight = level.sight
         if sight.version != self._sight_version:
             self.sight_texture.set_data(sight.data)

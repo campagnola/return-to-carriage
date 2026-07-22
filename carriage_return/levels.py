@@ -18,6 +18,7 @@ Game-side module: no rendering library may be imported here.
 """
 import numpy as np
 
+from .adaptation import OUTDOOR_ILLUMINANCE
 from .light import AmbientLight, ArrayLight, PointLight
 from .maze import Maze
 from .monster import Monster
@@ -71,7 +72,13 @@ def build_home(blocktypes):
     # The even wash of daylight through the roof. A map light: it belongs to
     # the room, not to anything that moves, and needs no scene -- it announces
     # any change through its own signal, which the level handles.
-    maze.add_light(AmbientLight(maze, color=(8000, 8000, 8000)), pos=(0, 0))
+    #
+    # This is the reference level of the whole absolute light scale: home
+    # daylight is OUTDOOR_ILLUMINANCE per channel, and the eye starts fully
+    # adapted to exactly this (see adaptation.OUTDOOR_ADAPT_LUMINANCE). Every
+    # other light in the game is chosen relative to it -- the sewer hole shaft's
+    # scattered wash is ~1/100 of this. Tunable in a later visual pass.
+    maze.add_light(AmbientLight(maze, color=(OUTDOOR_ILLUMINANCE,) * 3), pos=(0, 0))
 
     return level, hole_pos
 
@@ -179,26 +186,56 @@ def build_world(scene):
                   enterable=False, char=None)
 
     # The daylight is the sewer hole's own light, carried by the end like a
-    # torch's flame: a bright spot where the shaft strikes the floor (an array
-    # light on that one cell), and a dim, shadow-casting 1/r^2 wash for the
-    # light that hit the floor there and scattered down the corridor.
+    # torch's flame. Physically it is a thin shaft of the *same* sun that lights
+    # home, coming through a small hole in the ceiling: the one cell the beam
+    # strikes is nearly outdoor-bright, while the fraction that scatters off that
+    # floor patch and bounces down the corridor is only ~1/100 of it. That 100:1
+    # is the whole point of the absolute scale -- home daylight is ~100x the
+    # light that reaches you down the hole. Two lights express it:
+    #
+    #  - an ArrayLight for the beam spot: value 1.0 on the struck cell, tinted a
+    #    cool daylight blue whose luminance (0.2126R + 0.7152G + 0.0722B) lands
+    #    near OUTDOOR_ILLUMINANCE, so the spot reads as bright as open daylight.
+    #    (80, 95, 135) -> luminance ~95 ~= OUTDOOR_ILLUMINANCE.
+    #  - a PointLight for the scattered wash: a dim, shadow-casting 1/r^2 fall
+    #    that should land around OUTDOOR_ILLUMINANCE/100 (~1.0) a few cells out.
+    #    Its map is shadow_map(0..255)/dist2 * color, dist2 ~= (cells*ss)^2 + 0.5
+    #    (ss=4), so a few cells out shadow/dist2 is order ~5-15; a cool color of
+    #    ~0.06-0.10 per channel gives ~0.3-1.5 there, i.e. ~home/100.
+    #
+    # All values here are starting points on the shared scale, tunable in a
+    # later visual pass; only the exact 100:1 home:hole ratio is load-bearing.
     hx, hy = sewer_hole
     spot = np.zeros(sewer.shape, dtype='float32')
-    spot[hy, hx] = 6000000.0
+    spot[hy, hx] = 1.0
     bottom.lights = [
-        ArrayLight(bottom, spot, color=(4000, 5000, 8000)),
-        PointLight(bottom, color=(10, 20, 100), brightness=1.0),
+        ArrayLight(bottom, spot, color=np.array([80, 95, 135]) * 0.1),
+        PointLight(bottom, color=(0.06, 0.07, 0.10), brightness=1.0),
     ]
     world.link(top, bottom)
 
     # Stairs from the sewer down to the dungeon; each end draws its own glyph.
-    world.link(StairsDown(location=(sewer, sewer_stairs), scene=scene),
-               StairsUp(location=(dungeon, dungeon_arrival), scene=scene))
+    world.link(
+        StairsDown(location=(sewer, sewer_stairs), scene=scene),
+        StairsUp(location=(dungeon, dungeon_arrival), scene=scene)
+    )
+
+    world.link(
+       StairsDown(location=(home_level.maze, (30, 30)), scene=scene),
+       StairsUp(location=(dungeon, (9, 7)), scene=scene)
+    )
+
 
     Scroll(location=(dungeon, (5, 5)), scene=scene)
     torches = [Torch(location=(dungeon, pos), scene=scene)
                for pos in TORCH_POSITIONS]
-    torches[0].light.color = (10000, 5000, 1000)
+    # A brighter, warmer torch than the standard one (Torch.LIGHT_COLOR), on
+    # the same absolute scale. Its PointLight map is shadow(0..255)/dist2 * color
+    # with dist2 ~= (cells*ss)^2 + 0.5 (ss=4), so a couple cells out the factor
+    # is order ~4-15; keeping the historical warm 10:5:1 ratio, (5.0, 2.5, 0.5)
+    # gives a near-torch illuminance of order ~OUTDOOR_ILLUMINANCE/5 (~20) while
+    # the core blows toward white. Warm R>G>B; tunable in a later visual pass.
+    torches[0].light.color = (5.0, 2.5, 0.5)
 
     # The sewer's stairs down get a torch so they are findable from a distance;
     # the ceiling opening the player fell through is lit by its own daylight.

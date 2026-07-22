@@ -48,12 +48,19 @@ def test_update_sight(scene):
     v0 = scene.sight.version
     scene.update_sight(1/60.)
     assert scene.sight.version == v0 + 1
-    assert scene.sight.data.shape == scene.field_shape
+    # sight packs RGBA now: RGB linear HDR light, A a memory overlay
+    assert scene.sight.data.shape == scene.field_shape[:2] + (4,)
+    # the fixture is lit and fully visible, so the HDR RGB is non-zero
     assert scene.sight.data.max() > 0
 
 
 def test_memory_decay_is_time_based(scene):
     scene.update_sight(1/60.)
+
+    # update_sight now re-accumulates max(memory, current_lit) BEFORE decaying,
+    # so to isolate pure decay we dominate the accumulation: set memory far
+    # above any lit value, so the max() keeps it and only the decay acts.
+    scene.memory[:] = 1e6
     mem = scene.memory.copy()
 
     # one 2-second step decays the same as two 1-second steps
@@ -62,7 +69,7 @@ def test_memory_decay_is_time_based(scene):
     assert np.allclose(scene_mem_a, scene_mem_b)
 
     scene.update_sight(2.0)
-    assert np.allclose(scene.memory[:, :, :2], scene_mem_a[:, :, :2])
+    assert np.allclose(scene.memory, scene_mem_a)
 
 
 def test_write_message(scene):
@@ -121,14 +128,14 @@ def test_set_level_swaps_maze_and_resizes_fields(scene):
 
     assert scene.maze is maze
     assert scene.field_shape == (12 * ss, 20 * ss, 3)
-    assert scene.memory.shape == scene.field_shape
+    assert scene.memory.shape == scene.field_shape[:2]
     assert scene.line_of_sight.shape == scene.field_shape
-    assert scene.sight.data.shape == scene.field_shape
+    assert scene.sight.data.shape == scene.field_shape[:2] + (4,)
 
     # the sight pipeline still runs against the new level
     scene.player.location.update(maze, [5, 5])
     scene.update_sight(1 / 60.)
-    assert scene.sight.data.shape == scene.field_shape
+    assert scene.sight.data.shape == scene.field_shape[:2] + (4,)
 
 
 def test_set_level_frees_the_previous_scenery(scene):

@@ -252,7 +252,7 @@ class PointLight(Light):
     without recasting shadows every frame.
     """
 
-    def __init__(self, entity, color=(10, 10, 10), brightness=1.0):
+    def __init__(self, entity, color=(1, 1, 1), brightness=1.0):
         # Position-dependent caches, dropped together whenever the light moves
         # (see _invalidate_position). The shadow map and the unscaled
         # (shadow * falloff) map survive a colour or brightness change; only

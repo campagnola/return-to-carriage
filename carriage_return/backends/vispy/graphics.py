@@ -4,6 +4,10 @@ import vispy.visuals, vispy.scene, vispy.gloo
 from vispy.visuals.shaders import ModularProgram, Function
 from vispy.visuals.transforms import STTransform, NullTransform
 
+# adaptation.py is pure game-side (no rendering imports); safe to import here to
+# keep the default exposure tied to the same outdoor-light reference the eye uses.
+from ...adaptation import OUTDOOR_ADAPT_LUMINANCE
+
 
 # load support for opengl 3 features
 vispy.gloo.gl.use_gl('gl+')
@@ -536,17 +540,36 @@ class CharAtlas(object):
         
 
 class TextureMaskFilter(object):
+    """Tone-maps the sprites against the level's sight field.
+
+    Tone mapping lives here, per fragment, after the sprite's albedo color has
+    been composited: gl_FragColor.rgb is the material color fg*alpha+bg*(1-alpha)
+    (treated as linear reflectance) and gl_FragColor.a is coverage. The sight
+    texture supplies linear HDR light in rgb and a display-space memory overlay
+    in a. We expose the reflected luminance (albedo*light*exposure) and run it
+    through a Reinhard curve + display gamma, so bright light physically blows a
+    surface toward white rather than capping at its albedo. Exposure is driven by
+    the player's eye adaptation (set_exposure, once per frame).
+    """
     def __init__(self, texture, transform, scale):
         self.fshader = Function("""
             void apply_texture_mask() {
                 vec4 tex_pos = $transform(gl_FragCoord);
                 tex_pos /= tex_pos.w;
-                vec4 mask = texture2D($texture, tex_pos.xy);
-                mask.w = 1.0;
-                gl_FragColor = gl_FragColor * mask;
+                vec4 tex = texture2D($texture, tex_pos.xy);   // rgb = linear HDR light, a = display-space memory
+                vec3 albedo = gl_FragColor.rgb;
+                vec3 refl = albedo * tex.rgb * $exposure;     // reflected luminance, exposed (Reinhard input)
+                vec3 lit = refl / (1.0 + refl);               // Reinhard tone curve
+                lit = pow(lit, vec3(1.0/2.2));                // display gamma / OETF
+                vec3 mem = vec3(0.0, 0.0, tex.a);             // dim blue memory overlay (already display-encoded)
+                gl_FragColor = vec4(lit + mem, gl_FragColor.a);
             }
         """)
         self.fshader['texture'] = texture
+        # sane default exposure so the first frame (before any update pushes the
+        # player's adaptation) is valid: key / OUTDOOR_ADAPT_LUMINANCE, i.e. an
+        # eye fully adapted to outdoor light.
+        self.fshader['exposure'] = 0.18 / OUTDOOR_ADAPT_LUMINANCE
         self.scale_tr = STTransform(scale=scale) * STTransform(translate=(0.5, 0.5))
         self.fshader['transform'] = self.scale_tr * transform
         
@@ -555,6 +578,10 @@ class TextureMaskFilter(object):
         # remove the same object again -- calling self.fshader() a second time
         # would build a different expression and remove nothing
         self._fshader_expr = None
+
+    def set_exposure(self, value):
+        """Set the Reinhard exposure scalar (key / adaptation_luminance)."""
+        self.fshader['exposure'] = float(value)
 
     def _attach(self, visual):
         self._visual = visual

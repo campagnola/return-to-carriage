@@ -186,9 +186,9 @@ def test_changing_level_resizes_the_sight_fields(played_world):
     scene.set_level(world.levels['big'])
 
     assert scene.field_shape == (20 * ss, 30 * ss, 3)
-    assert scene.memory.shape == scene.field_shape
+    assert scene.memory.shape == scene.field_shape[:2]
     assert scene.line_of_sight.shape == scene.field_shape
-    assert scene.sight.data.shape == scene.field_shape
+    assert scene.sight.data.shape == scene.field_shape[:2] + (4,)
 
 
 def test_entities_on_other_levels_are_hidden(played_world):
@@ -318,15 +318,19 @@ def test_compositing_a_level_the_player_has_left_uses_its_own_shape():
     player.location.update(small.maze, (1, 1))
 
     big.memory[:] = 0.25                   # something remembered on the big level
-    remembered = big.memory.copy()         # update_sight decays memory in place
 
     # the renderer's situation mid-transition: showing 'big' while the player
     # is still on 'small'. This used to raise "operands could not be broadcast
-    # together" from big.line_of_sight * small.norm_light.
+    # together" when the big level's fields were composited against the small
+    # level's lighting; each level now derives every shape from itself.
     big.update_sight(1 / 60., player)
 
-    assert big.sight.data.shape == big.field_shape
-    assert np.allclose(big.sight.data, remembered)   # fully blocked -> memory only
+    # sight packs RGBA: [0:3] linear HDR visible light, [3] a memory overlay.
+    # The player is elsewhere, so the view is fully blocked: no current light,
+    # and only the level's OWN (correctly shaped) memory shows through.
+    assert big.sight.data.shape == big.field_shape[:2] + (4,)
+    assert not big.sight.data[..., :3].any()   # fully blocked -> no current light
+    assert big.sight.data[..., 3].any()        # its own remembered field shows
 
 
 def test_a_level_keeps_its_own_memory(played_world):
@@ -353,7 +357,7 @@ def test_sight_fields_are_sized_to_their_own_level(played_world):
         expected = (level.maze.shape[0] * ss, level.maze.shape[1] * ss, 3)
         assert level.field_shape == expected
         assert level.line_of_sight.shape == expected
-        assert level.memory.shape == expected
+        assert level.memory.shape == expected[:2]
 
 
 def test_an_unlit_level_renders_dark_rather_than_failing(played_world):
@@ -362,7 +366,7 @@ def test_an_unlit_level_renders_dark_rather_than_failing(played_world):
 
     scene.update_sight(1 / 60.)
 
-    assert scene.sight.data.shape == scene.field_shape
+    assert scene.sight.data.shape == scene.field_shape[:2] + (4,)
     assert not scene.sight.data.any()
 
 
