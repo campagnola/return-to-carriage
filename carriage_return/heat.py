@@ -84,7 +84,7 @@ class Heat(Entity):
     #: of cooling). A few of these and the glow is gone -- it lingers "a while".
     COOLING_TAU = 1.5
     #: stop and self-destruct once within this many kelvin of ambient
-    DESTROY_MARGIN = 40.0
+    DESTROY_MARGIN = 10.0
     #: brightness reaches its peak at this temperature and saturates above it,
     #: so a merely-hot fireball strike and a far hotter lightning strike both top
     #: out at a believable glow rather than the bolt washing out the screen.

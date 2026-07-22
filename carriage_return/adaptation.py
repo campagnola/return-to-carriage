@@ -4,22 +4,24 @@ Every level's light is expressed on one shared, physical scale where home
 daylight is the reference and the light coming down the hole is a small fraction
 of it. Because the scale is absolute, "home is a hundred times brighter than the
 sewer" is a fact about the numbers, not an accident of per-level renormalization.
-Two things follow from an absolute scale, and both live here:
+The scale's anchor -- how bright home daylight actually is -- is a level-design
+fact and lives with the lights that realise it (see :mod:`.levels`), not here.
 
-- A reference point for that scale. :data:`OUTDOOR_ILLUMINANCE` and
-  :data:`REFERENCE_ALBEDO` are the one place the daylight reference is written
-  down; :data:`OUTDOOR_ADAPT_LUMINANCE` is the reflected luminance the eye is
-  adapted to when standing in open daylight. Other modules (the level builders,
-  the default :class:`EyeAdaptation`) import these constants rather than
-  spelling out magic numbers, so "the player starts adapted to outdoor light"
-  and "home ambient is this bright" cannot drift apart.
+What lives here is a model of the viewer's eye. :class:`EyeAdaptation` holds the
+one scalar that says how bright the world *currently feels* -- the luminance the
+eye has settled to. It is not part of the physical light; it is the observer.
+That is why it rides the player (see :class:`~.player.Player`) rather than any
+level: it must persist as the player falls through the hole, so the eyes stay
+daylight-adapted for the first moment in the dark and only slowly open up.
 
-- A model of the viewer's eye. :class:`EyeAdaptation` holds the one scalar that
-  says how bright the world *currently feels* -- the luminance the eye has
-  settled to. It is not part of the physical light; it is the observer. That is
-  why it rides the player (see :class:`~.player.Player`) rather than any level:
-  it must persist as the player falls through the hole, so the eyes stay
-  daylight-adapted for the first moment in the dark and only slowly open up.
+The eye's reference is not hardcoded: it is *established from the first scene
+luminance it is ever shown* -- the first :meth:`~EyeAdaptation.adapt` call, when
+adaptation is first needed. Because the player starts in home daylight, that
+first measurement is the daylight the eye is adapted to, so "the player starts
+adapted to outdoor light" is a measured fact -- exactly consistent with what the
+renderer draws -- rather than a stand-in albedo times a magic illuminance. The
+dark-adaptation floor (:data:`MIN_ADAPT_LUMINANCE`) is a fixed point on the same
+absolute scale, so it does not move with the measured reference.
 
 This module is the CPU half of the tone-reproduction chain. It produces one
 number -- :attr:`EyeAdaptation.exposure` -- that the GPU Reinhard tone-mapper
@@ -38,30 +40,16 @@ numpy, were it needed) is used.
 import math
 
 
-#: Home daylight illuminance, per channel, in arbitrary "lux-like" units. This
-#: is the reference the whole light scale is pinned to; every other light in the
-#: game is chosen relative to it (the hole shaft is ~1/100 of this).
-OUTDOOR_ILLUMINANCE = 100.0
-
-#: A representative material reflectance, used only to relate an illuminance
-#: (light arriving at a surface) to a luminance (light leaving it toward the
-#: eye). Real surfaces vary; this stands in for a "typical" one so the eye's
-#: adaptation target has a physical meaning without needing a real albedo map.
-REFERENCE_ALBEDO = 0.15
-
-#: The reflected luminance the eye is adapted to outdoors -- daylight bounced off
-#: a representative surface. This is the default the eye starts at, so the player
-#: begins fully adapted to open daylight.
-OUTDOOR_ADAPT_LUMINANCE = OUTDOOR_ILLUMINANCE * REFERENCE_ALBEDO
-
-#: The darkest luminance the eye will dark-adapt to. A real eye does not open up
-#: without limit: below some level nothing more is gained and true darkness
-#: stays dark. This floor caps the exposure (``key / MIN_ADAPT_LUMINANCE`` is the
-#: most the tone-mapper will ever brighten a scene), so the dim sewer settles to
-#: "the shaft, and not much else" rather than amplifying every corner to grey.
-#: It is the main knob for how much is eventually visible in the dark: raise it
-#: to keep dark areas darker, lower it to let the eye open up further.
-MIN_ADAPT_LUMINANCE = OUTDOOR_ADAPT_LUMINANCE / 50.0
+#: The darkest luminance the eye will dark-adapt to -- a fixed point on the
+#: shared absolute scale (not derived from the measured reference). A real eye
+#: does not open up without limit: below some level nothing more is gained and
+#: true darkness stays dark. This floor caps the exposure
+#: (``key / MIN_ADAPT_LUMINANCE`` is the most the tone-mapper will ever brighten
+#: a scene), so the dim sewer settles to "the shaft, and not much else" rather
+#: than amplifying every corner to grey. It is the main knob for how much is
+#: eventually visible in the dark: raise it to keep dark areas darker, lower it
+#: to let the eye open up further.
+MIN_ADAPT_LUMINANCE = 1.0
 
 #: Clamp applied before any ``log``; a truly black scene has zero luminance and
 #: ``log(0)`` is undefined, so adaptation targets are floored to this.
@@ -119,19 +107,22 @@ class EyeAdaptation:
     shader multiplies reflected luminance by before the Reinhard curve.
     """
 
-    def __init__(self, luminance=OUTDOOR_ADAPT_LUMINANCE,
-                 tau_light=TAU_LIGHT_ADAPT, tau_dark=TAU_DARK_ADAPT, key=ADAPT_MIDDLE_GREY,
-                 min_luminance=MIN_ADAPT_LUMINANCE):
-        """Start the eye adapted to *luminance*.
+    def __init__(self, tau_light=TAU_LIGHT_ADAPT, tau_dark=TAU_DARK_ADAPT,
+                 key=ADAPT_MIDDLE_GREY, min_luminance=MIN_ADAPT_LUMINANCE):
+        """Create an eye with no reference yet.
 
-        :param luminance: the reflected luminance the eye begins settled to.
-            Defaults to :data:`OUTDOOR_ADAPT_LUMINANCE`, so a freshly built eye
-            is fully daylight-adapted -- the correct state for a player who has
-            not yet fallen down the hole.
+        The eye holds no adaptation luminance until it is first shown a scene:
+        the first :meth:`adapt` (or :meth:`snap_to`) call establishes it from
+        the measured scene luminance. Because the player starts in home
+        daylight, that first measurement is the daylight the eye is adapted to.
+        Until it happens :attr:`luminance`/:attr:`exposure` have no defined value
+        and raise if read -- there is nothing to expose to yet.
+
         :param min_luminance: the darkest luminance the eye will dark-adapt to
-            (:data:`MIN_ADAPT_LUMINANCE`). The adaptation luminance -- and so the
-            adaptation *target* -- is floored here, capping exposure at
-            ``key / min_luminance`` so true darkness stays dark.
+            (:data:`MIN_ADAPT_LUMINANCE`) -- a fixed point on the absolute scale,
+            so it is known now rather than measured. The adaptation luminance --
+            and so the adaptation *target* -- is floored here, capping exposure
+            at ``key / min_luminance`` so true darkness stays dark.
         :param tau_light: light-adaptation time constant in seconds (~1 s), used
             when the surroundings are *brighter* than the eye is set for so the
             adapted luminance rises and the screen dims. The eye closes
@@ -149,10 +140,10 @@ class EyeAdaptation:
         # Floor on dark adaptation, in the log domain. Kept as a log so it can
         # clamp log_la and the adaptation target directly.
         self.log_min = math.log(max(min_luminance, _LUMINANCE_FLOOR))
-        # Log domain (see class docstring): store log of the adaptation
-        # luminance so relaxation is constant-stops-per-second. Never below the
-        # dark-adaptation floor.
-        self.log_la = max(math.log(max(luminance, _LUMINANCE_FLOOR)), self.log_min)
+        # Log domain (see class docstring): log of the adaptation luminance, so
+        # relaxation is constant-stops-per-second. None until the first sight
+        # establishes it (see adapt/snap_to); never below the floor thereafter.
+        self.log_la = None
 
         #: True while the eye is still more than _SETTLE_EPS (log units) from
         #: its target. The renderer reads this to keep repainting an otherwise
@@ -177,7 +168,14 @@ class EyeAdaptation:
         Also updates :attr:`settling` to whether the eye is still more than
         ``_SETTLE_EPS`` from its target, so the renderer can keep the frame loop
         alive until adaptation has caught up even when nothing else is changing.
+
+        The very first call establishes the eye's reference from
+        *scene_luminance* -- the eye starts adapted to whatever it first sees --
+        and returns without easing: there is no prior state to relax from.
         """
+        if self.log_la is None:
+            self.snap_to(scene_luminance)
+            return
         if dt <= 0:
             return
         # Clamp the target to the dark-adaptation floor, not just log_la after
@@ -193,8 +191,9 @@ class EyeAdaptation:
     def snap_to(self, scene_luminance):
         """Instantly adapt the eye to *scene_luminance* -- no easing.
 
-        Used where a settled eye is wanted immediately rather than after ~20 s:
-        initialising the player at game start, and the deterministic offscreen
+        Used where a fully-settled eye is wanted immediately rather than after
+        ~20 s: it both establishes the eye's reference on the first sight (the
+        no-easing branch of :meth:`adapt`) and serves the deterministic offscreen
         screenshot path, where every capture must be fully adapted to its own
         scene so results do not depend on how many frames were run first.
         """
@@ -203,7 +202,11 @@ class EyeAdaptation:
 
     @property
     def luminance(self):
-        """The luminance the eye is currently adapted to (linear, not log)."""
+        """The luminance the eye is currently adapted to (linear, not log).
+
+        Raises before the eye has been shown a scene: there is no reference to
+        report until the first :meth:`adapt`/:meth:`snap_to` establishes one.
+        """
         return math.exp(self.log_la)
 
     @property

@@ -184,7 +184,7 @@ class Fireball(Spell):
     SPEED = 30.0            # cells / second
     STEP_INTERVAL = 1 / 60.
     #: the wall it hits glows fresh-ember hot (a full-brightness orange glow)
-    STRIKE_TEMP = 1500.0
+    STRIKE_TEMP = 1000.0
 
     def __init__(self, scene, maze, pos, direction, start=True):
         Spell.__init__(self, scene, maze, entity_type='mob.spell.fireball',

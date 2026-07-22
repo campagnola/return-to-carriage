@@ -20,8 +20,10 @@ class Player(Entity):
 
         # Eye adaptation is player state, not level state: it persists across
         # levels so it rides the player through the hole -- eyes stay daylight-
-        # adapted for the first moment in the dark sewer. Default init starts
-        # fully adapted to outdoor light (OUTDOOR_ADAPT_LUMINANCE).
+        # adapted for the first moment in the dark sewer. It starts with no
+        # reference and establishes one from the first scene it is shown; since
+        # the player begins in home daylight, that first sight is what "adapted
+        # to outdoor light" means (see adaptation.EyeAdaptation).
         self.adaptation = EyeAdaptation()
 
         scene.player = self

@@ -4,13 +4,16 @@ import vispy.visuals, vispy.scene, vispy.gloo
 from vispy.visuals.shaders import ModularProgram, Function
 from vispy.visuals.transforms import STTransform, NullTransform
 
-# adaptation.py is pure game-side (no rendering imports); safe to import here to
-# keep the default exposure tied to the same outdoor-light reference the eye uses.
-from ...adaptation import OUTDOOR_ADAPT_LUMINANCE
-
 
 # load support for opengl 3 features
 vispy.gloo.gl.use_gl('gl+')
+
+#: Bootstrap exposure for the shader before the player's eye adaptation is ever
+#: pushed. The eye establishes its real reference from the first scene it sees
+#: (see :mod:`...adaptation`), and the renderer overrides this uniform every
+#: composite from ``player.adaptation.exposure``; this only has to keep a frame
+#: drawn before that first update from being black or blown out.
+_DEFAULT_EXPOSURE = 0.012
 
 
 class SpritesVisual(vispy.visuals.Visual):
@@ -567,9 +570,8 @@ class TextureMaskFilter(object):
         """)
         self.fshader['texture'] = texture
         # sane default exposure so the first frame (before any update pushes the
-        # player's adaptation) is valid: key / OUTDOOR_ADAPT_LUMINANCE, i.e. an
-        # eye fully adapted to outdoor light.
-        self.fshader['exposure'] = 0.18 / OUTDOOR_ADAPT_LUMINANCE
+        # player's adaptation) is valid; see _DEFAULT_EXPOSURE.
+        self.fshader['exposure'] = _DEFAULT_EXPOSURE
         self.scale_tr = STTransform(scale=scale) * STTransform(translate=(0.5, 0.5))
         self.fshader['transform'] = self.scale_tr * transform
         

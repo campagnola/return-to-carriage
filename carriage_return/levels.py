@@ -18,7 +18,6 @@ Game-side module: no rendering library may be imported here.
 """
 import numpy as np
 
-from .adaptation import OUTDOOR_ILLUMINANCE
 from .light import AmbientLight, ArrayLight, PointLight
 from .maze import Maze
 from .monster import Monster
@@ -72,13 +71,7 @@ def build_home(blocktypes):
     # The even wash of daylight through the roof. A map light: it belongs to
     # the room, not to anything that moves, and needs no scene -- it announces
     # any change through its own signal, which the level handles.
-    #
-    # This is the reference level of the whole absolute light scale: home
-    # daylight is OUTDOOR_ILLUMINANCE per channel, and the eye starts fully
-    # adapted to exactly this (see adaptation.OUTDOOR_ADAPT_LUMINANCE). Every
-    # other light in the game is chosen relative to it -- the sewer hole shaft's
-    # scattered wash is ~1/100 of this. Tunable in a later visual pass.
-    maze.add_light(AmbientLight(maze, color=(OUTDOOR_ILLUMINANCE,) * 3), pos=(0, 0))
+    maze.add_light(AmbientLight(maze, color=(50000,) * 3), pos=(0, 0))
 
     return level, hole_pos
 
