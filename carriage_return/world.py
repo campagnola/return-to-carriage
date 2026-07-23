@@ -153,6 +153,16 @@ class Level:
         # or moved); set true so the first frame casts sight from scratch
         self._need_los_update = True
 
+        # Eye-adaptation bounds this level imposes on the viewer, in reflected
+        # luminance (cd/m^2), or None to use the module defaults. update_sight
+        # pushes these onto the player's eye each frame the player is here, so a
+        # level that says nothing resets the eye to the default range (see
+        # EyeAdaptation.set_bounds). Setting both to the *same* value pins the
+        # eye -- a fixed exposure that ignores the sampled scene -- which home
+        # does, being lit by the sky rather than the dim floor the window sees.
+        self.min_adapt_luminance = None
+        self.max_adapt_luminance = None
+
     def clear_line_of_sight(self):
         """Nothing on this level is in sight; the viewer has gone elsewhere.
 
@@ -316,6 +326,13 @@ class Level:
             # light into light leaving the surface toward the eye.
             lumE = illuminance @ LUMINANCE_WEIGHTS
             Y_refl = self._albedo_lum[:, :, 0] * lumE / np.pi
+
+            # This level decides how far the eye may open up or stop down while
+            # the player is on it; a level that specifies nothing resets the eye
+            # to the default range, and a level that pins both bounds (home)
+            # holds the exposure fixed regardless of what the window samples.
+            player.adaptation.set_bounds(self.min_adapt_luminance,
+                                         self.max_adapt_luminance)
 
             # Drive eye adaptation from the line-of-sight-weighted mean reflected
             # luminance in a +/-5 maze-cell window around the player. Nothing

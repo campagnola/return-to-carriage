@@ -36,7 +36,7 @@ _default_blocktypes = [
     # bright sky through the bars, and daylight streams past them. Dark bars
     # (fg) silhouette against a bright cool-sky background.
     blocktype('grate', '#',  False,    0,       (.05, .05, .07, 1.0), (.55, .70, 1.0, 1.0)),
-    blocktype('grass', '.',  True,     0,       (.02, .15, .02, 1.0),    (.02, .1, 0.02, 1.0), bg_color_var=0.005),
+    blocktype('grass', '.',  True,     0,       (.05, .8, .1, 1.0),    (.05, .7, .1, 1.0), bg_color_var=0.02),
 ]
 
 

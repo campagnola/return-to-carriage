@@ -20,8 +20,9 @@ adaptation is first needed. Because the player starts in home daylight, that
 first measurement is the daylight the eye is adapted to, so "the player starts
 adapted to outdoor light" is a measured fact -- exactly consistent with what the
 renderer draws -- rather than a stand-in albedo times a magic illuminance. The
-dark-adaptation floor (:data:`MIN_ADAPT_LUMINANCE`) is a fixed point on the same
-absolute scale, so it does not move with the measured reference.
+dark-adaptation floor (:data:`MIN_ADAPT_LUMINANCE`) and the light-adaptation
+ceiling (:data:`MAX_ADAPT_LUMINANCE`) are fixed points on the same absolute
+scale, so they do not move with the measured reference.
 
 This module is the CPU half of the tone-reproduction chain. It produces one
 number -- :attr:`EyeAdaptation.exposure` -- that the GPU Reinhard tone-mapper
@@ -52,6 +53,19 @@ from . import config
 #: is eventually visible in the dark: raise it to keep dark areas darker, lower
 #: it to let the eye open up further. Tunable in the visual pass.
 MIN_ADAPT_LUMINANCE = 2.0
+
+#: The brightest reflected luminance the eye will light-adapt to, in cd/m^2 --
+#: the ceiling to :data:`MIN_ADAPT_LUMINANCE`'s floor, and likewise a fixed point
+#: on the shared physical scale. A real eye cannot stop down without limit
+#: either: past some level it can no longer compress the light and an intense
+#: source just glares. This ceiling floors the exposure (``key /
+#: MAX_ADAPT_LUMINANCE`` is the least the tone-mapper will ever brighten a
+#: scene), so a surface lit fiercely up close -- a torch or fireball at arm's
+#: length -- stays a blown-out glare instead of the eye adapting it down to grey.
+#: Set above home daylight (the game's brightest illuminance, and the eye's own
+#: established reference) so ordinary daylight adapts fully and only genuinely
+#: intense light clips. Tunable in the visual pass.
+MAX_ADAPT_LUMINANCE = 20000.0
 
 #: Clamp applied before any ``log``; a truly black scene has zero luminance and
 #: ``log(0)`` is undefined, so adaptation targets are floored to this.
@@ -116,7 +130,8 @@ class EyeAdaptation:
     """
 
     def __init__(self, tau_light=TAU_LIGHT_ADAPT, tau_dark=TAU_DARK_ADAPT,
-                 key=ADAPT_MIDDLE_GREY, min_luminance=MIN_ADAPT_LUMINANCE):
+                 key=ADAPT_MIDDLE_GREY, min_luminance=MIN_ADAPT_LUMINANCE,
+                 max_luminance=MAX_ADAPT_LUMINANCE):
         """Create an eye with no reference yet.
 
         The eye holds no adaptation luminance until it is first shown a scene:
@@ -131,6 +146,11 @@ class EyeAdaptation:
             so it is known now rather than measured. The adaptation luminance --
             and so the adaptation *target* -- is floored here, capping exposure
             at ``key / min_luminance`` so true darkness stays dark.
+        :param max_luminance: the brightest luminance the eye will light-adapt to
+            (:data:`MAX_ADAPT_LUMINANCE`) -- the matching ceiling, likewise a
+            fixed point on the absolute scale. The adaptation luminance and target
+            are capped here, flooring exposure at ``key / max_luminance`` so an
+            intense source stays a glare rather than adapting down to grey.
         :param tau_light: light-adaptation time constant in seconds (~1 s), used
             when the surroundings are *brighter* than the eye is set for so the
             adapted luminance rises and the screen dims. The eye closes
@@ -149,9 +169,10 @@ class EyeAdaptation:
         self.tau_light = tau_light
         self.tau_dark = tau_dark
         self.key = key
-        # Floor on dark adaptation, in the log domain. Kept as a log so it can
-        # clamp log_la and the adaptation target directly.
-        self.log_min = math.log(max(min_luminance, _LUMINANCE_FLOOR))
+        # Floor and ceiling on adaptation, in the log domain (set as logs so they
+        # can clamp log_la and the adaptation target directly). A level may
+        # retune these as the player enters it; see set_bounds.
+        self.set_bounds(min_luminance, max_luminance)
         # Log domain (see class docstring): log of the adaptation luminance, so
         # relaxation is constant-stops-per-second. None until the first sight
         # establishes it (see adapt/snap_to); never below the floor thereafter.
@@ -161,6 +182,31 @@ class EyeAdaptation:
         #: its target. The renderer reads this to keep repainting an otherwise
         #: static scene until adaptation has caught up, then lets it go idle.
         self.settling = False
+
+    def set_bounds(self, min_luminance=None, max_luminance=None):
+        """Set the range of luminance the eye is allowed to adapt to.
+
+        The bounds are level design, not eye state: which level the player is on
+        decides how far the eye may open up or stop down (see
+        :meth:`~.world.Level.update_sight`). ``None`` for either bound resets it
+        to the module default (:data:`MIN_ADAPT_LUMINANCE` /
+        :data:`MAX_ADAPT_LUMINANCE`), which is what a level that says nothing
+        about adaptation gets. The eye's *state* -- the luminance it has settled
+        to -- is untouched here; only the range it clamps into changes, so the
+        eye still eases across a bound change rather than jumping.
+
+        Passing the **same** value for both pins the eye: every target and every
+        adapted luminance clamps to that one value, so adaptation stops sampling
+        the scene entirely and the exposure is fixed. A level uses this when the
+        scene it draws is a poor guide to how bright it should feel -- home, lit
+        by the sky rather than the dim floor the sampling window sees.
+        """
+        if min_luminance is None:
+            min_luminance = MIN_ADAPT_LUMINANCE
+        if max_luminance is None:
+            max_luminance = MAX_ADAPT_LUMINANCE
+        self.log_min = math.log(max(min_luminance, _LUMINANCE_FLOOR))
+        self.log_max = math.log(max(max_luminance, _LUMINANCE_FLOOR))
 
     def adapt(self, scene_luminance, dt):
         """Relax the eye toward *scene_luminance* over *dt* seconds.
@@ -190,11 +236,12 @@ class EyeAdaptation:
             return
         if dt <= 0:
             return
-        # Clamp the target to the dark-adaptation floor, not just log_la after
-        # the fact: a scene darker than the floor is unreachable, and measuring
+        # Clamp the target into the adaptation range, not just log_la after the
+        # fact: a scene outside [floor, ceiling] is unreachable, and measuring
         # settling against an unreachable target would never clear the flag --
         # the renderer would repaint at 60 Hz forever.
-        target = max(math.log(max(scene_luminance, _LUMINANCE_FLOOR)), self.log_min)
+        target = min(max(math.log(max(scene_luminance, _LUMINANCE_FLOOR)),
+                         self.log_min), self.log_max)
         gap = target - self.log_la
         self.settling = abs(gap) > _SETTLE_EPS
         tau = self.tau_light if gap > 0 else self.tau_dark
@@ -209,7 +256,8 @@ class EyeAdaptation:
         screenshot path, where every capture must be fully adapted to its own
         scene so results do not depend on how many frames were run first.
         """
-        self.log_la = max(math.log(max(scene_luminance, _LUMINANCE_FLOOR)), self.log_min)
+        self.log_la = min(max(math.log(max(scene_luminance, _LUMINANCE_FLOOR)),
+                              self.log_min), self.log_max)
         self.settling = False
 
     @property
