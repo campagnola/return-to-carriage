@@ -1,9 +1,17 @@
-# coding: utf8
+import time
+
 from .layers import GlyphRegistry, SpriteLayer, LayerList
 from .maze import Maze
 from .entity import Entity
 from .events import Observable
 from .world import SIGHT_SUPERSAMPLE, Level
+
+#: Salience at or above which a percept is logged the instant it is noticed,
+#: rather than held for a later "look". The boundary sits at 0 -- "maximally
+#: cared about" -- so anything with non-negative salience speaks up immediately
+#: and only the explicitly quieter (negative) percepts wait to be looked for.
+AUTO_LOG_SALIENCE = 0.0
+
 
 
 class MessageLog(object):
@@ -144,6 +152,8 @@ class Scene(Entity):
         # and never travel.
         self.world = None
 
+        self.clock = time.monotonic
+
         self.set_level(Maze.load_image('level1.png'))
 
     def set_world(self, world):
@@ -268,6 +278,37 @@ class Scene(Entity):
     def write(self, message):
         """Display a message to the user."""
         self.log.write(message)
+
+    def perceive(self, percept, who=None):
+        """Central perception resolver: decide whether *who* notices *percept*
+        now, and if so deliver it. Salient percepts (salience >= AUTO_LOG_SALIENCE)
+        are delivered immediately (on_perceived -> the log). Returns whether it
+        was noticed.
+
+        *who* is the perceiver whose acuity is weighed against the percept's
+        log-scale visibility: noticed when ``who.perception > -visibility``. The
+        randomness lives in the perceiver -- ``Player.perception`` samples a
+        distribution on each read -- so a keen roll catches fainter things. The
+        percept's own cooldown suppresses repeats within its window.
+
+        *who* defaults to None, meaning the percept is offered to anyone/everyone
+        nearby (a noise everyone in earshot might catch) rather than to one
+        actor. That broadcast is not implemented yet, so None currently raises;
+        callers with a specific perceiver pass it explicitly.
+        """
+        if who is None:
+            raise NotImplementedError(
+                "perceive(who=None): offering a percept to everyone nearby is "
+                "not implemented yet; pass an explicit perceiver")
+        now = self.clock()
+        if not percept.ready(now):
+            return False
+        if who.perception <= -percept.visibility:
+            return False
+        percept.mark(now)
+        if percept.salience >= AUTO_LOG_SALIENCE:
+            percept.on_perceived(self, who)
+        return True
 
     def items_at(self, pos):
         """Return the items lying in the maze at *pos*."""

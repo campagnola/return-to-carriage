@@ -6,6 +6,7 @@ from .light import PointLight
 from .location import Location
 from .sprite import SingleCharSprite
 from .units import lm
+from .random import RandomDist
 
 
 #: The 'glo' spell's light: bright, pure white. Equal RGB channels so it reads
@@ -39,7 +40,13 @@ class Player(Entity):
         # levels; it needs no inventory slot. Toggled by toggle_glo.
         self.glo = None
 
+        self.base_perception = RandomDist('lognorm', mean=1, stdev=0.1)
+
         scene.player = self
+
+    @property
+    def perception(self):
+        return self.base_perception()
 
     def take(self, item):
         """Move *item* from the maze into this player's inventory.

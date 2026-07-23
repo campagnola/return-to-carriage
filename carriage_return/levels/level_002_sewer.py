@@ -10,6 +10,7 @@ import numpy as np
 from ..item import Torch
 from ..light import ArrayLight, PointLight
 from ..maze import Maze
+from ..perception import TransientPercept
 from ..portal import Hole
 from ..units import lm, lx
 from ..world import Level
@@ -23,6 +24,10 @@ HALF = 1
 
 #: The cool daylight tint shared by the grate window and the ceiling hole.
 SKY = np.array([0.8, 0.9, 1.0])
+
+#: Perceived-luminance threshold (lux) below which a sewer cell reads as
+#: complete darkness; tunable in the visual pass.
+DARK_THRESHOLD = 0.05
 
 
 def _generate(blocktypes, seed=SEED):
@@ -211,5 +216,28 @@ def build_level(scene):
     # ceiling opening the player fell through is lit by its own daylight.
     sx, sy = locations['stairs_down']
     Torch(location=(maze, (sx - 1, sy)), scene=scene)
+
+    # The grue: the sewer's first use of the perception framework. A discrete
+    # warning that fires when the player steps onto a cell in effectively
+    # complete darkness -- routed through the scene's resolver, so whether it
+    # is noticed still depends on the player's perception, and its cooldown
+    # keeps a fumble through the dark from spamming the log. A lit torch or the
+    # glo spell lifts the struck cell out of darkness (see Level.is_dark_at), so
+    # the warning simply stops firing once the player makes light.
+    grue = TransientPercept(
+        "It is dark here. You are likely to be eaten by a grue.",
+        salience=10.0, visibility=1.0, cooldown=300.0)
+
+    def check_darkness(*args, **kwargs):
+        player = scene.player
+        if player is not None and player.level is level and level.is_dark_at(
+                player.location.global_location.slot, DARK_THRESHOLD):
+            scene.perceive(grue, player)
+
+    # The player must already exist (see game.new_game, which builds the player
+    # before the world). Guarded so the bare build_world used by the screenshot
+    # harness and tests -- which never make a player -- simply does not wire the grue.
+    if scene.player is not None:
+        scene.player.location.global_changed.connect(check_darkness)
 
     return level

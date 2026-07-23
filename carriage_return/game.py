@@ -21,22 +21,18 @@ from .item import Torch
 
 
 def new_game(scene):
-    """Start a new game: build the world and place the player in it.
-
-    Builds and installs the populated world (see :func:`.levels.build_world`),
-    then puts the player on the home level with a lit torch in hand. The player
-    reaches the dungeon by falling down the hole and taking the sewer stairs.
+    """Start a new game: create the player, build the world,
+    and place the player in it.
 
     Returns ``(world, player)``.
     """
+    player = Player(scene)
     world = build_world(scene)
     home = world.levels['home']
-
-    player = Player(scene)
     player.location.update(home.maze, home.locations['start'])
 
     # set player initial inventory
-    
+
     # held_torch = Torch(location=(player, 'right hand'), scene=scene,
     #                    obj_name="held torch")
     # held_torch.light.color = (10000, 5000, 1000)

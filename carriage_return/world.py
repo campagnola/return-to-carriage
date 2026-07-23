@@ -106,21 +106,10 @@ class Level:
         self.lighting_changed = Observable()
 
         # Composited HDR illuminance for this level (the linear sum of its light
-        # maps, RGB), and its cross-frame cache. Sized to this maze and reached
-        # only through this level, so the lights summed here (this level's) and
-        # the field they multiply (this level's line of sight) can never be of
-        # two different shapes. This is the expensive step; it is rebuilt only
-        # when dropped (a lighting or viewpoint change), never per frame.
-        #
-        # There is no longer any per-frame renormalisation. The CPU emits a
-        # linear HDR field and the GPU tone-maps it under a slowly-varying
-        # exposure; a flickering flame therefore modulates the output directly,
-        # because it changes ``illuminance`` and nothing divides that change
-        # back out. (The old ``_light_norm`` divisor existed only to keep a
-        # per-level log-normalisation from pinning the brightest cell to 1.0
-        # and cancelling the flicker; with the tone map moved to the GPU it is
-        # gone.)
+        # maps, RGB), and its cross-frame cache. This is the expensive step; it is rebuilt only
+        # when marked dirty (a lighting or viewpoint change), never per frame.
         self.illuminance = None
+        self._illuminance_dirty = False
         self.light_cache = ArraySumCache()
 
         # Per-cell material reflectance luminance at field resolution, (h, w, 1).
@@ -203,24 +192,29 @@ class Level:
         self.lighting_changed()
 
     def invalidate_lighting(self):
-        """Discard the composited illuminance; it is rebuilt on the next update.
+        """Mark the composited illuminance dirty; it is rebuilt on the next request.
 
         Called by a light on this level whose emitted light changed (colour,
         brightness). Nothing needs to be *kept* to make a flickering flame show:
         the field is linear HDR and the GPU exposure varies slowly, so a rebuilt
         ``illuminance`` carrying the flame's new brightness modulates the output
-        directly rather than being renormalised away.
+        directly rather than being renormalised away. The previous field is left
+        in place (only flagged), so a reader between frames still sees valid
+        lighting until illuminance_map recomposites it.
         """
-        self.illuminance = None
+        self._illuminance_dirty = True
 
     def invalidate_sight(self):
         """The viewer moved on this level: recast sight and recomposite light.
 
-        Drops the line of sight and the composited illuminance, so the next
-        update rebuilds both for the new viewpoint.
+        Flags the composited illuminance dirty and forces line of sight to be
+        recast, so the next update rebuilds both for the new viewpoint. The
+        illuminance field itself is left in place (see invalidate_lighting): it
+        is position-independent, so the stale map still answers "how much light
+        reaches this cell" correctly until it is recomposited.
         """
         self._need_los_update = True
-        self.illuminance = None
+        self._illuminance_dirty = True
 
     def enter(self):
         """Prepare this level to be shown, dropping every cross-frame cache.
@@ -231,6 +225,7 @@ class Level:
         albedo map is *not* dropped: it depends only on the fixed maze.
         """
         self.illuminance = None
+        self._illuminance_dirty = False
         self._need_los_update = True
         self.light.set_data(np.zeros((*self.memory.shape, 4), dtype='float32'))
         self.memory_overlay.set_data(np.zeros(self.memory.shape, dtype='float32'))
@@ -290,29 +285,11 @@ class Level:
                 self._need_los_update = False
             line_of_sight = self.line_of_sight
 
-            # Composite this level's HDR illuminance. Only this level's lights
-            # are consulted, so their maps are all sized to this level -- no
-            # light on another level can contribute a differently-shaped array.
-            # Held in a local because an animator/flicker thread may null the
-            # cache at any moment; the worst that costs is one stale frame.
-            illuminance = self.illuminance
-            if illuminance is None:
-                lights = []
-                # snapshot: a spell mob may add or remove lights from its own
-                # animation thread while this composite runs (see spell.py), so
-                # iterate a copy rather than the live list
-                for light in list(self.lights):
-                    light_map = light.lightmap(supersample=self.supersample)
-                    if light_map is None:
-                        continue
-                    lights.append(light_map)
-                if lights:
-                    # ArraySumCache.sum_arrays asserts on an empty list, and a
-                    # level may legitimately hold no light at all
-                    illuminance = self.light_cache.sum_arrays(lights).astype('float32', copy=False)
-                else:
-                    illuminance = np.zeros(self.field_shape, dtype='float32')
-                self.illuminance = illuminance
+            # Composite this level's HDR illuminance, recompositing if a move or
+            # a light change marked it dirty. Held in a local because an
+            # animator/flicker thread may mark it dirty mid-frame; the worst that
+            # costs is one stale frame.
+            illuminance = self.illuminance_map()
             if self._albedo_lum is None:
                 self._albedo_lum = self._build_albedo_lum()
 
@@ -374,6 +351,78 @@ class Level:
 
         # Memory overlay: shown only where the cell is not currently in view.
         self.memory_overlay.set_data(mem_disp * (1.0 - los_scalar))
+
+    def _composite_illuminance(self):
+        """Sum this level's light maps into one HDR illuminance field (lux, RGB).
+
+        The single place the composite is built. Snapshots the lights list (a
+        spell mob may add or remove lights from its own animation thread, see
+        spell.py) and sizes every map to this level, so no light on another level
+        can contribute a differently-shaped array. A level holding no light
+        composites to zeros (ArraySumCache.sum_arrays asserts on an empty list)."""
+        lights = []
+        for light in list(self.lights):
+            light_map = light.lightmap(supersample=self.supersample)
+            if light_map is None:
+                continue
+            lights.append(light_map)
+        if lights:
+            return self.light_cache.sum_arrays(lights).astype('float32', copy=False)
+        return np.zeros(self.field_shape, dtype='float32')
+
+    def illuminance_map(self):
+        """This level's composited HDR illuminance (lux, RGB), rebuilt if dirty.
+
+        The up-to-date map anyone may request: it recomposites when the field
+        has never been built (fresh from enter()) or was marked dirty by a move
+        or a light change, and otherwise returns the cached field untouched.
+
+        Recompositing sums the light maps, which for a point light samples the
+        injected shadow provider -- a GL read-back -- so it must run on the
+        thread that owns that provider (the display backend's draw thread).
+        Because a move only *flags* the field dirty rather than dropping it, a
+        reader that just needs a value between frames (a darkness test on the
+        input thread) reads the last composite through illuminance_at and never
+        forces a recomposite off the draw thread."""
+        if self.illuminance is None or self._illuminance_dirty:
+            self.illuminance = self._composite_illuminance()
+            self._illuminance_dirty = False
+        return self.illuminance
+
+    def illuminance_at(self, pos):
+        """Composited HDR illuminance (lux, per channel) arriving at maze cell
+        *pos* (x, y), or None if the level has not yet been composited since it
+        was entered.
+
+        Reads the cached composite without forcing a rebuild -- safe to call off
+        the draw thread -- and the field is ungated by line of sight, so it
+        measures the light reaching a cell regardless of the current viewpoint.
+        A move leaves the field in place (only flagged dirty), so this keeps
+        answering with the last composite until the draw thread recomposites via
+        illuminance_map. Read the reference once so a concurrent rebuild cannot
+        tear the read."""
+        x, y = pos
+        ss = self.supersample
+        field = self.illuminance
+        if field is None:
+            return None
+        return field[y * ss, x * ss]
+
+    def is_dark_at(self, pos, threshold):
+        """True if cell *pos* is in effectively complete darkness: the perceived
+        luminance of the illuminance arriving there is below *threshold* (lux).
+        A lit torch or the glo spell is one of this level's lights, so it lifts
+        the player out of darkness automatically once composited.
+
+        Returns None until the level's lighting has been composited at least once
+        since it was entered (illuminance_at is None): before that there is no
+        light field to judge, and a darkness warning fired then would misjudge
+        the very cell the player just arrived on -- the daylit hole they dropped
+        through -- as pitch dark."""
+        illuminance = self.illuminance_at(pos)
+        if illuminance is None:
+            return None
+        return float(illuminance @ LUMINANCE_WEIGHTS) < threshold
 
     def __repr__(self):
         return "<Level %r %dx%d>" % ((self.name,) + self.maze.shape)

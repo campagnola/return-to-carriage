@@ -15,6 +15,14 @@ class Entity:
         self.obj_name = obj_name
         self.type = EntityType.create(entity_type)
 
+        # Most entities are not separately perceivable, so this stays None. A
+        # hidden button or an invisible mob sets it to a Percept (see
+        # perception.py) so the scene's perception resolver can treat it like
+        # any other percept. Persistent world objects stay their own class
+        # family, kept separate from transient message percepts; only the thin
+        # perceivable aspect is shared, and this is where an entity carries it.
+        self.percept = None
+
     def __repr__(self):
         return f"<{self.__class__.__name__} name={repr(self.obj_name)} type={self.type} id=0x{id(self):x}>"
 

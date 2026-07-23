@@ -332,7 +332,7 @@ class SpritesVisual(vispy.visuals.Visual):
         """
         if not isinstance(shape, tuple):
             raise TypeError("shape must be a tuple (got %r)" % shape)
-        n = np.product(shape)
+        n = np.prod(shape)
         old_size = self._resize(self.position.shape[0] + n)
         sd = SpriteData(self, start=old_size, shape=shape)
         self.sprite_data_items.append(sd)
@@ -437,7 +437,7 @@ class SpriteData(object):
         self.set_start(start)
 
     def __len__(self):
-        return np.product(self.shape)
+        return np.prod(self.shape)
 
     @property
     def position(self):

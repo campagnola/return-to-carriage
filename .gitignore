@@ -4,3 +4,4 @@ agent_helpers/
 .idea/
 .pytest_cache/
 /vispy/
+conda_env*
