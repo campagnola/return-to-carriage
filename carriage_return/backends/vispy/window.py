@@ -2,6 +2,7 @@ import numpy as np
 import vispy.scene, vispy.app
 import vispy.util.ptime as ptime
 
+from carriage_return import config
 from .grids import GridRenderer
 from .input import CanvasInputSource
 
@@ -47,6 +48,9 @@ class MainWindow:
         self.grid_renderer = None
 
         self.frame_timer = vispy.app.Timer(start=True, connect=self._frame_tick, interval=0.016)
+
+        self._fps_frame_count = 0
+        self._fps_last_time = None
 
         self._follow_entity = None
         self.game_scene = None
@@ -99,6 +103,21 @@ class MainWindow:
             self.canvas.update()
         if self.game_scene is not None and self.game_scene.quit_requested:
             self.canvas.close()
+        if config.test_mode:
+            self._update_fps_title()
+
+    def _update_fps_title(self):
+        now = ptime.time()
+        self._fps_frame_count += 1
+        if self._fps_last_time is None:
+            self._fps_last_time = now
+            return
+        elapsed = now - self._fps_last_time
+        if elapsed >= 1.0:
+            fps = self._fps_frame_count / elapsed
+            self.canvas.title = f"Return to Carriage [test] — {fps:.1f} fps"
+            self._fps_frame_count = 0
+            self._fps_last_time = now
 
     def _scroll_camera(self, ev):
         now = ptime.time()
