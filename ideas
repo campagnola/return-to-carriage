@@ -114,6 +114,10 @@ Detail and perception
     - Caracters with higher perception will notice more detail, even without manually looking
     - features in the environment have both visibility (how likely you are to notice) and salience (how likely you are to care). 
         whether a feature shows up in the event log depends on (visibility * perception) * salience
+    - Percepts should have optional location
+    - Percepts should have sensory modality-specific visibility values, and characters have modality-specific perception values (eg: player has great vision, but this percept is entirely smell)
+    - With location, we can compute a distance-based attenuation in visibility
+    - Modifiers can affect either visibility or perception (fog, invisibility spell, etc)
 
 ---------------------
 
