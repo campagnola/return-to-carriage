@@ -27,6 +27,8 @@ from carriage_return.input import InputDispatcher
 from carriage_return.game import new_game
 from carriage_return.item import Scroll, Torch
 
+from offscreen_clock import ManualClock  # tooling only; see module docstring
+
 
 def build_game():
     dispatcher = InputDispatcher()
@@ -35,7 +37,10 @@ def build_game():
     hud = build_hud(scene)
     scene.write('Hello?')
     scene.write('Is anybody\n    there?')
-    renderer = VispySceneRenderer(ui, scene)
+    # deterministic time source so adaptation/memory decay do not depend on how
+    # fast this process runs (offscreen tooling only; see offscreen_clock).
+    clock = ManualClock()
+    renderer = VispySceneRenderer(ui, scene, time_source=clock)
     ui.attach_scene(scene)
     dm = DungeonMaster(scene)
 
@@ -43,7 +48,7 @@ def build_game():
     # scrolling and the input threads are timing-dependent.
     world, player = new_game(scene)
 
-    return ui, scene, renderer, player
+    return ui, scene, renderer, player, clock
 
 
 def open_take_menu(scene, player):
@@ -65,20 +70,22 @@ def open_take_menu(scene, player):
 def main():
     out_path = sys.argv[1]
     menu = len(sys.argv) > 2 and sys.argv[2] == '--menu'
-    ui, scene, renderer, player = build_game()
+    ui, scene, renderer, player, clock = build_game()
     if menu:
         open_take_menu(scene, player)
 
-    # SceneCanvas.render() draws the scene directly without emitting
-    # events.draw or running the frame tick, so the renderer's per-draw
-    # update (LOS/lighting -> sight texture) and the grid sync must be
-    # invoked explicitly; a fixed dt keeps the memory decay deterministic.
-    # Two rounds reach steady state.
+    # SceneCanvas.render() draws the scene (recomputing the LOS/lighting fields
+    # in the sprite pre-draw) but does not run the frame tick, so the grid sync
+    # is invoked explicitly. The first render establishes the clock baseline
+    # (dt == 0); two further frames advance a fixed 1/60 s each so memory decay
+    # and adaptation are deterministic, reaching the same steady state every run.
     ui.canvas.set_current()
+    ui.grid_renderer.sync()
+    ui.canvas.render()                      # warm-up: dt == 0
     for _ in range(2):
-        renderer.update(dt=1/60.)
+        clock.advance(1 / 60.)
         ui.grid_renderer.sync()
-        img = ui.canvas.render()
+        img = ui.canvas.render()            # dt == 1/60
 
     import PIL.Image
     # drop the alpha channel: the on-screen window ignores framebuffer

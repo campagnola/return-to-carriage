@@ -25,11 +25,21 @@ class LayerSpritesVisual(SpritesVisual):
     emission for that filter to add on top of the reflected light.
     """
     _layer_sync = None
+    _field_sync = None
     emits = True
 
     def _prepare_draw(self, view):
+        # Latch the glyph positions, then recompute the light field for that
+        # same frame position immediately after. Reading both back to back --
+        # with the heavy lighting compute happening AFTER both reads, not
+        # between them -- is what keeps a glyph and its attached light on the
+        # same cell: an input-thread move landing during the compute is picked
+        # up whole by the next frame, never splitting one. See
+        # VispySceneRenderer._sync_fields.
         if self._layer_sync is not None:
             self._layer_sync()
+        if self._field_sync is not None:
+            self._field_sync()
         return SpritesVisual._prepare_draw(self, view)
 
 
@@ -122,13 +132,20 @@ class VispySceneRenderer(object):
       textures (each only when its version changed) and applies them to the
       sprites as a mask filter that gates reflection/emission by line of sight
 
-    As in the pre-split design, the sight update runs as a canvas draw-event
-    callback, i.e. after the scene has been drawn; the updated field is
-    rendered on the next frame. Offscreen SceneCanvas.render() calls do not
-    emit draw events, so batch/screenshot code must call update() explicitly
-    (with an explicit dt for determinism).
+    The sight update runs from the sprite visual's _prepare_draw, right after
+    the glyph positions are latched, so a frame draws the glyph and the light
+    attached to it from one position read -- there is no one-frame lag between
+    them even while an input thread moves the player concurrently. This is the
+    only place the fields advance; it covers on-screen draws and offscreen
+    SceneCanvas.render() alike.
+
+    Time-based effects (eye adaptation, memory decay) advance by the real
+    interval between frames, read through ``time_source``. That defaults to the
+    monotonic wall clock and is overridden only by offscreen tooling that wants
+    reproducible frames (see the ``time_source`` argument); the running game
+    always uses the default.
     """
-    def __init__(self, ui, scene):
+    def __init__(self, ui, scene, *, time_source=time.perf_counter):
         self.ui = ui
         self.scene = scene
 
@@ -147,6 +164,11 @@ class VispySceneRenderer(object):
         self._light_version = None
         self._memory_version = None
         self._last_update_time = None
+        # Real time is read only through this callable. In the running game it
+        # is the monotonic wall clock; offscreen tooling injects a deterministic
+        # source so a rendered frame does not depend on machine speed. Nothing
+        # in normal operation passes a non-default source.
+        self._time_source = time_source
 
         # both the shadow renderer and the sight texture are sized from the
         # maze, so they are rebuilt on every level change (including the
@@ -157,7 +179,10 @@ class VispySceneRenderer(object):
 
         scene.redraw_requested.connect(ui.mark_dirty)
 
-        ui.canvas.events.draw.connect(self._on_draw)
+        # drive the per-frame field update from the sprite visual's pre-draw,
+        # immediately after the glyphs are latched (see _prepare_draw), so the
+        # glyph and its light are always read for the same frame position.
+        self.txt._field_sync = self._sync_fields
 
     def _rebuild_for_level(self):
         """Re-create the maze-sized GL resources for the scene's current level.
@@ -199,19 +224,17 @@ class VispySceneRenderer(object):
                                               scale=(1./ms[1], 1./ms[0]))
         self.txt.attach(self.sight_filter)
 
-        # force the next update() to upload into the new textures
+        # force the next field sync to upload into the new textures
         self._light_version = None
         self._memory_version = None
 
-    def _on_draw(self, event):
-        now = time.perf_counter()
-        dt = 0.0 if self._last_update_time is None else now - self._last_update_time
-        self._last_update_time = now
-        self.update(dt)
+    def _sync_fields(self):
+        """Recompute and upload the visual fields for the current frame.
 
-    def update(self, dt):
-        """Advance the captured level's visual fields by *dt* and upload any
-        that changed.
+        Runs from the sprite visual's _prepare_draw, right after the glyph
+        positions are latched, so the glyph and the light attached to it are
+        read for one frame position. dt is the real interval since the previous
+        frame, taken from ``self._time_source``.
 
         Composites the level this renderer was built for -- reached through the
         captured reference, so its light/memory fields, lighting and shadow
@@ -220,6 +243,10 @@ class VispySceneRenderer(object):
         it), Level.update_sight blocks the view and the level's remembered field
         is what shows.
         """
+        now = self._time_source()
+        dt = 0.0 if self._last_update_time is None else now - self._last_update_time
+        self._last_update_time = now
+
         level = self._level
         level.update_sight(dt, self.scene.player)
 
