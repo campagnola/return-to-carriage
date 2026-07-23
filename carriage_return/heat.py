@@ -53,7 +53,9 @@ def blackbody_color(temperature):
 
     if t <= 66:
         red = 255.0
-        green = 99.4708025861 * np.log(t) - 161.1195681661 if t > 0 else 0.0
+        # green = 99.4708025861 * np.log(t) - 161.1195681661 if t > 0 else 0.0
+        # reduce green just a little
+        green = 96 * np.log(t) - 161.1195681661 if t > 0 else 0.0
     else:
         red = 329.698727446 * (t - 60) ** -0.1332047592
         green = 288.1221695283 * (t - 60) ** -0.0755148492
@@ -83,7 +85,7 @@ class Heat(Entity):
 
     #: seconds for the temperature *above ambient* to fall by 1/e (Newton's law
     #: of cooling). A few of these and the glow is gone -- it lingers "a while".
-    COOLING_TAU = 1.5
+    COOLING_TAU = 4.0
     #: stop and self-destruct once within this many kelvin of ambient
     DESTROY_MARGIN = 10.0
     #: brightness reaches its peak at this temperature and saturates above it,
@@ -93,7 +95,7 @@ class Heat(Entity):
     #: peak luminous flux of the glow, in lumens, reached at REF_TEMP: the
     #: blackbody colour (0..1 per channel) is scaled by this, so a hot strike
     #: peaks ~10x a torch (a torch is ~15 lm; see :class:`~.light.PointLight`).
-    PEAK_BRIGHTNESS = 150 * lm
+    PEAK_BRIGHTNESS = 15000 * lm
     #: real-time cooling tick
     STEP_INTERVAL = 1 / 30.
 

@@ -11,6 +11,7 @@ canvas.events.draw).
 """
 import time
 
+import numpy as np
 import vispy.scene, vispy.gloo
 
 from .graphics import CharAtlas, SpritesVisual, TextureMaskFilter, ShadowRenderer
@@ -117,8 +118,9 @@ class VispySceneRenderer(object):
       ``visibility``
     - drives ``level.update_sight(dt, player)`` once per canvas draw, on the
       level it has captured (never "whatever level is current")
-    - uploads the level's ``sight`` FieldLayer to a texture (only when its
-      version changed) and applies it to the sprites as a mask filter
+    - uploads the level's ``light`` and ``memory_overlay`` FieldLayers to two
+      textures (each only when its version changed) and applies them to the
+      sprites as a mask filter that gates reflection/emission by line of sight
 
     As in the pre-split design, the sight update runs as a canvas draw-event
     callback, i.e. after the scene has been drawn; the updated field is
@@ -139,9 +141,11 @@ class VispySceneRenderer(object):
         # another thread cannot change which level a frame in flight is drawing.
         self._level = None
 
-        self.sight_texture = None
+        self.light_texture = None
+        self.memory_texture = None
         self.sight_filter = None
-        self._sight_version = None
+        self._light_version = None
+        self._memory_version = None
         self._last_update_time = None
 
         # both the shadow renderer and the sight texture are sized from the
@@ -171,23 +175,33 @@ class VispySceneRenderer(object):
         level.visibility = ShadowRenderer(level.maze, self.ui.canvas,
                                           supersample=level.supersample)
 
-        # sight field -> texture, masking the sprites visual
+        # light and memory fields -> textures, masking the sprites visual
         if self.sight_filter is not None:
             self.txt.detach(self.sight_filter)
 
         ms = level.maze.shape
-        # RGBA float: rgb carry linear HDR light (los*illuminance, may exceed 1),
-        # a carries the display-space memory overlay. The tone map that turns
-        # this into displayable color lives in TextureMaskFilter (per fragment).
-        self.sight_texture = vispy.gloo.Texture2D(shape=(*level.field_shape[:2], 4), format='rgba',
+        # Light: RGBA float, rgb carry raw linear HDR illuminance (may exceed 1,
+        # ungated by line of sight), a carries the line-of-sight scalar (0..1).
+        self.light_texture = vispy.gloo.Texture2D(shape=(*level.field_shape[:2], 4), format='rgba',
                                                   internalformat='rgba32f',
                                                   interpolation='linear', wrapping='repeat')
+        # Memory: single-channel float, the display-space memory overlay. The
+        # shader reads it as .r. r32f keeps the display-space value at full
+        # precision; the filter samples .r regardless of channel count.
+        self.memory_texture = vispy.gloo.Texture2D(shape=(*level.field_shape[:2], 1), format='red',
+                                                   internalformat='r32f',
+                                                   interpolation='linear', wrapping='repeat')
+        # The tone map that turns these into displayable color, and the gating
+        # of reflection/emission by line of sight, live in TextureMaskFilter
+        # (per fragment).
         tr = self.txt.transforms.get_transform('framebuffer', 'visual')
-        self.sight_filter = TextureMaskFilter(self.sight_texture, tr, scale=(1./ms[1], 1./ms[0]))
+        self.sight_filter = TextureMaskFilter(self.light_texture, self.memory_texture, tr,
+                                              scale=(1./ms[1], 1./ms[0]))
         self.txt.attach(self.sight_filter)
 
-        # force the next update() to upload into the new texture
-        self._sight_version = None
+        # force the next update() to upload into the new textures
+        self._light_version = None
+        self._memory_version = None
 
     def _on_draw(self, event):
         now = time.perf_counter()
@@ -196,24 +210,25 @@ class VispySceneRenderer(object):
         self.update(dt)
 
     def update(self, dt):
-        """Advance the captured level's visual field by *dt* and upload it if
-        it changed.
+        """Advance the captured level's visual fields by *dt* and upload any
+        that changed.
 
         Composites the level this renderer was built for -- reached through the
-        captured reference, so its sight field, lighting and shadow provider
-        are all the one maze's shape. When the player is not on that level
-        (the window between a level switch and the player being moved onto it),
-        Level.update_sight blocks the view and the level's remembered field is
-        what shows.
+        captured reference, so its light/memory fields, lighting and shadow
+        provider are all the one maze's shape. When the player is not on that
+        level (the window between a level switch and the player being moved onto
+        it), Level.update_sight blocks the view and the level's remembered field
+        is what shows.
         """
         level = self._level
         level.update_sight(dt, self.scene.player)
 
         # exposure tracks the player's eye adaptation and changes every frame,
         # so push it to the tone-mapping filter each draw (cheap uniform set).
-        # The field texture itself only re-uploads on a version change below.
-        # When there is no player, keep the last exposure -- the field rgb is
-        # ~0 in that case anyway, so only the memory overlay shows.
+        # The field textures themselves only re-upload on a version change
+        # below. When there is no player, keep the last exposure -- line of
+        # sight is 0 in that case anyway, so reflection and emission are gated
+        # off on the GPU and only the memory overlay shows.
         player = self.scene.player
         if player is not None:
             self.sight_filter.set_exposure(player.adaptation.exposure)
@@ -227,7 +242,12 @@ class VispySceneRenderer(object):
             if player.adaptation.settling:
                 self.ui.mark_dirty()
 
-        sight = level.sight
-        if sight.version != self._sight_version:
-            self.sight_texture.set_data(sight.data)
-            self._sight_version = sight.version
+        light = level.light
+        if light.version != self._light_version:
+            self.light_texture.set_data(light.data)
+            self._light_version = light.version
+
+        memory = level.memory_overlay
+        if memory.version != self._memory_version:
+            self.memory_texture.set_data(memory.data[..., np.newaxis])
+            self._memory_version = memory.version

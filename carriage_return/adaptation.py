@@ -39,6 +39,8 @@ numpy, were it needed) is used.
 """
 import math
 
+from . import config
+
 
 #: The darkest reflected luminance the eye will dark-adapt to, in cd/m^2 -- a
 #: fixed point on the shared physical scale (not derived from the measured
@@ -61,8 +63,14 @@ _LUMINANCE_FLOOR = 1e-4
 #: the adapted luminance *falls* and the screen slowly brightens) is slow. The
 #: felt effect: step into glare and the image settles in about a second; drop
 #: into the dark and it takes ~20 s for the scene to open up.
-TAU_LIGHT_ADAPT = 1.0
-TAU_DARK_ADAPT = 2.0
+TAU_LIGHT_ADAPT = 0.3
+TAU_DARK_ADAPT = 8.0
+
+#: Both time constants collapse to this (seconds) under ``config.test_mode``, so
+#: the eye settles almost at once and a human testing the game does not wait out
+#: the ~20 s dark adaptation. Not used in the real game or the screenshot
+#: harness, where the physical time constants above stand.
+TAU_TEST = 0.2
 
 
 #: The middle-grey key value for the Reinhard exposure. 0.18 is photographic
@@ -134,6 +142,10 @@ class EyeAdaptation:
             photographic 18% grey; lower draws the whole scene darker). It sets
             what adapted luminance is mapped to mid-tone on screen.
         """
+        if config.test_mode:
+            # Hands-on testing: collapse both time constants so the eye settles
+            # almost immediately instead of over ~20 s (see TAU_TEST).
+            tau_light = tau_dark = TAU_TEST
         self.tau_light = tau_light
         self.tau_dark = tau_dark
         self.key = key

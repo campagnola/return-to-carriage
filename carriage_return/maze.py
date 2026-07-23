@@ -78,26 +78,36 @@ class Maze(Entity):
 
             # randomize colors
             for bt in self.blocktypes:
-                if 'bg_color_var' in bt['meta']:
+                if bt['bg_color_var'] > 0:
                     mask = self.blocks == bt['id']
-                    rand = np.random.normal(scale=bt['meta']['bg_color_var'], size=(mask.sum(), 1))
+                    rand = np.random.normal(scale=bt['bg_color_var'], size=(mask.sum(), 1))
                     self._bg_color[mask] += rand
 
         return self._bg_color
 
     @classmethod
-    def load_image(cls, filename, blocktypes=None, obj_name=None):
-        """Build a maze from an image: non-black pixels are wall, black is path.
+    def load_image(cls, filename, blocktypes=None, encoding=None, obj_name=None):
+        """Build a maze from an image whose pixel values encode blocktypes.
+
+        *encoding* maps a pixel value to a blocktype name; it describes how the
+        image was drawn. Block ids are assigned automatically and need not match
+        pixel values, so the image's encoding is stated by name. It defaults to
+        a binary scheme: black is path, white is wall.
 
         *blocktypes* defaults to a fresh table, but a multi-level world passes
         its shared one so that block ids mean the same thing on every level.
         """
         if blocktypes is None:
             blocktypes = BlockTypes()
-        maze_blocks = np.array(Image.open(filename))[::-1,:,0]
-        maze_blocks[maze_blocks>0] = blocktypes.id_of('wall')
-        maze_blocks[maze_blocks==0] = blocktypes.id_of('path')
-        return cls(maze_blocks, blocktypes, obj_name=obj_name)
+        if encoding is None:
+            encoding = {0: 'path', 255: 'wall'}
+        pixels = np.array(Image.open(filename))[::-1,:,0]
+        unknown = set(np.unique(pixels)) - set(encoding)
+        assert not unknown, f"{filename} has pixel values {sorted(unknown)} not in encoding"
+        blocks = np.zeros(pixels.shape, dtype='uint8')
+        for value, name in encoding.items():
+            blocks[pixels == value] = blocktypes.id_of(name)
+        return cls(blocks, blocktypes, obj_name=obj_name)
 
     def add_scenery(self, glyphs, layer):
         """Fill a scenery SpriteLayer with this maze's blocks; return the slot.

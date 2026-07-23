@@ -608,25 +608,31 @@ class CharAtlas(object):
         
 
 class TextureMaskFilter(object):
-    """Tone-maps the sprites against the level's sight field.
+    """Tone-maps the sprites against the level's light and memory fields.
 
     Tone mapping lives here, per fragment, after the sprite's albedo color has
     been composited: gl_FragColor.rgb is the material color fg*alpha+bg*(1-alpha)
-    (treated as linear reflectance) and gl_FragColor.a is coverage. The sight
-    texture supplies linear HDR light in rgb and a display-space memory overlay
-    in a. The fragment's outgoing luminance is reflected plus emitted --
-    ``albedo*light + emission`` -- exposed and run through a Reinhard curve +
-    display gamma together, so an emitter (a torch flame) adds its own light on
-    top of what it reflects and bright light physically blows a surface toward
-    white rather than capping at its albedo. Emission rides on the sprite as
-    ``sprite_emission`` (coverage-scaled linear radiance the sprite shader
-    leaves in a shared global) and is gated by line of sight, approximated by
-    the presence of visible light: outside the player's view the sight rgb is
-    zero, so a torch behind a wall neither reflects nor glows -- only its
-    remembered overlay shows. Exposure is driven by the player's eye adaptation
-    (set_exposure, once per frame).
+    (treated as linear reflectance) and gl_FragColor.a is coverage. Two textures
+    feed it: the light texture supplies raw linear HDR illuminance in rgb and
+    the line-of-sight scalar (0..1) in a; the memory texture supplies the
+    display-space memory overlay in r. The fragment's outgoing luminance is
+    reflected plus emitted -- ``albedo*illuminance + emission`` -- with BOTH
+    terms gated by line of sight, then exposed and run through a Reinhard curve
+    + display gamma together. An emitter (a torch flame) therefore adds its own
+    light on top of what it reflects, and bright light physically blows a
+    surface toward white rather than capping at its albedo.
+
+    Gating on line of sight rather than on local light is the point of the two
+    textures: emission rides on the sprite as ``sprite_emission``
+    (coverage-scaled linear radiance the sprite shader leaves in a shared
+    global), and a self-emitting glyph in a cell that is in view but unlit still
+    shows, because its emission is gated by line of sight (a) and not by whether
+    any light happens to fall on the cell. Outside the player's view line of
+    sight is zero, so a glyph behind a wall neither reflects nor glows -- only
+    its remembered overlay shows. Exposure is driven by the player's eye
+    adaptation (set_exposure, once per frame).
     """
-    def __init__(self, texture, transform, scale):
+    def __init__(self, light_texture, memory_texture, transform, scale):
         self.fshader = Function("""
             // Coverage-scaled linear emitted radiance, written by the sprite
             // fragment shader's main() and read here. Declared in this filter
@@ -638,22 +644,22 @@ class TextureMaskFilter(object):
             void apply_texture_mask() {
                 vec4 tex_pos = $transform(gl_FragCoord);
                 tex_pos /= tex_pos.w;
-                vec4 tex = texture2D($texture, tex_pos.xy);   // rgb = linear HDR light, a = display-space memory
+                vec4 lgt = texture2D($light, tex_pos.xy);     // rgb = HDR illuminance (ungated), a = line of sight
+                float los = lgt.a;
+                float mem = texture2D($memory, tex_pos.xy).r; // display-space remembered overlay (masked to unseen)
                 vec3 albedo = gl_FragColor.rgb;
-                vec3 refl = albedo * tex.rgb;                 // reflected luminance (linear)
-                // Emission is light the glyph makes, not light it reflects, so
-                // it bypasses the *light multiply. Gate it by whether this cell
-                // is in view: any visible light means it is, and an emitter's
-                // own source lights its own cell, so a hidden torch stays dark.
-                float vis = smoothstep(0.0, 0.02, max(tex.r, max(tex.g, tex.b)));
-                vec3 out_lum = (refl + sprite_emission * vis) * $exposure;   // exposed outgoing luminance
+                // Outgoing luminance = reflected + emitted; both gated by line
+                // of sight (neither is visible through a wall), then exposed and
+                // tone-mapped together.
+                vec3 refl = albedo * lgt.rgb * los;           // reflected luminance (linear)
+                vec3 out_lum = (refl + sprite_emission * los) * $exposure;   // exposed outgoing luminance
                 vec3 lit = out_lum / (1.0 + out_lum);         // Reinhard tone curve
                 lit = pow(lit, vec3(1.0/2.2));                // display gamma / OETF
-                vec3 mem = vec3(0.0, 0.0, tex.a);             // dim blue memory overlay (already display-encoded)
-                gl_FragColor = vec4(lit + mem, gl_FragColor.a);
+                gl_FragColor = vec4(lit + vec3(0.0, 0.0, mem), gl_FragColor.a);
             }
         """)
-        self.fshader['texture'] = texture
+        self.fshader['light'] = light_texture
+        self.fshader['memory'] = memory_texture
         # sane default exposure so the first frame (before any update pushes the
         # player's adaptation) is valid; see _DEFAULT_EXPOSURE.
         self.fshader['exposure'] = _DEFAULT_EXPOSURE

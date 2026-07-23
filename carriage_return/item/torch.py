@@ -1,107 +1,14 @@
-# coding: utf8
+"""The :class:`Torch` item: a burning, flickering light source."""
 import threading
 import time
 import weakref
 
 import numpy as np
 
-from .entity import Entity
-from .heat import blackbody_color
-from .inventory import Inventory
-from .light import PointLight
-from .location import Location
-from .sprite import SingleCharSprite
-from .units import K, lm
-
-
-class Item(Entity):
-
-    name = "nondescript item"
-    char = '?'
-    mass = 0.0     # in kg
-    length = 10.0  # in cm
-    readable = False
-    takeable = False
-    fg_color = (0, 0, 0.8, 1)
-    bg_color = None
-    #: Light the glyph emits on its own (RGB, linear), or None for a plain
-    #: reflective item. An emitter (see Torch) glows independently of the light
-    #: falling on it rather than merely reflecting its surroundings.
-    emission = None
-
-    def __init__(self, location, scene, obj_name=None):
-        Entity.__init__(self, entity_type='item.' + self.name, obj_name=obj_name)
-        self.scene = scene
-
-        self.inventory = Inventory(self, allowed_slots=[])
-        self.location = Location(self, None, None)
-        self.sprite = SingleCharSprite(self, zval=-0.1, char=self.char,
-                                       fg_color=self.fg_color, emission=self.emission,
-                                       layer='items')
-
-        # A plain item emits no light. An item that shines builds its own
-        # Light in its __init__ (see Torch) and drives its colour/brightness;
-        # the Light handles the rest of being a light source -- level tracking,
-        # shadow maps, the emitted map.
-        self.light = None
-
-        scene.add_item(self)
-
-        if location is not None:
-            self.location.update(*location)
-
-    @property
-    def weight(self):
-        # allows us to change gravity later..
-        return self.mass
-
-    @property
-    def description(self):
-        """A short description of this item
-        """
-        # todo: include minimal detail, custom naming, etc.
-        return self.name
-
-    def destroy(self):
-        """Remove this item from the game.
-        """
-        self.scene.items.remove(self)
-        if self.light is not None:
-            self.light.destroy()
-        self.location.update(None, None)
-        self.sprite.hide()
-
-
-class Scroll(Item):
-
-    name = "scroll of infinite recursion"
-    char = u'次'
-    readable = True
-    takeable = True
-    mass = 0.05
-    length = 20.0
-    fg_color = (0.8, 0.8, 0.8, 1.0)
-
-    # page contents shown by the 'read' action (opened as a pager below)
-    pages = [
-        "Instructions for use:\n"
-        "\n"
-        "1. Carefully unroll the scroll.\n"
-        "2. Read the instructions for use.",
-
-        "3. If the instructions are unclear,\n"
-        "   consult the instructions.\n"
-        "4. Repeat until enlightened.",
-
-        "You put the scroll down, none the\n"
-        "wiser but strangely satisfied.",
-    ]
-
-    def read(self, reader):
-        """Show the scroll's pages in a modal pager (the joke ends on the last
-        page; the scroll is not consumed). Returns the pager session."""
-        from . import dialogs
-        return dialogs.open_pager(self.scene, self.description, self.pages)
+from ..heat import blackbody_color
+from ..light import PointLight
+from ..units import K, lm
+from .base import Item
 
 
 class Torch(Item):
@@ -216,6 +123,3 @@ class Torch(Item):
         next_brightness = base_brightness + (new_brightness - base_brightness) * (1 - np.exp(-rate * dt))
         for torch, nb in zip(lit, next_brightness):
             torch.light.brightness = nb
-
-
-

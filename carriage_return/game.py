@@ -15,7 +15,7 @@ determinism).
 Game-side module: it must not import vispy, Qt or OpenGL (see
 tests/test_boundaries.py).
 """
-from .levels import HOME_START, build_world
+from .levels import build_world
 from .player import Player
 from .item import Torch
 
@@ -30,10 +30,10 @@ def new_game(scene):
     Returns ``(world, player)``.
     """
     world = build_world(scene)
-    home = world.levels['home'].maze
+    home = world.levels['home']
 
     player = Player(scene)
-    player.location.update(home, HOME_START)
+    player.location.update(home.maze, home.locations['start'])
 
     # set player initial inventory
     

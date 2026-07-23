@@ -4,7 +4,7 @@ import pytest
 
 from carriage_return.blocktypes import BlockTypes
 from carriage_return.dm import DungeonMaster
-from carriage_return.levels import build_home, build_sewer, build_world
+from carriage_return.levels import build_world, level_002_sewer
 from carriage_return.maze import Maze
 from carriage_return.player import Player
 from carriage_return.portal import Door, Hole, StairsDown, StairsUp
@@ -188,7 +188,8 @@ def test_changing_level_resizes_the_sight_fields(played_world):
     assert scene.field_shape == (20 * ss, 30 * ss, 3)
     assert scene.memory.shape == scene.field_shape[:2]
     assert scene.line_of_sight.shape == scene.field_shape
-    assert scene.sight.data.shape == scene.field_shape[:2] + (4,)
+    assert scene.light.data.shape == scene.field_shape[:2] + (4,)
+    assert scene.memory_overlay.data.shape == scene.field_shape[:2]
 
 
 def test_entities_on_other_levels_are_hidden(played_world):
@@ -274,7 +275,8 @@ def test_a_light_on_another_level_does_not_light_this_one(played_world):
     scene.update_sight(1 / 60.)
 
     assert lower.lights == []
-    assert not scene.sight.data.any()
+    assert not scene.light.data.any()
+    assert not scene.memory_overlay.data.any()
 
 
 def test_leaving_a_level_clears_its_line_of_sight(played_world):
@@ -325,12 +327,14 @@ def test_compositing_a_level_the_player_has_left_uses_its_own_shape():
     # level's lighting; each level now derives every shape from itself.
     big.update_sight(1 / 60., player)
 
-    # sight packs RGBA: [0:3] linear HDR visible light, [3] a memory overlay.
-    # The player is elsewhere, so the view is fully blocked: no current light,
-    # and only the level's OWN (correctly shaped) memory shows through.
-    assert big.sight.data.shape == big.field_shape[:2] + (4,)
-    assert not big.sight.data[..., :3].any()   # fully blocked -> no current light
-    assert big.sight.data[..., 3].any()        # its own remembered field shows
+    # light packs RGBA ([0:3] illuminance, [3] line of sight); memory_overlay
+    # is the display-space overlay. The player is elsewhere, so the view is
+    # fully blocked: no current light and zero line of sight, and only the
+    # level's OWN (correctly shaped) memory shows through.
+    assert big.light.data.shape == big.field_shape[:2] + (4,)
+    assert not big.light.data.any()            # fully blocked -> no light, no line of sight
+    assert big.memory_overlay.data.shape == big.field_shape[:2]
+    assert big.memory_overlay.data.any()       # its own remembered field shows
 
 
 def test_a_level_keeps_its_own_memory(played_world):
@@ -366,38 +370,43 @@ def test_an_unlit_level_renders_dark_rather_than_failing(played_world):
 
     scene.update_sight(1 / 60.)
 
-    assert scene.sight.data.shape == scene.field_shape[:2] + (4,)
-    assert not scene.sight.data.any()
+    # the level is in view (line of sight, channel 3, is non-zero) but unlit:
+    # no illuminance in the rgb channels and nothing remembered, so the GPU
+    # renders it dark rather than the sum cache blowing up.
+    assert scene.light.data.shape == scene.field_shape[:2] + (4,)
+    assert not scene.light.data[..., :3].any()
+    assert not scene.memory_overlay.data.any()
 
 
 # -- the shipped levels -------------------------------------------------------
 
 def test_home_is_a_walled_room_with_a_hole():
-    bt = BlockTypes()
-    level, hole = build_home(bt)
-    maze = level.maze
+    world = build_world(Scene())
+    home = world.levels['home']
+    maze = home.maze
+    hole = home.locations['hole']
 
-    # the hole is a portal entity placed by build_world, not terrain here
+    # the hole is a portal entity placed by the sewer builder, not terrain here
     assert maze.blocktype_at(hole[1], hole[0])['name'] == 'path'
     border = np.concatenate([maze.blocks[0], maze.blocks[-1],
                              maze.blocks[:, 0], maze.blocks[:, -1]])
-    assert (border == bt.id_of('wall')).all()
-    assert (maze.blocks[1:-1, 1:-1] == bt.id_of('path')).all()
+    assert (border == maze.blocktypes.id_of('wall')).all()
+    assert (maze.blocks[1:-1, 1:-1] == maze.blocktypes.id_of('path')).all()
 
 
 def test_the_sewer_is_the_same_every_time():
-    a, a_hole, a_stairs = build_sewer(BlockTypes())
-    b, b_hole, b_stairs = build_sewer(BlockTypes())
+    a_maze, a_loc, _ = level_002_sewer._generate(BlockTypes())
+    b_maze, b_loc, _ = level_002_sewer._generate(BlockTypes())
 
-    assert (a.maze.blocks == b.maze.blocks).all()
-    assert (a_hole, a_stairs) == (b_hole, b_stairs)
+    assert (a_maze.blocks == b_maze.blocks).all()
+    assert a_loc == b_loc
 
 
 def test_the_sewer_hallways_join_up():
     """The stairs must be walkable-reachable from the hole, for any seed."""
     for seed in (20240719, 1, 2, 3, 99):
-        level, hole, stairs = build_sewer(BlockTypes(), seed=seed)
-        maze = level.maze
+        maze, loc, _ = level_002_sewer._generate(BlockTypes(), seed=seed)
+        hole, stairs = loc['hole'], loc['stairs_down']
         walkable = maze.blocktypes['walkable'][maze.blocks]
         seen = np.zeros(maze.shape, dtype=bool)
         stack = [(hole[1], hole[0])]
@@ -415,8 +424,7 @@ def test_the_sewer_hallways_join_up():
 
 def test_the_sewer_stays_inside_its_walls():
     for seed in (20240719, 1, 2, 3, 99):
-        level, hole, stairs = build_sewer(BlockTypes(), seed=seed)
-        maze = level.maze
+        maze, _, _ = level_002_sewer._generate(BlockTypes(), seed=seed)
         walkable = maze.blocktypes['walkable'][maze.blocks]
         assert not walkable[0].any() and not walkable[-1].any()
         assert not walkable[:, 0].any() and not walkable[:, -1].any()

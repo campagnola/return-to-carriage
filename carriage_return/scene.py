@@ -70,8 +70,10 @@ class Scene(Entity):
 
     - ``glyphs`` and ``sprite_layers`` ('scenery', 'items', 'actors') carry
       character sprites; entities write into them as they move.
-    - ``level.sight`` is a FieldLayer holding the composited lighting *
-      line-of-sight + memory field, updated by ``Level.update_sight()``.
+    - ``level.light`` (illuminance + line of sight) and
+      ``level.memory_overlay`` are FieldLayers updated by
+      ``Level.update_sight()``; the renderer uploads them and gates
+      reflection/emission by line of sight on the GPU.
 
     Everything sized to a maze -- the sight fields, the composited lighting,
     and the ``visibility`` shadow provider a backend injects -- lives on the
@@ -180,9 +182,14 @@ class Scene(Entity):
         return self._level.line_of_sight
 
     @property
-    def sight(self):
-        """The composited sight field of the current level."""
-        return self._level.sight
+    def light(self):
+        """The current level's light field (rgb = illuminance, a = line of sight)."""
+        return self._level.light
+
+    @property
+    def memory_overlay(self):
+        """The current level's display-space memory overlay field."""
+        return self._level.memory_overlay
 
     def set_level(self, level):
         """Make *level* visible, rebuilding everything sized from its maze.

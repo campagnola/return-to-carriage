@@ -45,10 +45,10 @@ class Level:
     """One maze, under a name, plus everything sized against that maze.
 
     A Level owns *every* array sized to its maze -- the line-of-sight and
-    memory fields, the composited lighting, the composited ``sight`` field the
-    renderer uploads, and (injected by the display backend) the ``visibility``
-    shadow provider. Nothing maze-sized lives on the scene "for whichever level
-    is current"; it all lives here, on the level it belongs to.
+    memory fields, the composited lighting, the ``light`` and ``memory_overlay``
+    fields the renderer uploads, and (injected by the display backend) the
+    ``visibility`` shadow provider. Nothing maze-sized lives on the scene "for
+    whichever level is current"; it all lives here, on the level it belongs to.
 
     That is what makes the level the unit of consistency across threads. A
     reader -- the draw thread compositing a frame while the input thread walks
@@ -74,6 +74,13 @@ class Level:
         self.maze = maze
         self.world = None
         self.supersample = supersample
+
+        # Named cells of interest on this level, ``{name: (x, y)}`` -- the start
+        # square, portal mouths, torch stands. A higher-numbered level reads the
+        # entries of the lower-numbered levels it links back to (see the level
+        # builders in :mod:`.levels`), so the coordinates portals hang from live
+        # with the level that owns them, not in the code that wires them.
+        self.locations = {}
 
         # let anything holding a maze find the level it belongs to; this is
         # the hop that lets an entity ask about *its own* level's sight
@@ -123,12 +130,18 @@ class Level:
         # eye-adaptation target and the memory field.
         self._albedo_lum = None
 
-        # The composited sight field the renderer uploads: RGBA float32. Owned
-        # by the level so its identity is stable for a backend that captured it,
-        # and always the right shape for this maze. Channels [0:3] are the
-        # linear HDR visible illuminance ``los * E`` (tone-mapped on the GPU);
-        # channel [3] is a display-space memory overlay, already gamma-encoded.
-        self.sight = FieldLayer('sight', shape=(h, w, 4))
+        # The two composited fields the renderer uploads, each owned by the
+        # level so its identity is stable for a backend that captured it and
+        # always the right shape for this maze:
+        #  - light: RGBA float32. Channels [0:3] are the raw linear HDR
+        #    illuminance E (NOT gated by line of sight); channel [3] is the
+        #    line-of-sight scalar in 0..1. The GPU multiplies the two, so
+        #    reflection and emission are both gated by line of sight there.
+        #  - memory_overlay: single-channel float32, the display-space memory
+        #    overlay ``mem_disp * (1 - los)``, already gamma-encoded and masked
+        #    to the cells not currently in view.
+        self.light = FieldLayer('light', shape=(h, w, 4))
+        self.memory_overlay = FieldLayer('memory', shape=(h, w))
 
         # Shadow-map provider sized to this maze, injected by the display
         # backend when it builds this level's GL resources (see the vispy
@@ -203,13 +216,14 @@ class Level:
         """Prepare this level to be shown, dropping every cross-frame cache.
 
         Called when the level becomes the displayed one. Blanks the composited
-        field and the illuminance cache so the first frame is built from
+        fields and the illuminance cache so the first frame is built from
         scratch, matching what a freshly-entered level should look like. The
         albedo map is *not* dropped: it depends only on the fixed maze.
         """
         self.illuminance = None
         self._need_los_update = True
-        self.sight.set_data(np.zeros((*self.memory.shape, 4), dtype='float32'))
+        self.light.set_data(np.zeros((*self.memory.shape, 4), dtype='float32'))
+        self.memory_overlay.set_data(np.zeros(self.memory.shape, dtype='float32'))
 
     def _build_albedo_lum(self):
         """Per-cell reflectance luminance at field resolution, ``(h, w, 1)``.
@@ -229,8 +243,8 @@ class Level:
         return up[:, :, None]
 
     def update_sight(self, dt, player):
-        """Advance this level's sight/memory field by *dt* seconds, writing the
-        result into ``self.sight``.
+        """Advance this level's sight/memory fields by *dt* seconds, writing the
+        result into ``self.light`` and ``self.memory_overlay``.
 
         Called once per rendered frame by the display backend, for the level it
         is currently showing. Everything read here -- the line-of-sight and
@@ -238,18 +252,24 @@ class Level:
         this one level's, sized to this one maze, so no interleaving with a
         level switch on another thread can compose arrays of two shapes.
 
-        The CPU no longer tone-maps. Channels [0:3] of ``sight`` carry the raw
-        linear HDR visible illuminance ``line_of_sight * illuminance``; the GPU
-        applies albedo, the Reinhard curve and display gamma under the player's
-        eye-adaptation exposure. This method also drives that adaptation, from
-        the reflected luminance of the blocks in a window around the player, and
-        maintains the display-space memory overlay it packs into channel [3].
+        The CPU no longer tone-maps, and it no longer conflates lighting with
+        line of sight. The ``light`` field carries raw linear HDR illuminance in
+        channels [0:3] (NOT gated by line of sight) and the line-of-sight scalar
+        in channel [3]; the GPU gates both reflection and emission by that
+        scalar, applies albedo, and runs the Reinhard curve + display gamma
+        under the player's eye-adaptation exposure. Keeping line of sight
+        separate is what lets a self-emitting glyph in an unlit but in-view cell
+        still show -- its emission is gated by line of sight, not by local
+        light. This method also drives that adaptation, from the reflected
+        luminance of the blocks in a window around the player, and maintains the
+        display-space memory overlay in ``memory_overlay``.
 
         When *player* is not standing on this level the view is fully blocked:
-        line of sight is zero, so channels [0:3] are zero and only the memory
-        overlay survives. That is what the renderer shows in the brief window
-        after it has switched to a new level but before the player has been
-        moved onto it -- the level's memory, for free.
+        line of sight is zero, so reflection and emission are gated off on the
+        GPU and only the memory overlay survives. That is what the renderer
+        shows in the brief window after it has switched to a new level but
+        before the player has been moved onto it -- the level's memory, for
+        free.
         """
         watched = player is not None and player.level is self
         h, w = self.memory.shape
@@ -286,8 +306,8 @@ class Level:
             if self._albedo_lum is None:
                 self._albedo_lum = self._build_albedo_lum()
 
-            # linear HDR reflected-light input for the GPU tone map
-            E_vis = line_of_sight * illuminance
+            # Line of sight is effectively a scalar (opaque occluders, so the
+            # shadow map's three channels are identical); collapse it to one.
             los_scalar = line_of_sight.max(axis=2)
 
             # Reflected luminance per cell (cd/m^2): what the eye and memory
@@ -313,9 +333,10 @@ class Level:
             # remember the brightest reflected luminance ever seen at each cell
             self.memory = np.maximum(self.memory, Y_refl * los_scalar)
         else:
-            # fully blocked: no live view, memory shows in full
-            line_of_sight = 0.0
-            E_vis = 0.0
+            # fully blocked: no live view, memory shows in full. Zero
+            # illuminance and zero line of sight gate reflection and emission
+            # off on the GPU; the memory overlay still shows because (1-los)=1.
+            illuminance = 0.0
             los_scalar = 0.0
 
         # forget
@@ -327,11 +348,15 @@ class Level:
         m = self.memory * (0.18 / MEMORY_REF_LUMINANCE)
         mem_disp = (m / (1.0 + m)) ** (1.0 / 2.2) * MEMORY_STRENGTH
 
-        # Pack RGBA: [0:3] linear HDR visible light, [3] memory where not seen.
-        out = np.empty((h, w, 4), dtype='float32')
-        out[:, :, :3] = E_vis
-        out[:, :, 3] = mem_disp * (1.0 - los_scalar)
-        self.sight.set_data(out)
+        # Pack the light field: [0:3] raw linear HDR illuminance (ungated by
+        # line of sight), [3] the line-of-sight scalar the GPU gates against.
+        light = np.empty((h, w, 4), dtype='float32')
+        light[:, :, :3] = illuminance
+        light[:, :, 3] = los_scalar
+        self.light.set_data(light)
+
+        # Memory overlay: shown only where the cell is not currently in view.
+        self.memory_overlay.set_data(mem_disp * (1.0 - los_scalar))
 
     def __repr__(self):
         return "<Level %r %dx%d>" % ((self.name,) + self.maze.shape)

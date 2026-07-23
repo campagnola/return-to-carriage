@@ -2,6 +2,7 @@
 import faulthandler
 faulthandler.enable()
 
+from carriage_return import config
 from carriage_return.backends.vispy import MainWindow, VispySceneRenderer
 from carriage_return.scene import Scene
 from carriage_return.dm import DungeonMaster
@@ -11,12 +12,22 @@ from carriage_return.interpreter import CommandInterpreter
 from carriage_return.input import (InputDispatcher, GameplayInputHandler,
                                    CommandInputHandler, start_gamepad)
 
+import argparse
 import sys
 import vispy.app
 
 
 
 if __name__ == '__main__':
+
+    parser = argparse.ArgumentParser(description='Return to Carriage')
+    parser.add_argument('--test', action='store_true',
+                        help='test mode: speed up slow real-time behaviours '
+                             '(e.g. eye adaptation) for hands-on testing')
+    args = parser.parse_args()
+    # Set before anything is built so construction-time reads (eye adaptation
+    # time constants, etc.) see it.
+    config.test_mode = args.test
 
     dispatcher = InputDispatcher()
     ui = MainWindow(dispatcher)
