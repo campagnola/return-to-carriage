@@ -27,6 +27,7 @@ import time
 import numpy as np
 
 from .entity import Entity
+from .glyph_effects import ColorModifier
 from .light import PointLight
 from .location import Location
 from .units import lm
@@ -70,6 +71,18 @@ def blackbody_color(temperature):
     return tuple(float(np.clip(c, 0.0, 255.0) / 255.0) for c in (red, green, blue))
 
 
+def _emissive_flux(T):
+    """Emission brightness scalar for temperature T (Kelvin).
+
+    Returns 0 at ambient (~300K) and scales up to ~3.0 at peak heat.
+    Tuned to match torch emission at full temperature.
+    """
+    ambient = 300.0
+    peak = 1500.0
+    t = max(0.0, (T - ambient) / (peak - ambient))
+    return t * 3.0
+
+
 class Heat(Entity):
     """A glyph-less entity that heats one maze cell and glows while it cools.
 
@@ -95,7 +108,7 @@ class Heat(Entity):
     #: peak luminous flux of the glow, in lumens, reached at REF_TEMP: the
     #: blackbody colour (0..1 per channel) is scaled by this, so a hot strike
     #: peaks ~10x a torch (a torch is ~15 lm; see :class:`~.light.PointLight`).
-    PEAK_BRIGHTNESS = 15000 * lm
+    PEAK_BRIGHTNESS = 5000 * lm
     #: real-time cooling tick
     STEP_INTERVAL = 1 / 30.
 
@@ -114,6 +127,9 @@ class Heat(Entity):
         self.location = Location(self, None, None)
         self.light = PointLight(self, color=(1.0, 1.0, 1.0), brightness=0.0)
         self.light.pin(self.maze, self.pos)
+
+        self._color_modifier = ColorModifier()
+        maze.add_cell_modifier(pos, self._color_modifier)
 
         self._restyle()          # colour + brightness for the starting temp
         self._relight()          # nudge the level to composite the new light
@@ -137,6 +153,14 @@ class Heat(Entity):
         """Set the light's colour and brightness from the current temperature."""
         self.light.color = blackbody_color(self.temperature)
         self.light.brightness = self._brightness_for(self.temperature)
+
+        color = blackbody_color(self.temperature)
+        flux = _emissive_flux(self.temperature)
+        emission = np.array(color) * flux
+        self._color_modifier.fg_emission = emission
+        self._color_modifier.bg_emission = emission
+        if self._color_modifier._slot is not None:
+            self._color_modifier._slot._dirty = True
 
     def _relight(self):
         """Recomposite this cell's level and ask for a repaint.
@@ -190,6 +214,7 @@ class Heat(Entity):
             return
         self._done = True
         self.light.destroy()
+        self.maze.remove_cell_modifier(self.pos, self._color_modifier)
         level = self.maze.level
         if level is not None:
             level.invalidate_lighting()

@@ -10,10 +10,13 @@ blocktype_dtype = [
     ('fg_color', 'float32', 4),
     ('bg_color', 'float32', 4),
     ('bg_color_var', float),
+    ('fg_emission', 'float32', 3),
+    ('bg_emission', 'float32', 3),
 ]
 
 
-def blocktype(name, char, walkable, opacity, fg_color, bg_color, bg_color_var=0.0):
+def blocktype(name, char, walkable, opacity, fg_color, bg_color, bg_color_var=0.0,
+              fg_emission=(0, 0, 0), bg_emission=(0, 0, 0)):
     """One row of the blocktype table, as a list of columns in dtype order.
 
     Ids are not given here -- BlockTypes assigns them by position. Code that
@@ -24,7 +27,7 @@ def blocktype(name, char, walkable, opacity, fg_color, bg_color, bg_color_var=0.
     default) plus a field in *blocktype_dtype* -- not a dict dumped into a
     catch-all column.
     """
-    return [name, char, walkable, opacity, fg_color, bg_color, bg_color_var]
+    return [name, char, walkable, opacity, fg_color, bg_color, bg_color_var, fg_emission, bg_emission]
 
 
 _default_blocktypes = [
@@ -35,7 +38,8 @@ _default_blocktypes = [
     # A barred window to the outside: impassable, but not opaque -- you see the
     # bright sky through the bars, and daylight streams past them. Dark bars
     # (fg) silhouette against a bright cool-sky background.
-    blocktype('grate', '#',  False,    0,       (.05, .05, .07, 1.0), (.55, .70, 1.0, 1.0)),
+    blocktype('grate', '#',  False,    0,       (.05, .05, .07, 1.0), (.55, .70, 1.0, 1.0),
+              fg_emission=(0.05, 0.03, 0.0), bg_emission=(0.05, 0.03, 0.0)),
     blocktype('grass', '.',  True,     0,       (.05, .8, .1, 1.0),    (.05, .7, .1, 1.0), bg_color_var=0.02),
 ]
 

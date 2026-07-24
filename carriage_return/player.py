@@ -24,7 +24,7 @@ class Player(Entity):
         self.location = Location(self, None, None)
         # zval more negative than any other entity (monsters/items sit at -0.1)
         # so the player always draws on top when co-located.
-        self.sprite = SingleCharSprite(self, zval=-0.2, char='&', emission=(1, 1, 1), layer='actors')
+        self.sprite = SingleCharSprite(self, zval=-0.2, char='&', fg_emission=(1, 1, 1), layer='actors')
 
         # Eye adaptation is player state, not level state: it persists across
         # levels so it rides the player through the hole -- eyes stay daylight-

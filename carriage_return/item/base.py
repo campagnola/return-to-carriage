@@ -19,7 +19,7 @@ class Item(Entity):
     #: Light the glyph emits on its own (RGB, linear), or None for a plain
     #: reflective item. An emitter (see Torch) glows independently of the light
     #: falling on it rather than merely reflecting its surroundings.
-    emission = None
+    fg_emission = None
 
     def __init__(self, location, scene, obj_name=None):
         Entity.__init__(self, entity_type='item.' + self.name, obj_name=obj_name)
@@ -28,7 +28,7 @@ class Item(Entity):
         self.inventory = Inventory(self, allowed_slots=[])
         self.location = Location(self, None, None)
         self.sprite = SingleCharSprite(self, zval=-0.1, char=self.char,
-                                       fg_color=self.fg_color, emission=self.emission,
+                                       fg_color=self.fg_color, fg_emission=self.fg_emission,
                                        layer='items')
 
         # A plain item emits no light. An item that shines builds its own

@@ -1,6 +1,8 @@
 import numpy as np
+from collections import defaultdict
 from PIL import Image
 from .blocktypes import BlockTypes
+from .events import Observable
 from .geometry import isocurve
 from .entity import Entity
 from .inventory import Inventory
@@ -32,6 +34,13 @@ class Maze(Entity):
         self._opacity = None
         self._fg_color = None
         self._bg_color = None
+        self._fg_emission = None
+        self._bg_emission = None
+
+        # per-cell modifier registry: survives level rebuilds
+        self._cell_modifiers = defaultdict(list)  # (row, col) → [ColorModifier, ...]
+        self._scenery_slot = None  # the SpriteSlot currently displaying this maze
+        self.appearance_changed = Observable()
 
     @property
     def shape(self):
@@ -48,6 +57,35 @@ class Maze(Entity):
         self._opacity = None
         self._fg_color = None
         self._bg_color = None
+        self._fg_emission = None
+        self._bg_emission = None
+
+    def add_cell_modifier(self, pos, modifier):
+        """Register a ColorModifier for maze cell pos=(x, y).
+
+        If a scenery slot currently exists (i.e. the maze is displayed), attach
+        the modifier immediately. Otherwise it will be attached when add_scenery
+        is next called.
+        """
+        x, y = int(pos[0]), int(pos[1])
+        self._cell_modifiers[(x, y)].append(modifier)
+        if self._scenery_slot is not None:
+            modifier.cells = y * self.shape[1] + x
+            self._scenery_slot.add_modifier(modifier)
+        self.appearance_changed()
+
+    def remove_cell_modifier(self, pos, modifier):
+        """Unregister a ColorModifier for maze cell pos=(x, y)."""
+        x, y = int(pos[0]), int(pos[1])
+        mods = self._cell_modifiers.get((x, y), [])
+        if modifier in mods:
+            mods.remove(modifier)
+        if self._scenery_slot is not None:
+            try:
+                self._scenery_slot.remove_modifier(modifier)
+            except ValueError:
+                pass  # modifier not attached (slot rebuilt since it was added)
+        self.appearance_changed()
 
     @classmethod
     def filled(cls, shape, blocktypes, blocktype='wall', obj_name=None):
@@ -84,6 +122,18 @@ class Maze(Entity):
                     self._bg_color[mask] += rand
 
         return self._bg_color
+
+    @property
+    def fg_emission(self):
+        if self._fg_emission is None:
+            self._fg_emission = self.blocktypes['fg_emission'][self.blocks]
+        return self._fg_emission
+
+    @property
+    def bg_emission(self):
+        if self._bg_emission is None:
+            self._bg_emission = self.blocktypes['bg_emission'][self.blocks]
+        return self._bg_emission
 
     @classmethod
     def load_image(cls, filename, blocktypes=None, encoding=None, obj_name=None):
@@ -136,9 +186,21 @@ class Maze(Entity):
         pos[..., :2] = np.mgrid[0:shape[1], 0:shape[0]].transpose(2, 1, 0)
         scenery.position = pos
 
-        # set colors
+        # set colors and base emission
         scenery.fgcolor = self.fg_color
         scenery.bgcolor = self.bg_color
+        scenery.fg_emission = self.fg_emission.reshape(-1, 3)
+        scenery.bg_emission = self.bg_emission.reshape(-1, 3)
+
+        # store slot so add_cell_modifier can attach to it immediately, and
+        # reattach any modifiers that were registered before this call
+        self._scenery_slot = scenery
+        cols = self.shape[1]
+        for (x, y), mods in self._cell_modifiers.items():
+            idx = y * cols + x
+            for mod in mods:
+                mod.cells = idx
+                scenery.add_modifier(mod)
 
         return scenery
 

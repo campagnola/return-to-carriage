@@ -233,6 +233,7 @@ class Scene(Entity):
         # display to repaint through here; connect is idempotent, so a level
         # re-entered many times never stacks duplicate callbacks
         level.lighting_changed.connect(self.request_redraw)
+        level.maze.appearance_changed.connect(self.request_redraw)
 
         # rebuild the scenery sprites: free the outgoing maze's slot before
         # allocating the new one, so the layer does not grow by a whole maze

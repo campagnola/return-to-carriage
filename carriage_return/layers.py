@@ -30,6 +30,16 @@ Conventions:
 import numpy as np
 
 from .events import Observable
+from .glyph_effects import ColorModifier  # noqa: F401 — re-exported for callers
+
+
+def _offset_cells(cells, offset):
+    """Shift a cell index or slice by *offset* (a slot's start position in the layer)."""
+    if isinstance(cells, slice):
+        start = (cells.start or 0) + offset
+        stop = (cells.stop + offset) if cells.stop is not None else None
+        return slice(start, stop, cells.step)
+    return cells + offset  # integer index
 
 
 class GlyphLayer(object):
@@ -116,7 +126,8 @@ class SpriteLayer(GlyphLayer):
         self.bgcolor = np.empty((0, 4), dtype='float32')
         # Linear emitted radiance per sprite (RGB); 0 for a plain reflective
         # glyph, non-zero for an emitter such as a torch flame.
-        self.emission = np.empty((0, 3), dtype='float32')
+        self.fg_emission = np.empty((0, 3), dtype='float32')
+        self.bg_emission = np.empty((0, 3), dtype='float32')
         self.slots = []
 
     def __len__(self):
@@ -169,14 +180,17 @@ class SpriteLayer(GlyphLayer):
         glyph = np.zeros((n,), dtype='uint32')
         fgcolor = np.zeros((n, 4), dtype='float32')
         bgcolor = np.zeros((n, 4), dtype='float32')
-        emission = np.zeros((n, 3), dtype='float32')
+        fg_emission = np.zeros((n, 3), dtype='float32')
+        bg_emission = np.zeros((n, 3), dtype='float32')
         position[:keep] = self.position[:keep]
         glyph[:keep] = self.glyph[:keep]
         fgcolor[:keep] = self.fgcolor[:keep]
         bgcolor[:keep] = self.bgcolor[:keep]
-        emission[:keep] = self.emission[:keep]
+        fg_emission[:keep] = self.fg_emission[:keep]
+        bg_emission[:keep] = self.bg_emission[:keep]
         self.position, self.glyph, self.fgcolor, self.bgcolor = position, glyph, fgcolor, bgcolor
-        self.emission = emission
+        self.fg_emission = fg_emission
+        self.bg_emission = bg_emission
 
         self._changed(structure=True)
         return n1
@@ -205,6 +219,8 @@ class SpriteSlot(object):
     def __init__(self, layer, start, shape):
         self.layer = layer
         self.set_shape(shape, inform_parent=False)
+        self._modifiers = []
+        self._dirty = False
         self.set_start(start)
 
     def __len__(self):
@@ -240,8 +256,12 @@ class SpriteSlot(object):
     @fgcolor.setter
     def fgcolor(self, p):
         self._fgcolor = p
-        self.fgcolor[:] = p
-        self.layer._data_changed()
+        if self._modifiers:
+            self._dirty = True
+            self._recompose()
+        else:
+            self.fgcolor[:] = p
+            self.layer._data_changed()
 
     @property
     def bgcolor(self):
@@ -251,19 +271,44 @@ class SpriteSlot(object):
     @bgcolor.setter
     def bgcolor(self, p):
         self._bgcolor = p
-        self.bgcolor[:] = p
-        self.layer._data_changed()
+        if self._modifiers:
+            self._dirty = True
+            self._recompose()
+        else:
+            self.bgcolor[:] = p
+            self.layer._data_changed()
 
     @property
-    def emission(self):
+    def fg_emission(self):
         start, stop = self.indices
-        return self.layer.emission[start:stop].reshape(self.shape + (3,))
+        return self.layer.fg_emission[start:stop].reshape(self.shape + (3,))
 
-    @emission.setter
-    def emission(self, p):
-        self._emission = p
-        self.emission[:] = p
-        self.layer._data_changed()
+    @fg_emission.setter
+    def fg_emission(self, p):
+        self._fg_emission = p
+        if self._modifiers:
+            self._dirty = True
+            self._recompose()
+        else:
+            start, stop = self.indices
+            self.layer.fg_emission[start:stop] = p
+            self.layer._data_changed()
+
+    @property
+    def bg_emission(self):
+        start, stop = self.indices
+        return self.layer.bg_emission[start:stop].reshape(self.shape + (3,))
+
+    @bg_emission.setter
+    def bg_emission(self, p):
+        self._bg_emission = p
+        if self._modifiers:
+            self._dirty = True
+            self._recompose()
+        else:
+            start, stop = self.indices
+            self.layer.bg_emission[start:stop] = p
+            self.layer._data_changed()
 
     def set_start(self, start):
         self.indices = (start, start + len(self))
@@ -272,10 +317,19 @@ class SpriteSlot(object):
             self.glyph = self._glyph
             self.fgcolor = self._fgcolor
             self.bgcolor = self._bgcolor
-            # optional: only slots that emit ever set it; others keep the 0 the
-            # layer's arrays default to after a repack
-            if self._emission is not None:
-                self.emission = self._emission
+            # optional: only slots that emit ever set these; others keep the 0
+            # the layer's arrays default to after a repack
+            if self._fg_emission is not None:
+                self.fg_emission = self._fg_emission
+            if self._bg_emission is not None:
+                self.bg_emission = self._bg_emission
+            if self._modifiers:
+                # The individual setters above called _recompose when
+                # _modifiers was non-empty; call once more here to cover
+                # the case where only position/glyph changed (no setter
+                # triggered _recompose) so the modifier deltas land at
+                # the new indices.
+                self._recompose()
 
     def set_shape(self, shape, inform_parent=True):
         self.shape = shape
@@ -283,9 +337,76 @@ class SpriteSlot(object):
         self._glyph = None
         self._fgcolor = None
         self._bgcolor = None
-        self._emission = None
+        self._fg_emission = None
+        self._bg_emission = None
         if inform_parent:
             self.layer._slot_shape_changed()
+
+    def add_modifier(self, modifier):
+        """Attach a ColorModifier; mark dirty so the renderer recomposes."""
+        modifier._slot = self
+        self._modifiers.append(modifier)
+        self._dirty = True
+        if self.layer is not None:
+            self.layer._data_changed()
+
+    def remove_modifier(self, modifier):
+        """Detach a ColorModifier; mark dirty so the renderer restores base."""
+        self._modifiers.remove(modifier)
+        modifier._slot = None
+        self._dirty = True
+        if self.layer is not None:
+            self.layer._data_changed()
+
+    def _recompose(self):
+        """Write effective = base + Σ modifiers into the layer arrays.
+
+        Called on the draw thread (via VispyLayerRenderer.sync) and eagerly
+        from setters when modifiers are present. Resets the dirty flag.
+        """
+        self._dirty = False
+        start, stop = self.indices
+        n = stop - start
+        layer = self.layer
+
+        def _flat(val, ncols):
+            """Return *val* reshaped to (n, ncols) when its total size matches;
+            otherwise return as-is so numpy can broadcast scalar-like values."""
+            a = np.asarray(val)
+            return a.reshape(n, ncols) if a.size == n * ncols else a
+
+        # Re-apply base values; reset to 0 if base is unset but modifiers
+        # will add to it, so stale accumulated values don't leak through.
+        if self._fg_emission is not None:
+            layer.fg_emission[start:stop] = _flat(self._fg_emission, 3)
+        elif self._modifiers:
+            layer.fg_emission[start:stop] = 0
+        if self._bg_emission is not None:
+            layer.bg_emission[start:stop] = _flat(self._bg_emission, 3)
+        elif self._modifiers:
+            layer.bg_emission[start:stop] = 0
+        if self._fgcolor is not None:
+            layer.fgcolor[start:stop] = _flat(self._fgcolor, 4)
+        elif self._modifiers:
+            layer.fgcolor[start:stop] = 0
+        if self._bgcolor is not None:
+            layer.bgcolor[start:stop] = _flat(self._bgcolor, 4)
+        elif self._modifiers:
+            layer.bgcolor[start:stop] = 0
+
+        for mod in self._modifiers:
+            cells = (slice(start, stop) if mod.cells == slice(None)
+                     else _offset_cells(mod.cells, start))
+            if mod.fg_emission is not None:
+                layer.fg_emission[cells] += mod.fg_emission
+            if mod.bg_emission is not None:
+                layer.bg_emission[cells] += mod.bg_emission
+            if mod.fgcolor is not None:
+                layer.fgcolor[cells] += mod.fgcolor
+            if mod.bgcolor is not None:
+                layer.bgcolor[cells] += mod.bgcolor
+
+        layer._data_changed()
 
 
 class CharGridLayer(GlyphLayer):

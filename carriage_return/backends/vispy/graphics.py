@@ -38,19 +38,22 @@ class SpritesVisual(vispy.visuals.Visual):
         attribute float sprite;
         attribute vec4 fgcolor;
         attribute vec4 bgcolor;
-        attribute vec3 emission;
+        attribute vec3 fg_emission;
+        attribute vec3 bg_emission;
 
         varying float v_sprite;
         varying vec4 v_fgcolor;
         varying vec4 v_bgcolor;
-        varying vec3 v_emission;
+        varying vec3 v_fg_emission;
+        varying vec3 v_bg_emission;
         varying vec2 v_point_coord_scale;
         varying vec2 v_point_size;
 
         void main (void) {
             v_fgcolor = fgcolor;
             v_bgcolor = bgcolor;
-            v_emission = emission;
+            v_fg_emission = fg_emission;
+            v_bg_emission = bg_emission;
             v_sprite = sprite;
 
             // Map sprite location to the coordinate system where the size of
@@ -84,7 +87,8 @@ class SpritesVisual(vispy.visuals.Visual):
         #version 120
         varying vec4 v_fgcolor;
         varying vec4 v_bgcolor;
-        varying vec3 v_emission;
+        varying vec3 v_fg_emission;
+        varying vec3 v_bg_emission;
         varying float v_sprite;
         varying vec2 v_point_coord_scale;
         varying vec2 v_point_size;
@@ -115,7 +119,7 @@ class SpritesVisual(vispy.visuals.Visual):
             }
             
             gl_FragColor = v_fgcolor * alpha + v_bgcolor * (1-alpha);
-            //EMISSION_WRITE v_emission
+            //EMISSION_WRITE
         }
     """
 
@@ -126,18 +130,21 @@ class SpritesVisual(vispy.visuals.Visual):
         in float sprite;
         in vec4 fgcolor;
         in vec4 bgcolor;
-        in vec3 emission;
+        in vec3 fg_emission;
+        in vec3 bg_emission;
 
         out float v_sprite;
         out vec4 v_fgcolor;
         out vec4 v_bgcolor;
-        out vec3 v_emission;
+        out vec3 v_fg_emission;
+        out vec3 v_bg_emission;
         out vec2 v_sprite_size;
 
         void main (void) {
             v_fgcolor = fgcolor;
             v_bgcolor = bgcolor;
-            v_emission = emission;
+            v_fg_emission = fg_emission;
+            v_bg_emission = bg_emission;
             v_sprite = sprite;
             v_sprite_size = $sprite_size;
 
@@ -154,13 +161,15 @@ class SpritesVisual(vispy.visuals.Visual):
         in float v_sprite[];
         in vec4 v_fgcolor[];
         in vec4 v_bgcolor[];
-        in vec3 v_emission[];
+        in vec3 v_fg_emission[];
+        in vec3 v_bg_emission[];
         in vec2 v_sprite_size[];
 
         out float f_sprite;
         out vec4 f_fgcolor;
         out vec4 f_bgcolor;
-        out vec3 f_emission;
+        out vec3 f_fg_emission;
+        out vec3 f_bg_emission;
         out vec2 point_coord;
         out vec2 point_size;
 
@@ -170,7 +179,8 @@ class SpritesVisual(vispy.visuals.Visual):
             f_sprite = v_sprite[0];
             f_fgcolor = v_fgcolor[0];
             f_bgcolor = v_bgcolor[0];
-            f_emission = v_emission[0];
+            f_fg_emission = v_fg_emission[0];
+            f_bg_emission = v_bg_emission[0];
         
             // Map sprite location to the coordinate system where the size of
             // the sprite is specified
@@ -216,7 +226,8 @@ class SpritesVisual(vispy.visuals.Visual):
         uniform float size;
         in vec4 f_fgcolor;
         in vec4 f_bgcolor;
-        in vec3 f_emission;
+        in vec3 f_fg_emission;
+        in vec3 f_bg_emission;
         in float f_sprite;
         in vec2 point_coord;
         in vec2 point_size;
@@ -245,7 +256,7 @@ class SpritesVisual(vispy.visuals.Visual):
             }
             
             gl_FragColor = f_fgcolor * alpha + f_bgcolor * (1-alpha);
-            //EMISSION_WRITE f_emission
+            //EMISSION_WRITE
         }
     """
 
@@ -278,7 +289,8 @@ class SpritesVisual(vispy.visuals.Visual):
         self.bgcolor = np.empty((0, 4), dtype='float32')
         # Linear emitted radiance per sprite (RGB, no alpha); 0 for a plain
         # reflective glyph, non-zero for an emitter such as a torch flame.
-        self.emission = np.empty((0, 3), dtype='float32')
+        self.fg_emission = np.empty((0, 3), dtype='float32')
+        self.bg_emission = np.empty((0, 3), dtype='float32')
 
         self._atlas_tex = vispy.gloo.Texture2D(shape=(1,1,4), format='rgba', interpolation='nearest')
         self._atlas_map_tex = vispy.gloo.Texture1D(shape=(1,4), format='rgba', internalformat='rgba32f', interpolation='nearest')
@@ -301,7 +313,8 @@ class SpritesVisual(vispy.visuals.Visual):
         self.shared_program['sprite'] = vispy.gloo.VertexBuffer()
         self.shared_program['fgcolor'] = vispy.gloo.VertexBuffer()
         self.shared_program['bgcolor'] = vispy.gloo.VertexBuffer()
-        self.shared_program['emission'] = vispy.gloo.VertexBuffer()
+        self.shared_program['fg_emission'] = vispy.gloo.VertexBuffer()
+        self.shared_program['bg_emission'] = vispy.gloo.VertexBuffer()
         
         # blending must be declared here: vispy applies gl_state incrementally
         # per visual, so relying on another visual having enabled blend leaves
@@ -310,22 +323,28 @@ class SpritesVisual(vispy.visuals.Visual):
                              blend_func=('src_alpha', 'one_minus_src_alpha'))
 
     def _resolve_emission(self, src):
-        """Fill in the fragment shader's ``//EMISSION_WRITE <varying>`` marker.
+        """Fill in the fragment shader's ``//EMISSION_WRITE`` marker.
 
         A visual that emits (``emits`` True) turns the marker into a statement
-        that stashes the coverage-scaled emission colour in ``sprite_emission``
-        for the tone-mapping filter to read; the filter is what declares that
-        global, so the write is emitted only when a filter is in play. A visual
-        that does not emit (the HUD grids) leaves the marker as the comment it
-        already is, so it draws its glyphs with no emission and no filter.
+        that blends fg and bg emission by glyph coverage and stashes the result
+        in ``sprite_emission`` for the tone-mapping filter to read; the filter
+        is what declares that global, so the write is emitted only when a filter
+        is in play. A visual that does not emit (the HUD grids) leaves the
+        marker as the comment it already is, so it draws its glyphs with no
+        emission and no filter.
         """
-        marker = '//EMISSION_WRITE '
+        marker = '//EMISSION_WRITE'
         i = src.find(marker)
         if i < 0 or not self.emits:
             return src
-        varying = src[i + len(marker):].split()[0]
-        return src.replace(marker + varying,
-                           'sprite_emission = %s * alpha;' % varying)
+        if '#version 120' in src:
+            fg_varying = 'v_fg_emission'
+            bg_varying = 'v_bg_emission'
+        else:
+            fg_varying = 'f_fg_emission'
+            bg_varying = 'f_bg_emission'
+        replacement = 'sprite_emission = %s * alpha + %s * (1.0 - alpha);' % (fg_varying, bg_varying)
+        return src.replace(marker, replacement)
 
     def add_sprites(self, shape):
         """Expand to allow more sprites, return a SpriteData instance with the specified shape.
@@ -346,7 +365,8 @@ class SpritesVisual(vispy.visuals.Visual):
         self.sprite = np.resize(self.sprite, (n,))
         self.fgcolor = np.resize(self.fgcolor, (n, 4))
         self.bgcolor = np.resize(self.bgcolor, (n, 4))
-        self.emission = np.resize(self.emission, (n, 3))
+        self.fg_emission = np.resize(self.fg_emission, (n, 3))
+        self.bg_emission = np.resize(self.bg_emission, (n, 3))
         self._upload_data()
         return n1
 
@@ -363,7 +383,8 @@ class SpritesVisual(vispy.visuals.Visual):
         self.shared_program['sprite'].set_data(self.sprite.astype('float32'))
         self.shared_program['fgcolor'].set_data(self.fgcolor)
         self.shared_program['bgcolor'].set_data(self.bgcolor)
-        self.shared_program['emission'].set_data(self.emission)
+        self.shared_program['fg_emission'].set_data(self.fg_emission)
+        self.shared_program['bg_emission'].set_data(self.bg_emission)
         self.shared_program.vert['sprite_size'] = tuple(self.sprite_size)
             
         self._need_data_upload = False
@@ -492,16 +513,29 @@ class SpriteData(object):
         self.sprites.update()
 
     @property
-    def emission(self):
+    def fg_emission(self):
         start, stop = self.indices
-        return self.sprites.emission[start:stop].reshape(self.shape + (3,))
+        return self.sprites.fg_emission[start:stop].reshape(self.shape + (3,))
 
-    @emission.setter
-    def emission(self, p):
-        self._emission = p
+    @fg_emission.setter
+    def fg_emission(self, p):
+        self._fg_emission = p
         start, stop = self.indices
-        self.emission[:] = p
-        self.sprites.shared_program['emission'][start:stop] = self.emission.view(dtype=[('emission', 'float32', 3)]).reshape(stop-start)
+        self.fg_emission[:] = p
+        self.sprites.shared_program['fg_emission'][start:stop] = self.fg_emission.view(dtype=[('fg_emission', 'float32', 3)]).reshape(stop-start)
+        self.sprites.update()
+
+    @property
+    def bg_emission(self):
+        start, stop = self.indices
+        return self.sprites.bg_emission[start:stop].reshape(self.shape + (3,))
+
+    @bg_emission.setter
+    def bg_emission(self, p):
+        self._bg_emission = p
+        start, stop = self.indices
+        self.bg_emission[:] = p
+        self.sprites.shared_program['bg_emission'][start:stop] = self.bg_emission.view(dtype=[('bg_emission', 'float32', 3)]).reshape(stop-start)
         self.sprites.update()
 
     def set_start(self, start):
@@ -511,10 +545,12 @@ class SpriteData(object):
             self.sprite = self._sprite
             self.fgcolor = self._fgcolor
             self.bgcolor = self._bgcolor
-            # optional: only emitting regions ever set it; others keep the 0
+            # optional: only emitting regions ever set these; others keep the 0
             # the visual's arrays default to after a resize
-            if self._emission is not None:
-                self.emission = self._emission
+            if self._fg_emission is not None:
+                self.fg_emission = self._fg_emission
+            if self._bg_emission is not None:
+                self.bg_emission = self._bg_emission
 
     def set_shape(self, shape, inform_parent=True):
         self.shape = shape
@@ -522,7 +558,8 @@ class SpriteData(object):
         self._sprite = None
         self._fgcolor = None
         self._bgcolor = None
-        self._emission = None
+        self._fg_emission = None
+        self._bg_emission = None
         if inform_parent:
             self.sprites.data_changed_shape()
 

@@ -58,7 +58,7 @@ class Torch(Item):
     #: reflecting what falls on it. In the same units as the light it casts, so
     #: the glyph glows at the flame's own colour and reads as the source of the
     #: pool of light around it instead of a lit surface the colour of the floor.
-    emission = np.array(LIGHT_COLOR) * 3
+    fg_emission = np.array(LIGHT_COLOR) * 3
 
     # Flicker. The flame's log-brightness wanders around 0 as a random walk
     # pulled back to centre (Ornstein-Uhlenbeck), so brightness is log-normal:

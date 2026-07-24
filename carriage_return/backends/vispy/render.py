@@ -83,6 +83,13 @@ class VispyLayerRenderer(object):
 
     def sync(self):
         """Copy changed layer data into the visual; no-op when nothing changed."""
+        # Recompose dirty SpriteSlots before uploading so effective values
+        # (base + modifier deltas) are in the layer arrays for this frame's upload.
+        for layer in self.layers:
+            for slot in layer.slots:
+                if slot._dirty:
+                    slot._recompose()
+
         glyphs = self.glyphs
         if glyphs.version != self._glyphs_version:
             self._glyphs_version = glyphs.version
@@ -114,7 +121,8 @@ class VispyLayerRenderer(object):
             region.sprite = layer.glyph
             region.fgcolor = layer.fgcolor
             region.bgcolor = layer.bgcolor
-            region.emission = layer.emission
+            region.fg_emission = layer.fg_emission
+            region.bg_emission = layer.bg_emission
             self._synced_versions[layer.name] = versions
 
 
