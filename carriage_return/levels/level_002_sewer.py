@@ -27,7 +27,7 @@ SKY = np.array([0.8, 0.9, 1.0])
 
 #: Perceived-luminance threshold (lux) below which a sewer cell reads as
 #: complete darkness; tunable in the visual pass.
-DARK_THRESHOLD = 0.05
+DARK_THRESHOLD = 0.003
 
 
 def _generate(blocktypes, seed=SEED):
