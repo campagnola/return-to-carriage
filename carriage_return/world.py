@@ -408,6 +408,15 @@ class Level:
             return None
         return field[y * ss, x * ss]
 
+    def luminance_at(self, pos):
+        """Perceived luminance (Rec. 709) of the illuminance arriving at maze
+        cell *pos*, or None if the level has not yet been composited (see
+        illuminance_at)."""
+        illuminance = self.illuminance_at(pos)
+        if illuminance is None:
+            return None
+        return float(illuminance @ LUMINANCE_WEIGHTS)
+
     def is_dark_at(self, pos, threshold):
         """True if cell *pos* is in effectively complete darkness: the perceived
         luminance of the illuminance arriving there is below *threshold* (lux).
@@ -415,14 +424,14 @@ class Level:
         the player out of darkness automatically once composited.
 
         Returns None until the level's lighting has been composited at least once
-        since it was entered (illuminance_at is None): before that there is no
+        since it was entered (luminance_at is None): before that there is no
         light field to judge, and a darkness warning fired then would misjudge
         the very cell the player just arrived on -- the daylit hole they dropped
         through -- as pitch dark."""
-        illuminance = self.illuminance_at(pos)
-        if illuminance is None:
+        luminance = self.luminance_at(pos)
+        if luminance is None:
             return None
-        return float(illuminance @ LUMINANCE_WEIGHTS) < threshold
+        return luminance < threshold
 
     def __repr__(self):
         return "<Level %r %dx%d>" % ((self.name,) + self.maze.shape)

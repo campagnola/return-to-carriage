@@ -20,7 +20,7 @@ from .layers import CharGridLayer
 # placeholder content, hard-coded until real stats/inspection exist
 STATS_TEXT = ("HP:17/33   Food:56%  Water:34%  Sleep:65%   Weight:207(45)"
               "    Level:3  Int:12  Str:9  Wis:11  Cha:2")
-INFO_TEXT = "There is a scroll of infinite recursion here."
+INFO_TEXT = ""
 
 
 def wrap(line, width):

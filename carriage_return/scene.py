@@ -5,12 +5,7 @@ from .maze import Maze
 from .entity import Entity
 from .events import Observable
 from .world import SIGHT_SUPERSAMPLE, Level
-
-#: Salience at or above which a percept is logged the instant it is noticed,
-#: rather than held for a later "look". The boundary sits at 0 -- "maximally
-#: cared about" -- so anything with non-negative salience speaks up immediately
-#: and only the explicitly quieter (negative) percepts wait to be looked for.
-AUTO_LOG_SALIENCE = 0.0
+from .perception import AUTO_LOG_SALIENCE
 
 
 
@@ -258,7 +253,9 @@ class Scene(Entity):
         assert self._player is None
         self._player = player
         player.location.global_changed.connect(self._player_moved)
+        player.location.global_changed.connect(self._check_nearby_percepts)
         self._player_moved()
+        self._check_nearby_percepts()
 
     def _player_moved(self, event=None):
         # the level the player now stands on must recast sight and rescale its
@@ -267,6 +264,27 @@ class Scene(Entity):
         level = self._player.level if self._player is not None else None
         if level is not None:
             level.invalidate_sight()
+
+    def _check_nearby_percepts(self, event=None):
+        """Evaluate every percept-bearing item on the player's current level
+        on every player move, so detection can fire on approach rather than
+        only when standing exactly on an item's cell.
+
+        Filtering `self.items` to the current level with non-empty `.percepts`
+        is cheap at this game's scale (a handful of items per level) -- no
+        spatial registry needed. The actual "visibility map" lookup happens
+        inside each percept's own `detectability()`, via the level's already-
+        cached `illuminance_at`/`line_of_sight_at`, so the expensive part
+        stays O(1) regardless of map size."""
+        level = self._player.level if self._player is not None else None
+        if level is None:
+            return
+        for item in self.items:
+            loc = item.location.global_location
+            if loc is None or loc.container.level is not level or not item.percepts:
+                continue
+            for percept in item.percepts:
+                self.perceive(percept, self._player)
 
     def monster_moved(self, mon, old_pos):
         if old_pos is not None:
@@ -282,20 +300,24 @@ class Scene(Entity):
 
     def perceive(self, percept, who=None):
         """Central perception resolver: decide whether *who* notices *percept*
-        now, and if so deliver it. Salient percepts (salience >= AUTO_LOG_SALIENCE)
-        are delivered immediately (on_perceived -> the log). Returns whether it
-        was noticed.
+        now, and if so deliver it. Runs a three-stage pipeline so each party
+        only answers what it actually knows:
 
-        *who* is the perceiver whose acuity is weighed against the percept's
-        log-scale visibility: noticed when ``who.perception > -visibility``. The
-        randomness lives in the perceiver -- ``Player.perception`` samples a
-        distribution on each read -- so a keen roll catches fainter things. The
-        percept's own cooldown suppresses repeats within its window.
+        1. ``percept.detectability(who)`` -- the percept's own physical
+           detectability, per sense, to a generic observer at *who*'s
+           position (lighting, camouflage, distance -- see perception.py).
+        2. ``self.modify_detectability(...)`` -- environment-wide conditions
+           (fog, ambient noise) the scene, not the percept, knows about.
+        3. ``who.detects(...)`` -- whether *who*'s own senses clear that bar,
+           and, if so, ``who.cares_about(percept)`` -- whether it is
+           important enough to announce immediately rather than held for a
+           later "look".
 
-        *who* defaults to None, meaning the percept is offered to anyone/everyone
-        nearby (a noise everyone in earshot might catch) rather than to one
-        actor. That broadcast is not implemented yet, so None currently raises;
-        callers with a specific perceiver pass it explicitly.
+        Returns whether *who* noticed it. *who* defaults to None, meaning the
+        percept is offered to anyone/everyone nearby (a noise everyone in
+        earshot might catch) rather than to one actor. That broadcast is not
+        implemented yet, so None currently raises; callers with a specific
+        perceiver pass it explicitly.
         """
         if who is None:
             raise NotImplementedError(
@@ -304,12 +326,22 @@ class Scene(Entity):
         now = self.clock()
         if not percept.ready(now):
             return False
-        if who.perception <= -percept.visibility:
+        raw = percept.detectability(who)
+        adjusted = self.modify_detectability(raw, percept, who)
+        if not who.detects(adjusted):
             return False
         percept.mark(now)
-        if percept.salience >= AUTO_LOG_SALIENCE:
+        if who.cares_about(percept):
             percept.on_perceived(self, who)
         return True
+
+    def modify_detectability(self, values, percept, who):
+        """Environment-wide modifiers (fog, ambient noise...) applied on top
+        of a percept's own physical detectability, before the perceiver's
+        stats are weighed. Nothing environment-wide exists in the game yet,
+        so this is a pass-through -- the seam a future scene-wide condition
+        would hang off."""
+        return values
 
     def items_at(self, pos):
         """Return the items lying in the maze at *pos*."""

@@ -7,6 +7,7 @@ from .location import Location
 from .sprite import SingleCharSprite
 from .units import lm
 from .random import RandomDist
+from .perception import AUTO_LOG_SALIENCE
 
 
 #: The 'glo' spell's light: bright, pure white. Equal RGB channels so it reads
@@ -40,13 +41,38 @@ class Player(Entity):
         # levels; it needs no inventory slot. Toggled by toggle_glo.
         self.glo = None
 
-        self.base_perception = RandomDist('lognorm', mean=1, stdev=0.1)
+        #: per-sense acuity distributions, keyed by sense name ('vision',
+        #: 'hearing', ...). Only vision has a real stat today; a sense with no
+        #: entry here falls back to a neutral baseline in perception().
+        self.base_perception = {
+            'vision': RandomDist('lognorm', mean=1, stdev=0.1),
+        }
 
         scene.player = self
 
-    @property
-    def perception(self):
-        return self.base_perception()
+    def perception(self, sense):
+        """Sample this player's current acuity for *sense*, fresh each call --
+        the seam Scene.perceive's noticing roll samples through, so a keen
+        roll catches fainter things. A sense with no stat of its own yet
+        falls back to a neutral baseline of 0 (neither helped nor hindered)."""
+        dist = self.base_perception.get(sense)
+        return dist() if dist is not None else 0.0
+
+    def detects(self, per_sense_values):
+        """Whether this player's own senses catch a percept, given its
+        (already environment-adjusted) per-sense detectability. True if any
+        single sense clears its own bar -- a keener eye lifts vision-based
+        percepts toward the threshold independently of how sharp the
+        player's hearing is."""
+        return any(self.perception(sense) > -value
+                   for sense, value in per_sense_values.items())
+
+    def cares_about(self, percept):
+        """Whether a just-detected percept is important enough to be told
+        about immediately vs. quietly noted for a later look. For now mirrors
+        the percept's own salience hint; the seam where player-specific
+        interest (already found ten swords, in a hurry, ...) would grow in."""
+        return percept.salience >= AUTO_LOG_SALIENCE
 
     def take(self, item):
         """Move *item* from the maze into this player's inventory.

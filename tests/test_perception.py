@@ -9,14 +9,17 @@ the darkness and grue paths are exercised by setting ``level.illuminance``
 directly rather than rendering.
 """
 import os
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
 
 from carriage_return.blocktypes import BlockTypes
+from carriage_return.dm import DungeonMaster
+from carriage_return.item import Sword
 from carriage_return.levels import build_world
 from carriage_return.maze import Maze
-from carriage_return.perception import ContinuousPercept, Percept, TransientPercept
+from carriage_return.perception import ContinuousPercept, Percept, TransientPercept, VisualPercept
 from carriage_return.player import Player
 from carriage_return.random import RandomDist
 from carriage_return.scene import AUTO_LOG_SALIENCE, Scene
@@ -28,9 +31,16 @@ GRUE_LINE = "It is dark here. You are likely to be eaten by a grue."
 
 
 class StubPerceiver:
-    """The minimal thing Scene.perceive needs of a perceiver: a perception stat."""
+    """The minimal thing Scene.perceive needs of a perceiver: a perception stat,
+    and the detects/cares_about contract Player now implements for real."""
     def __init__(self, perception=1.0):
         self.perception = perception
+
+    def detects(self, per_sense_values):
+        return any(self.perception > -v for v in per_sense_values.values())
+
+    def cares_about(self, percept):
+        return percept.salience >= AUTO_LOG_SALIENCE
 
 
 def _small_maze(shape=(12, 20)):
@@ -195,9 +205,10 @@ def test_too_faint_to_notice_is_not_marked(scene):
 def test_perceive_with_real_player(scene):
     player = Player(scene)               # Player.__init__ sets scene.player = self
     # pin the acuity distribution to a constant for a deterministic roll
-    player.base_perception.update(dist_type='constant', value=5.0)
+    player.base_perception['vision'].update(dist_type='constant', value=5.0)
     assert scene.player is player
-    p = TransientPercept("you notice something", salience=0.0, visibility=1.0)
+    p = TransientPercept("you notice something", salience=0.0, visibility=1.0,
+                         sense='vision')
 
     n0 = len(scene.log.lines)
     assert scene.perceive(p, player) is True
@@ -289,7 +300,7 @@ def grue_world():
     now = [1000.0]
     scene.clock = lambda: now[0]
     player = Player(scene)
-    player.base_perception = RandomDist('constant', value=1e6)  # noticing is certain
+    player.base_perception['vision'] = RandomDist('constant', value=1e6)  # noticing is certain
     world = build_world(scene)
     sewer = world.levels['sewer']
     return scene, world, player, sewer, now
@@ -347,3 +358,116 @@ def test_no_grue_when_the_cell_is_lit(grue_world):
     sewer.illuminance = np.full(sewer.field_shape, 5e4, dtype='float32')  # bright
     player.location.update(sewer.maze, sewer.locations['hole'])
     assert _grue_lines(scene) == []
+
+
+# -- Sword integration --------------------------------------------------------
+
+GLINT_LINE = "Something catches your eye."
+SWORD_LINE = "There is a rusty sword here."
+
+
+@pytest.fixture
+def sword_world():
+    """A full world with a player and a dungeon master, ready to walk onto the
+    sewer's sword. Mirrors game.new_game's ordering (player before world) and
+    makes the sewer current so dm.move_player operates on it. Perception is
+    pinned high so the sword is always noticed. Returns
+    (scene, player, sewer, dm, sword_cell, now)."""
+    os.chdir(PROJECT_ROOT)
+    scene = Scene()
+    now = [1000.0]
+    scene.clock = lambda: now[0]
+    player = Player(scene)
+    player.base_perception['vision'] = RandomDist('constant', value=1e6)
+    world = build_world(scene)
+    sewer = world.levels['sewer']
+    scene.set_level(sewer)
+    assert any(isinstance(e, Sword) for e in sewer.maze.inventory[sewer.locations['sword']])
+    return scene, player, sewer, DungeonMaster(scene), sewer.locations['sword'], now
+
+
+def _walk_onto_sword(player, sewer, dm, sword_cell):
+    """Put the player next to the sword, then step onto its cell -- a real move
+    so dm.move_player asks the sword (on_walked_on) what happens."""
+    player.location.update(sewer.maze, (sword_cell[0], sword_cell[1] + 1))
+    dm.move_player(player, sword_cell)
+
+
+def test_sword_is_silent_in_complete_darkness(sword_world):
+    scene, player, sewer, dm, sword_cell, now = sword_world
+    sewer.illuminance = np.zeros(sewer.field_shape, dtype='float32')  # true darkness
+    _walk_onto_sword(player, sewer, dm, sword_cell)
+    # neither of the sword's own percepts fires in true darkness -- unrelated
+    # to whether the sewer's grue warning (a separate, generic-sense percept
+    # tied to level darkness, not the sword) also fires on the same step.
+    assert GLINT_LINE not in scene.log.lines
+    assert SWORD_LINE not in scene.log.lines
+
+
+def test_sword_is_plain_when_the_cell_is_lit(sword_world):
+    scene, player, sewer, dm, sword_cell, now = sword_world
+    sewer.illuminance = np.full(sewer.field_shape, 5e4, dtype='float32')  # bright
+    _walk_onto_sword(player, sewer, dm, sword_cell)
+    assert SWORD_LINE in scene.log.lines
+    # GLINT_LINE may also fire alongside it -- percepts are independent now
+
+
+# -- VisualPercept.detectability -----------------------------------------------
+
+class _FakeLevel:
+    """The minimal thing VisualPercept.detectability needs from a Level."""
+    def __init__(self, luminance):
+        self._luminance = luminance
+
+    def luminance_at(self, pos):
+        return self._luminance
+
+
+def _fake_positioned(slot, level):
+    """A minimal stand-in for anything with `.location.global_location.slot`
+    and `.location.global_location.container.level` -- enough for both the
+    percept's owning entity and the perceiver."""
+    loc = SimpleNamespace(slot=slot, container=SimpleNamespace(level=level))
+    return SimpleNamespace(location=SimpleNamespace(global_location=loc))
+
+
+def test_visual_percept_is_negative_infinity_in_true_darkness():
+    level = _FakeLevel(luminance=0.0)
+    entity = _fake_positioned((5, 5), level)
+    perceiver = _fake_positioned((5, 5), level)
+    p = VisualPercept("x", salience=0.0, visibility=1.0, entity=entity)
+    assert p.detectability(perceiver) == {'vision': float('-inf')}
+
+
+def test_visual_percept_saturates_at_visibility_in_bright_light():
+    level = _FakeLevel(luminance=1e5)  # far above DIFFUSE_SCALE (2.0 lux)
+    entity = _fake_positioned((5, 5), level)
+    perceiver = _fake_positioned((5, 5), level)  # distance 0
+    p = VisualPercept("x", salience=0.0, visibility=2.5, entity=entity)
+    assert p.detectability(perceiver)['vision'] == pytest.approx(2.5)
+
+
+def test_visual_percept_glint_clears_before_identify_in_dim_light():
+    level = _FakeLevel(luminance=0.1)  # dim, well below DIFFUSE_SCALE
+    entity = _fake_positioned((5, 5), level)
+    perceiver = _fake_positioned((5, 5), level)
+    identify = VisualPercept("id", salience=0.0, visibility=0.0, entity=entity)
+    glint = VisualPercept("glint", salience=0.0, visibility=6.0, entity=entity)
+    identify_vis = identify.detectability(perceiver)['vision']
+    glint_vis = glint.detectability(perceiver)['vision']
+    # a realistic acuity (~1.0, the game's default lognorm mean) clears the
+    # glint's bar but not the identify bar -- this is what makes "catches
+    # your eye" trigger before "there is a rusty sword here" as light rises.
+    assert glint_vis > -1.0
+    assert identify_vis < -1.0
+
+
+def test_visual_percept_attenuates_with_distance():
+    level = _FakeLevel(luminance=1e5)
+    entity = _fake_positioned((0, 0), level)
+    near = _fake_positioned((1, 0), level)
+    far = _fake_positioned((10, 0), level)
+    p = VisualPercept("x", salience=0.0, visibility=6.0, entity=entity)
+    near_vis = p.detectability(near)['vision']
+    far_vis = p.detectability(far)['vision']
+    assert far_vis < near_vis

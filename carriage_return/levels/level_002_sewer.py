@@ -7,7 +7,7 @@ whose shaft is carried by the hole's sewer end like a torch's flame.
 """
 import numpy as np
 
-from ..item import Torch
+from ..item import Sword, Torch
 from ..light import ArrayLight, PointLight
 from ..maze import Maze
 from ..perception import TransientPercept
@@ -147,10 +147,16 @@ def _generate(blocktypes, seed=SEED):
     grate_spot[gy - half:gy + half + 1, xb:gx + 1] = 1.0   # floor inside the bars
     grate_spot[gy - half - 1:gy + half + 2, gx] = 1.0      # the barred window
 
+    # Whichever N-S hall reaches furthest north pokes past Hall 5 to a dead end
+    # well away from every light source -- the dark hallway end where the sword
+    # lies, seen only as a glint until the player brings a light of their own.
+    sword_pos = (x2, north2) if north2 < north3 else (x3, north3)
+
     locations = {
         'hole': shift(hole_pos),
         'stairs_down': shift(stairs_pos),
         'grate': (gx, gy),
+        'sword': shift(sword_pos),
     }
     return cropped, locations, grate_spot
 
@@ -216,6 +222,11 @@ def build_level(scene):
     # ceiling opening the player fell through is lit by its own daylight.
     sx, sy = locations['stairs_down']
     Torch(location=(maze, (sx - 1, sy)), scene=scene)
+
+    # The rusty sword, lying at the dark north dead end. No light of its own:
+    # unlit it is only a glint that catches the eye, and reads as a plain rusty
+    # sword once the player lights the cell (see Sword.is_brightly_lit).
+    Sword(location=(maze, locations['sword']), scene=scene)
 
     # The grue: the sewer's first use of the perception framework. A discrete
     # warning that fires when the player steps onto a cell in effectively
