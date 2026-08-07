@@ -4,6 +4,8 @@ import vispy.visuals, vispy.scene, vispy.gloo
 from vispy.visuals.shaders import ModularProgram, Function
 from vispy.visuals.transforms import STTransform, NullTransform
 
+from ...tone_mapping import GLSL_REINHARD_TONEMAP
+
 
 # load support for opengl 3 features
 vispy.gloo.gl.use_gl('gl+')
@@ -690,13 +692,16 @@ class TextureMaskFilter(object):
                 // tone-mapped together.
                 vec3 refl = albedo * lgt.rgb * los;           // reflected luminance (linear)
                 vec3 out_lum = (refl + sprite_emission * los) * $exposure;   // exposed outgoing luminance
-                vec3 lit = out_lum / (1.0 + out_lum);         // Reinhard tone curve
-                lit = pow(lit, vec3(1.0/2.2));                // display gamma / OETF
+                vec3 lit = $reinhard_tonemap(out_lum);         // Reinhard tone curve + display gamma
                 gl_FragColor = vec4(lit + vec3(0.0, 0.0, mem), gl_FragColor.a);
             }
         """)
         self.fshader['light'] = light_texture
         self.fshader['memory'] = memory_texture
+        # Reinhard curve + display gamma, defined once in tone_mapping.py and
+        # shared with the CPU-side memory overlay (Level.update_sight) -- see
+        # tone_mapping.reinhard_tonemap, its Python twin.
+        self.fshader['reinhard_tonemap'] = Function(GLSL_REINHARD_TONEMAP)
         # sane default exposure so the first frame (before any update pushes the
         # player's adaptation) is valid; see _DEFAULT_EXPOSURE.
         self.fshader['exposure'] = _DEFAULT_EXPOSURE

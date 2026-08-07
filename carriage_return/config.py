@@ -4,7 +4,7 @@
 (see ``return_to_carriage.py``) before the game is built. It exists to shorten
 slow, real-time behaviours so a human testing the game by hand does not have to
 sit through them -- the first being the eye-adaptation time constants (see
-:mod:`.adaptation`), which otherwise take ~20 s to open the eye up in the dark.
+:mod:`.tone_mapping`), which otherwise take ~20 s to open the eye up in the dark.
 
 It is off by default, so the real game and the screenshot harness behave
 identically unless the flag is passed. Read it as an attribute --

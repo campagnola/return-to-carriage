@@ -40,7 +40,7 @@ _default_blocktypes = [
     # (fg) silhouette against a bright cool-sky background.
     blocktype('grate', '#',  False,    0,       (.05, .05, .07, 1.0), (.55, .70, 1.0, 1.0),
               fg_emission=(0.05, 0.03, 0.0), bg_emission=(0.05, 0.03, 0.0)),
-    blocktype('grass', '.',  True,     0,       (.05, .8, .1, 1.0),    (.05, .7, .1, 1.0), bg_color_var=0.02),
+    blocktype('grass', '.',  True,     0,       (0.01, 0.16, 0.02, 1.0),    (0.01, 0.2, 0.02, 1.0), bg_color_var=0.01),
 ]
 
 

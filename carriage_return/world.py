@@ -18,27 +18,14 @@ from .array_cache import ArraySumCache
 from .blocktypes import BlockTypes
 from .events import Observable
 from .layers import FieldLayer
+from .tone_mapping import (LUMINANCE_WEIGHTS, memory_overlay_pixel,
+                           scene_reflected_luminance)
 
 
 #: Resolution of the sight fields relative to maze cells. One number, shared by
 #: Level (which allocates the fields) and Scene (which composites them), so the
 #: two cannot disagree about how big a level's fields are.
 SIGHT_SUPERSAMPLE = 4
-
-#: Rec. 709 luminance weights. Used to collapse an RGB value to a single
-#: perceived brightness -- both for the eye-adaptation target and for the
-#: per-cell material reflectance the albedo map holds.
-LUMINANCE_WEIGHTS = np.array([0.2126, 0.7152, 0.0722], dtype='float32')
-
-#: Reference luminance and strength for the memory overlay. Memory is mapped to
-#: a display value through a *fixed* exposure (``0.18 / MEMORY_REF_LUMINANCE``),
-#: deliberately independent of the player's live adaptation: a remembered area
-#: is a faint recollection, not something that should brighten just because the
-#: eye is now dark-adapted. MEMORY_STRENGTH caps how bright the recollection
-#: gets on screen. In reflected-luminance units (cd/m^2), on the same scale as
-#: the eye's adaptation; tunable in the visual pass.
-MEMORY_REF_LUMINANCE = 0.64
-MEMORY_STRENGTH = 1.0
 
 
 class Level:
@@ -298,11 +285,9 @@ class Level:
             los_scalar = line_of_sight.max(axis=2)
 
             # Reflected luminance per cell (cd/m^2): what the eye and memory
-            # respond to. illuminance is lux; a Lambertian surface of reflectance
-            # rho lit by E lux has luminance rho*E/pi, so the 1/pi turns arriving
-            # light into light leaving the surface toward the eye.
+            # respond to (see tone_mapping.scene_reflected_luminance).
             lumE = illuminance @ LUMINANCE_WEIGHTS
-            Y_refl = self._albedo_lum[:, :, 0] * lumE / np.pi
+            Y_refl = scene_reflected_luminance(self._albedo_lum[:, :, 0], lumE)
 
             # This level decides how far the eye may open up or stop down while
             # the player is on it; a level that specifies nothing resets the eye
@@ -338,9 +323,9 @@ class Level:
 
         # Memory overlay: linear memory -> a stable display value under a FIXED
         # reference exposure (independent of live adaptation, so a remembered
-        # area does not glow when the eye is dark-adapted). Reinhard + gamma.
-        m = self.memory * (0.18 / MEMORY_REF_LUMINANCE)
-        mem_disp = (m / (1.0 + m)) ** (1.0 / 2.2) * MEMORY_STRENGTH
+        # area does not glow when the eye is dark-adapted). See
+        # tone_mapping.memory_overlay_pixel.
+        mem_disp = memory_overlay_pixel(self.memory)
 
         # Pack the light field: [0:3] raw linear HDR illuminance (ungated by
         # line of sight), [3] the line-of-sight scalar the GPU gates against.

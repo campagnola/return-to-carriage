@@ -1,4 +1,4 @@
-from .adaptation import EyeAdaptation
+from .tone_mapping import EyeAdaptation
 from .entity import Entity
 from .errors import ActionError
 from .inventory import Inventory
@@ -17,6 +17,9 @@ GLO_LIGHT_COLOR = (50 * lm, 50 * lm, 50 * lm)
 
 
 class Player(Entity):
+    fg_color = (1.0, 1.0, 1.0, 1.0)
+    fg_emission = (1.0, 1.0, 1.0)
+
     def __init__(self, scene, obj_name=None):
         Entity.__init__(self, entity_type='player', obj_name=obj_name)
         self.scene = scene
@@ -32,7 +35,7 @@ class Player(Entity):
         # adapted for the first moment in the dark sewer. It starts with no
         # reference and establishes one from the first scene it is shown; since
         # the player begins in home daylight, that first sight is what "adapted
-        # to outdoor light" means (see adaptation.EyeAdaptation).
+        # to outdoor light" means (see tone_mapping.EyeAdaptation).
         self.adaptation = EyeAdaptation()
 
         # The 'glo' spell's light, or None while it is unlit. It is a point

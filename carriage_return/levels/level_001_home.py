@@ -19,7 +19,7 @@ from ..world import Level
 #: Chosen at the reflected luminance of the sunlit grass floor (its albedo under
 #: the 50000 lx wash below); raise it toward MAX_ADAPT_LUMINANCE to make home
 #: read brighter. Tunable in the visual pass.
-HOME_ADAPT_LUMINANCE = 50000.0
+HOME_ADAPT_LUMINANCE = 5000.0
 
 
 def build_level(scene):

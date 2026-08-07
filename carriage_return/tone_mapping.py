@@ -1,47 +1,177 @@
-"""Eye adaptation: the single, absolute luminance scale the game lives on.
+"""The full tone-reproduction chain: albedo + emission + illuminance + eye
+adaptation -> the color a pixel is actually drawn.
 
 Every level's light is expressed on one shared, physical scale where home
-daylight is the reference and the light coming down the hole is a small fraction
-of it. Because the scale is absolute, "home is a hundred times brighter than the
-sewer" is a fact about the numbers, not an accident of per-level renormalization.
-The scale's anchor -- how bright home daylight actually is -- is a level-design
-fact and lives with the lights that realise it (see :mod:`.levels`), not here.
+daylight is the reference and the light coming down the hole is a small
+fraction of it. Because the scale is absolute, "home is a hundred times
+brighter than the sewer" is a fact about the numbers, not an accident of
+per-level renormalization. The scale's anchor -- how bright home daylight
+actually is -- is a level-design fact and lives with the lights that realise
+it (see :mod:`.levels`), not here.
 
-What lives here is a model of the viewer's eye. :class:`EyeAdaptation` holds the
-one scalar that says how bright the world *currently feels* -- the luminance the
-eye has settled to. It is not part of the physical light; it is the observer.
-That is why it rides the player (see :class:`~.player.Player`) rather than any
-level: it must persist as the player falls through the hole, so the eyes stay
-daylight-adapted for the first moment in the dark and only slowly open up.
+This module holds everything downstream of that light: the eye's adaptation
+state (:class:`EyeAdaptation`), the exposure it produces, and the Reinhard +
+display-gamma curve that turns exposed linear luminance into a display pixel.
+Two call sites need the same curve -- the live scene, which the GPU draws
+(:class:`~.backends.vispy.graphics.TextureMaskFilter`), and the memory
+overlay, which the CPU draws (:meth:`~.world.Level.update_sight`) -- so the
+curve and its constants (:data:`DISPLAY_GAMMA`) are defined once, here, and
+both call sites use them. Where the same formula must also run on the GPU,
+its GLSL twin is defined right next to the Python version below (see
+:data:`GLSL_REINHARD_TONEMAP`) -- edit both together, they are not allowed to
+drift apart.
 
-The eye's reference is not hardcoded: it is *established from the first scene
-luminance it is ever shown* -- the first :meth:`~EyeAdaptation.adapt` call, when
-adaptation is first needed. Because the player starts in home daylight, that
-first measurement is the daylight the eye is adapted to, so "the player starts
-adapted to outdoor light" is a measured fact -- exactly consistent with what the
-renderer draws -- rather than a stand-in albedo times a magic illuminance. The
-dark-adaptation floor (:data:`MIN_ADAPT_LUMINANCE`) and the light-adaptation
-ceiling (:data:`MAX_ADAPT_LUMINANCE`) are fixed points on the same absolute
-scale, so they do not move with the measured reference.
-
-This module is the CPU half of the tone-reproduction chain. It produces one
-number -- :attr:`EyeAdaptation.exposure` -- that the GPU Reinhard tone-mapper
-consumes as a uniform. The fragment shader reconstructs reflected luminance and
-maps it to the display as::
-
-    v   = exposure * albedo * illuminance      # exposed reflected luminance
-    lit = v / (1 + v)                          # Reinhard
-    out = lit ** (1 / 2.2)                      # display gamma
-
-so this module never touches a pixel; it only decides where middle grey sits.
-
-Game-side module: no rendering library may be imported here. Only ``math`` (and
-numpy, were it needed) is used.
+Game-side module: no rendering library may be imported here. Only ``math``
+and numpy are used.
 """
 import math
 
+import numpy as np
+
 from . import config
 
+
+# ---------------------------------------------------------------------------
+# Illuminance -> luminance
+# ---------------------------------------------------------------------------
+
+#: Rec. 709 luminance weights. Used to collapse an RGB value to a single
+#: perceived brightness -- both for the eye-adaptation target and for the
+#: per-cell material reflectance the albedo map holds.
+LUMINANCE_WEIGHTS = np.array([0.2126, 0.7152, 0.0722], dtype='float32')
+
+
+# ---------------------------------------------------------------------------
+# Display gamma
+# ---------------------------------------------------------------------------
+
+#: The display transfer function exponent applied after every Reinhard curve
+#: in the game, on both the CPU and GPU paths: the live scene
+#: (:data:`GLSL_REINHARD_TONEMAP`, run by TextureMaskFilter) and the memory
+#: overlay (:func:`memory_overlay_pixel`, run by Level.update_sight) both
+#: gamma-correct with ``x ** (1 / DISPLAY_GAMMA)``. One constant so the two
+#: paths cannot drift apart. Currently mid-experiment on the middle-grey key
+#: (see :data:`ADAPT_MIDDLE_GREY`); the photographic display standard is 2.2.
+DISPLAY_GAMMA = 2.2
+
+
+def reinhard_tonemap(exposed):
+    """Reinhard tone curve + display gamma.
+
+    *exposed* is linear HDR luminance already multiplied by exposure (see
+    :func:`exposure`); returns display-ready values in [0, 1]. The GLSL twin
+    of this function, run per-fragment on the GPU, is
+    :data:`GLSL_REINHARD_TONEMAP` -- keep the two in sync.
+    """
+    exposed = np.asarray(exposed, dtype=float)
+    lit = exposed / (1.0 + exposed)
+    return lit ** (1.0 / DISPLAY_GAMMA)
+
+
+#: GLSL source for a ``reinhard_tonemap`` dependency function implementing
+#: exactly the math :func:`reinhard_tonemap` does above, for
+#: :class:`~.backends.vispy.graphics.TextureMaskFilter` to call from its
+#: fragment shader. ``DISPLAY_GAMMA`` is baked in at import time, so the two
+#: functions cannot disagree about which gamma they used -- edit the constant
+#: above, not the number below.
+GLSL_REINHARD_TONEMAP = """
+vec3 reinhard_tonemap(vec3 exposed) {{
+    vec3 lit = exposed / (1.0 + exposed);
+    return pow(lit, vec3(1.0 / {gamma}));
+}}
+""".format(gamma=DISPLAY_GAMMA)
+
+
+# ---------------------------------------------------------------------------
+# Exposure
+# ---------------------------------------------------------------------------
+
+def exposure(key, adapted_luminance):
+    """The Reinhard exposure scalar: ``key / adapted_luminance``.
+
+    The brighter the reference (the eye's adaptation luminance for the live
+    scene, :data:`MEMORY_REF_LUMINANCE` for the memory overlay), the smaller
+    this is, so the same physical light is drawn darker.
+    """
+    return key / adapted_luminance
+
+
+def reflected_luminance(albedo, illuminance):
+    """Linear reflected luminance leaving a surface: ``albedo * illuminance``.
+
+    This is the literal quantity the GPU fragment shader computes for the
+    live scene (no BRDF normalization) -- gating by line of sight and adding
+    emission is the caller's job (see
+    :class:`~.backends.vispy.graphics.TextureMaskFilter`). Contrast
+    :func:`scene_reflected_luminance`, which *does* apply the Lambertian
+    1/pi, for the physically-estimated luminance the eye adapts to.
+    """
+    return np.asarray(albedo, dtype=float) * np.asarray(illuminance, dtype=float)
+
+
+def scene_reflected_luminance(albedo_luminance, illuminance_luminance):
+    """Reflected luminance (cd/m^2) of a Lambertian surface, for eye adaptation.
+
+    A Lambertian surface of reflectance ``rho`` lit by ``E`` lux has luminance
+    leaving it of ``rho * E / pi``; the 1/pi turns arriving light into light
+    leaving the surface toward the eye. Used to build the adaptation target
+    the eye samples (:meth:`~.world.Level.update_sight`) -- *not* the same
+    quantity :func:`reflected_luminance` computes for the actual displayed
+    pixel, which omits the 1/pi.
+    """
+    return albedo_luminance * illuminance_luminance / math.pi
+
+
+def pixel_color(albedo, emission, illuminance, exposure_value):
+    """albedo, emission, illuminance, exposure -> displayed rgb, per channel.
+
+    The exact math :class:`~.backends.vispy.graphics.TextureMaskFilter` runs
+    per-fragment on the GPU, reproduced in Python for tools (see
+    ``agent_helpers/tonemap_demo.ipynb``) that want to predict what a color
+    will look like on screen without a GL context.
+    """
+    refl = reflected_luminance(albedo, illuminance)
+    out_lum = refl + np.asarray(emission, dtype=float)
+    return reinhard_tonemap(out_lum * exposure_value)
+
+
+# ---------------------------------------------------------------------------
+# Memory overlay
+# ---------------------------------------------------------------------------
+
+#: The middle-grey key the memory overlay is exposed at (see :func:`exposure`),
+#: a *fixed* reference deliberately independent of the player's live
+#: adaptation (:data:`ADAPT_MIDDLE_GREY`): a remembered area is a faint
+#: recollection, not something that should brighten just because the eye is
+#: now dark-adapted.
+MEMORY_KEY = 0.18
+
+#: Reference luminance the memory overlay is exposed against (cd/m^2, same
+#: scale as the eye's adaptation). Paired with :data:`MEMORY_KEY` via
+#: :func:`exposure` to get the memory overlay's fixed exposure.
+MEMORY_REF_LUMINANCE = 0.64
+
+#: Caps how bright the memory overlay's recollection gets on screen.
+MEMORY_STRENGTH = 1.0
+
+_MEMORY_EXPOSURE = exposure(MEMORY_KEY, MEMORY_REF_LUMINANCE)
+
+
+def memory_overlay_pixel(memory_luminance):
+    """Remembered linear luminance -> display-space memory overlay value.
+
+    Reinhard + display gamma under the fixed :data:`MEMORY_KEY` /
+    :data:`MEMORY_REF_LUMINANCE` exposure (see :func:`exposure`), scaled by
+    :data:`MEMORY_STRENGTH`. Used by :meth:`~.world.Level.update_sight` to
+    paint ``memory_overlay``.
+    """
+    exposed = np.asarray(memory_luminance, dtype=float) * _MEMORY_EXPOSURE
+    return reinhard_tonemap(exposed) * MEMORY_STRENGTH
+
+
+# ---------------------------------------------------------------------------
+# Eye adaptation
+# ---------------------------------------------------------------------------
 
 #: The darkest reflected luminance the eye will dark-adapt to, in cd/m^2 -- a
 #: fixed point on the shared physical scale (not derived from the measured
@@ -87,10 +217,11 @@ TAU_DARK_ADAPT = 8.0
 TAU_TEST = 0.2
 
 
-#: The middle-grey key value for the Reinhard exposure. 0.18 is photographic
-#: 18% grey; lower draws the whole scene darker. It sets what adapted luminance
-#: is mapped to mid-tone on screen.
-ADAPT_MIDDLE_GREY = 0.08
+#: The middle-grey key value for the Reinhard exposure (see :func:`exposure`).
+#: 0.18 is photographic 18% grey; lower draws the whole scene darker. It sets
+#: what adapted luminance is mapped to mid-tone on screen. Currently
+#: mid-experiment; see :data:`DISPLAY_GAMMA`.
+ADAPT_MIDDLE_GREY = 0.08    
 
 
 #: Below this log-luminance gap the eye counts as settled. The renderer stops
@@ -279,4 +410,4 @@ class EyeAdaptation:
         ``exposure`` in ``v = exposure * albedo * illuminance`` before the
         Reinhard curve.
         """
-        return self.key / self.luminance
+        return exposure(self.key, self.luminance)
