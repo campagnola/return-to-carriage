@@ -25,7 +25,7 @@ HOME_ADAPT_LUMINANCE = 5000.0
 def build_level(scene):
     """Build the home level and record its named cells."""
     bt = scene.world.blocktypes
-    maze = Maze.filled((40, 120), bt, 'wall', obj_name='home')
+    maze = Maze.filled((100, 300), bt, 'wall', obj_name='home')
     maze.blocks[1:-1, 1:-1] = bt.id_of('grass')
 
     level = Level('home', maze)
