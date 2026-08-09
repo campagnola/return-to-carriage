@@ -693,7 +693,7 @@ class TextureMaskFilter(object):
                 vec3 refl = albedo * lgt.rgb * los;           // reflected luminance (linear)
                 vec3 out_lum = (refl + sprite_emission * los) * $exposure;   // exposed outgoing luminance
                 vec3 lit = $reinhard_tonemap(out_lum);         // Reinhard tone curve + display gamma
-                gl_FragColor = vec4(lit + vec3(0.0, 0.0, mem), gl_FragColor.a);
+                gl_FragColor = vec4(lit + vec3(mem*.5, mem*.5, mem*1.5), gl_FragColor.a);
             }
         """)
         self.fshader['light'] = light_texture

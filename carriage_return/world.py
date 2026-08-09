@@ -19,7 +19,7 @@ from .blocktypes import BlockTypes
 from .events import Observable
 from .layers import FieldLayer
 from .tone_mapping import (LUMINANCE_WEIGHTS, memory_overlay_pixel,
-                           scene_reflected_luminance)
+                           memory_write_value, scene_reflected_luminance)
 
 
 #: Resolution of the sight fields relative to maze cells. One number, shared by
@@ -76,7 +76,8 @@ class Level:
         ms = maze.shape
         h, w = ms[0] * supersample, ms[1] * supersample
         # Line of sight and lighting are still three-channel (an RGB shadow map
-        # times RGB light); memory is a single linear luminance per cell.
+        # times RGB light); memory is a single already-tonemapped scalar per
+        # cell (see tone_mapping.memory_write_value).
         self.field_shape = (h, w, 3)
         self.memory = np.zeros((h, w), dtype='float32')
         self.line_of_sight = np.zeros(self.field_shape, dtype='float32')
@@ -284,8 +285,9 @@ class Level:
             # shadow map's three channels are identical); collapse it to one.
             los_scalar = line_of_sight.max(axis=2)
 
-            # Reflected luminance per cell (cd/m^2): what the eye and memory
-            # respond to (see tone_mapping.scene_reflected_luminance).
+            # Reflected luminance per cell (cd/m^2): what the eye adapts to
+            # (see tone_mapping.scene_reflected_luminance). Memory below uses
+            # its own, illuminance-capped version of this (memory_write_value).
             lumE = illuminance @ LUMINANCE_WEIGHTS
             Y_refl = scene_reflected_luminance(self._albedo_lum[:, :, 0], lumE)
 
@@ -309,8 +311,15 @@ class Level:
                 L_scene = float((Y_refl[y0:y1, x0:x1] * win_w).sum() / wsum)
                 player.adaptation.adapt(L_scene, dt)
 
-            # remember the brightest reflected luminance ever seen at each cell
-            self.memory = np.maximum(self.memory, Y_refl * los_scalar)
+            # Remember the brightest this cell has ever been perceived: the
+            # illuminance is capped (so a torch or spell can't burn a cell in
+            # brighter than any well-lit room) and seen through the player's
+            # *current* adaptation exposure (so a cell glimpsed while the eye
+            # hasn't adjusted yet barely registers). See
+            # tone_mapping.memory_write_value.
+            perceived = memory_write_value(self._albedo_lum[:, :, 0], lumE,
+                                           player.adaptation.exposure)
+            self.memory = np.maximum(self.memory, perceived * los_scalar)
         else:
             # fully blocked: no live view, memory shows in full. Zero
             # illuminance and zero line of sight gate reflection and emission
@@ -321,10 +330,11 @@ class Level:
         # forget
         self.memory *= self.MEMORY_DECAY_RATE ** dt
 
-        # Memory overlay: linear memory -> a stable display value under a FIXED
-        # reference exposure (independent of live adaptation, so a remembered
-        # area does not glow when the eye is dark-adapted). See
-        # tone_mapping.memory_overlay_pixel.
+        # Memory overlay: self.memory is already display-tonemapped as of the
+        # frame it was (re)written (see tone_mapping.memory_write_value), so a
+        # remembered area does not glow just because the eye is now
+        # dark-adapted -- there's no live exposure left to apply, only
+        # MEMORY_STRENGTH. See tone_mapping.memory_overlay_pixel.
         mem_disp = memory_overlay_pixel(self.memory)
 
         # Pack the light field: [0:3] raw linear HDR illuminance (ungated by

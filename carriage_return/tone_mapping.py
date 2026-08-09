@@ -47,10 +47,11 @@ LUMINANCE_WEIGHTS = np.array([0.2126, 0.7152, 0.0722], dtype='float32')
 
 #: The display transfer function exponent applied after every Reinhard curve
 #: in the game, on both the CPU and GPU paths: the live scene
-#: (:data:`GLSL_REINHARD_TONEMAP`, run by TextureMaskFilter) and the memory
-#: overlay (:func:`memory_overlay_pixel`, run by Level.update_sight) both
-#: gamma-correct with ``x ** (1 / DISPLAY_GAMMA)``. One constant so the two
-#: paths cannot drift apart. Currently mid-experiment on the middle-grey key
+#: (:data:`GLSL_REINHARD_TONEMAP`, run by TextureMaskFilter) and a memory
+#: write (:func:`memory_write_value`, run by Level.update_sight when a cell
+#: is seen) both gamma-correct with ``x ** (1 / DISPLAY_GAMMA)``. One
+#: constant so the two paths cannot drift apart. Currently mid-experiment on
+#: the middle-grey key
 #: (see :data:`ADAPT_MIDDLE_GREY`); the photographic display standard is 2.2.
 DISPLAY_GAMMA = 2.2
 
@@ -89,8 +90,7 @@ vec3 reinhard_tonemap(vec3 exposed) {{
 def exposure(key, adapted_luminance):
     """The Reinhard exposure scalar: ``key / adapted_luminance``.
 
-    The brighter the reference (the eye's adaptation luminance for the live
-    scene, :data:`MEMORY_REF_LUMINANCE` for the memory overlay), the smaller
+    The brighter the reference (the eye's adaptation luminance), the smaller
     this is, so the same physical light is drawn darker.
     """
     return key / adapted_luminance
@@ -136,37 +136,54 @@ def pixel_color(albedo, emission, illuminance, exposure_value):
 
 
 # ---------------------------------------------------------------------------
-# Memory overlay
+# Memory
 # ---------------------------------------------------------------------------
 
-#: The middle-grey key the memory overlay is exposed at (see :func:`exposure`),
-#: a *fixed* reference deliberately independent of the player's live
-#: adaptation (:data:`ADAPT_MIDDLE_GREY`): a remembered area is a faint
-#: recollection, not something that should brighten just because the eye is
-#: now dark-adapted.
-MEMORY_KEY = 0.18
+#: Illuminance (lux) above which more light no longer helps memory: a cell
+#: lit at least this well is lit well enough to see its layout, so a torch
+#: or a fireball up close can't burn a cell into memory any brighter than a
+#: normally-lit room does. Applied to the *arriving* light in
+#: :func:`memory_write_value`, before albedo -- a white wall still reads
+#: brighter than a black one at the same illuminance, only the light itself
+#: saturates. Roughly a torch's illuminance a couple of tiles off; tune in
+#: the visual pass.
+MEMORY_ILLUM_SATURATION = 3.0
 
-#: Reference luminance the memory overlay is exposed against (cd/m^2, same
-#: scale as the eye's adaptation). Paired with :data:`MEMORY_KEY` via
-#: :func:`exposure` to get the memory overlay's fixed exposure.
-MEMORY_REF_LUMINANCE = 0.64
-
-#: Caps how bright the memory overlay's recollection gets on screen.
+#: Caps how bright a memory write can land, applied on top of the Reinhard
+#: curve in :func:`memory_write_value`.
 MEMORY_STRENGTH = 1.0
 
-_MEMORY_EXPOSURE = exposure(MEMORY_KEY, MEMORY_REF_LUMINANCE)
 
+def memory_write_value(albedo_luminance, illuminance_luminance, exposure_value):
+    """What a glimpse of a cell burns into memory this frame.
 
-def memory_overlay_pixel(memory_luminance):
-    """Remembered linear luminance -> display-space memory overlay value.
-
-    Reinhard + display gamma under the fixed :data:`MEMORY_KEY` /
-    :data:`MEMORY_REF_LUMINANCE` exposure (see :func:`exposure`), scaled by
-    :data:`MEMORY_STRENGTH`. Used by :meth:`~.world.Level.update_sight` to
-    paint ``memory_overlay``.
+    The illuminance is capped first (:data:`MEMORY_ILLUM_SATURATION`), then
+    reflected off the surface (:func:`scene_reflected_luminance`), then run
+    through the same exposure + Reinhard curve (:func:`reinhard_tonemap`)
+    the live scene is drawn with this frame -- *exposure_value* is the
+    player's current :attr:`~.tone_mapping.EyeAdaptation.exposure`, not a
+    fixed reference. So a cell glimpsed while the eye is still adapted to a
+    brighter scene elsewhere reads as dim here too: you can't memorize what
+    you can't yet see. Called from :meth:`~.world.Level.update_sight`, whose
+    ``self.memory`` ratchets to the max of this value over every glimpse, so
+    once a cell has been seen well-adapted it stays remembered that way even
+    if a later glimpse is underexposed.
     """
-    exposed = np.asarray(memory_luminance, dtype=float) * _MEMORY_EXPOSURE
-    return reinhard_tonemap(exposed) * MEMORY_STRENGTH
+    capped = np.minimum(illuminance_luminance, MEMORY_ILLUM_SATURATION)
+    Y_refl = scene_reflected_luminance(albedo_luminance, capped)
+    return reinhard_tonemap(Y_refl * exposure_value)
+
+
+def memory_overlay_pixel(memory_value):
+    """Remembered value -> display-space memory overlay value.
+
+    ``self.memory`` already holds a Reinhard-tonemapped, live-exposed value
+    from the moment it was last (re)written (see :func:`memory_write_value`)
+    -- there is nothing left to tonemap here, only :data:`MEMORY_STRENGTH`
+    to scale by. Used by :meth:`~.world.Level.update_sight` to paint
+    ``memory_overlay``.
+    """
+    return np.asarray(memory_value, dtype=float) * MEMORY_STRENGTH
 
 
 # ---------------------------------------------------------------------------
