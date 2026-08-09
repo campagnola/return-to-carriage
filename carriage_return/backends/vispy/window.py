@@ -30,7 +30,7 @@ class MainWindow:
 
         # setup UI
         self.view = self.canvas.central_widget.add_view()
-        self.view.camera = Camera()
+        self.view.camera = Camera(on_interact=self._camera_interacted)
         self.view.camera.rect = [0, -5, 120, 60]
         self.view.camera.aspect = 0.6
         self.view.events.key_press.disconnect()
@@ -41,6 +41,11 @@ class MainWindow:
         # when set, the next camera update jumps straight to the target rather
         # than easing toward it; see _level_changed
         self._snap_camera = False
+
+        # when set, a mouse wheel/drag has taken the camera off the follow
+        # target; _scroll_camera leaves rect alone until the player's next
+        # move clears it (see _camera_interacted, _update_camera_target)
+        self._manual_camera = False
 
         # game-state changes set this flag (from any thread); the frame tick
         # below turns it into one canvas repaint
@@ -119,10 +124,18 @@ class MainWindow:
             self._fps_frame_count = 0
             self._fps_last_time = now
 
+    def _camera_interacted(self):
+        """Called by the camera after a mouse wheel/drag actually changes
+        rect: hold the view there until the player's next move."""
+        self._manual_camera = True
+
     def _scroll_camera(self, ev):
         now = ptime.time()
         dt = now - self._last_camera_update
         self._last_camera_update = now
+
+        if self._manual_camera:
+            return
 
         cr = vispy.geometry.Rect(self.view.camera.rect)
         tr = self.camera_target
@@ -146,9 +159,17 @@ class MainWindow:
         self.view.camera.rect = cr
 
     def _update_camera_target(self, event=None):
+        """Recompute the follow target for the player's new position.
+
+        Also ends any mouse-driven pan/zoom: called on every player move
+        (the game's "next turn"), so a manual view reverts to the default
+        follow framing from here rather than from wherever the mouse left
+        the live rect (see _camera_interacted).
+        """
+        self._manual_camera = False
         location = self._follow_entity.location
         pp = np.array(location.global_location.slot)
-        cr = vispy.geometry.Rect(self.view.camera.rect)
+        cr = vispy.geometry.Rect(self.camera_target)
         cc = np.array(cr.center)
         cs = np.array(cr.size)
         cp = np.array(cr.pos)
@@ -169,8 +190,23 @@ class MainWindow:
 
 
 class Camera(vispy.scene.cameras.PanZoomCamera):
-    """Pan/zoom camera with all default keyboard interaction disabled"""
+    """Pan/zoom camera with all default keyboard interaction disabled.
+
+    ``on_interact``, if given, is called whenever a mouse wheel/drag actually
+    moves ``rect`` (not on a hover or a plain button press) -- the window
+    uses this to know when the player has taken manual control of the view.
+    """
+    def __init__(self, *args, on_interact=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.on_interact = on_interact
+
     def viewbox_key_event(self, ev):
         pass
+
+    def viewbox_mouse_event(self, event):
+        rect_before = self.rect
+        super().viewbox_mouse_event(event)
+        if self.on_interact is not None and self.rect != rect_before:
+            self.on_interact()
 
 
