@@ -1,13 +1,14 @@
-"""The Menu dialog: model, key loop, and painter in one place.
+"""The Menu dialog: interactive state, key loop, and drawing in one widget.
 
-``Menu``/``MenuItem`` are pure-data models (a list of selectable items with a
-cursor, optionally with checkboxes); ``run_menu`` is the sequential key loop a
-DialogSession runs on its own thread; ``MenuPainter`` renders the model into a
-screen-space CharGridLayer. See base.py for the change-tracking and painter
-contracts.
+``MenuItem`` is a pure-data entry (a label, a value, a checked flag).
+``MenuWidget`` is a ``carriage_return.widgets.Widget`` that holds the
+interactive state (title, items, cursor, done/result) and draws itself;
+``run_menu`` is the sequential key loop a DialogSession runs on its own
+thread. See ``dialogs/__init__.py`` for how a MenuWidget is wrapped in a
+bordered ``GridFrame`` and composited to the screen.
 """
 from ..input import KeyPress
-from .base import CharGridPainter, Widget
+from ..widgets import CURSOR_BG, CURSOR_FG, FG, BG, HINT_FG, TITLE_FG, Widget
 
 
 class MenuItem(object):
@@ -26,7 +27,7 @@ class MenuItem(object):
         return "<MenuItem %r checked=%r>" % (self.label, self.checked)
 
 
-class Menu(Widget):
+class MenuWidget(Widget):
     """A list of selectable items with a cursor, optionally with checkboxes.
 
     Items may be given as MenuItem instances or plain strings (auto-wrapped).
@@ -35,8 +36,10 @@ class Menu(Widget):
     the item under the cursor when nothing is checked). In single-select mode
     accept() returns the current item's value.
 
-    accept() and cancel() set ``done`` (and ``result``) so a renderer can
-    observe closure; they are idempotent once done.
+    accept() and cancel() set ``done`` (and ``result``) so a caller can
+    observe closure; they are idempotent once done. Every mutator repaints
+    the widget's own cells before returning, so a caller never needs to
+    trigger a separate render pass.
     """
 
     def __init__(self, title, items, multi_select=False):
@@ -46,6 +49,11 @@ class Menu(Widget):
                       for item in items]
         self.multi_select = multi_select
         self.cursor = 0
+        self.done = False
+        self.result = None
+        self._hint = ("Up/Down move  Space toggle  Enter accept  Esc cancel"
+                      if multi_select else
+                      "Up/Down move  Enter select  Esc cancel")
 
     def __len__(self):
         return len(self.items)
@@ -65,6 +73,7 @@ class Menu(Widget):
         if cursor != self.cursor:
             self.cursor = cursor
             self._changed()
+            self.repaint()
 
     def toggle(self):
         """Toggle the checkbox under the cursor (no-op unless multi_select)."""
@@ -73,6 +82,7 @@ class Menu(Widget):
         item = self.items[self.cursor]
         item.checked = not item.checked
         self._changed()
+        self.repaint()
 
     def checked_items(self):
         return [item for item in self.items if item.checked]
@@ -96,6 +106,7 @@ class Menu(Widget):
         self.result = result
         self.done = True
         self._changed()
+        self.repaint()
         return result
 
     def cancel(self):
@@ -105,11 +116,39 @@ class Menu(Widget):
         self.result = None
         self.done = True
         self._changed()
+        self.repaint()
         return None
+
+    # -- sizing/drawing ------------------------------------------------
+
+    def _item_text(self, item):
+        if self.multi_select:
+            return "[x] %s" % item.label if item.checked else "[ ] %s" % item.label
+        return item.label
+
+    def preferred_shape(self):
+        """(nrows, ncols) this menu wants: title/blank/items/blank/hint, capped at 100 cols."""
+        widths = [len(self.title), len(self._hint)]
+        widths += [len(self._item_text(item)) for item in self.items]
+        return len(self.items) + 4, min(max(widths), 100)
+
+    def _shape_changed(self):
+        self.repaint()
+
+    def repaint(self):
+        """Redraw the whole widget from current state (title, items, cursor, hint)."""
+        self.clear(fg=FG, bg=BG)
+        self.write(0, 0, self.title, fg=TITLE_FG)
+        for i, item in enumerate(self.items):
+            row = 2 + i
+            if i == self.cursor:
+                self.fill_row(row, fg=CURSOR_FG, bg=CURSOR_BG)
+            self.write(row, 0, self._item_text(item))
+        self.write(self.nrows - 1, 0, self._hint, fg=HINT_FG)
 
 
 def run_menu(session, menu):
-    """Standard key handling for a Menu; returns the menu's accept/cancel result.
+    """Standard key handling for a MenuWidget; returns the menu's accept/cancel result.
 
     Up/Down move the cursor, Space toggles a checkbox (multi-select menus),
     Enter accepts, Escape cancels. Key releases and unknown keys are ignored.
@@ -128,36 +167,3 @@ def run_menu(session, menu):
             return menu.accept()
         elif event.key == 'Escape':
             return menu.cancel()
-
-
-class MenuPainter(CharGridPainter):
-    """Paints a Menu: title, item rows (with checkboxes when multi-select),
-    highlighted cursor row, key hints."""
-
-    def __init__(self, scene, menu, **kwds):
-        self._hint = ("Up/Down move  Space toggle  Enter accept  Esc cancel"
-                      if menu.multi_select else
-                      "Up/Down move  Enter select  Esc cancel")
-        CharGridPainter.__init__(self, scene, menu, **kwds)
-
-    def _item_text(self, item):
-        if self.model.multi_select:
-            return "[x] %s" % item.label if item.checked else "[ ] %s" % item.label
-        return item.label
-
-    def _content_shape(self):
-        menu = self.model
-        widths = [len(menu.title), len(self._hint)]
-        widths += [len(self._item_text(item)) for item in menu.items]
-        # title, blank, items, blank, hint
-        return len(menu.items) + 4, min(max(widths), 100)
-
-    def _render_content(self):
-        menu = self.model
-        self._write_line(0, menu.title, fg=self.TITLE_FG)
-        for i, item in enumerate(menu.items):
-            row = 2 + i
-            if i == menu.cursor:
-                self._fill_row(row, self.CURSOR_FG, self.CURSOR_BG)
-            self._write_line(row, self._item_text(item))
-        self._write_line(self.nrows - 1, self._hint, fg=self.HINT_FG)

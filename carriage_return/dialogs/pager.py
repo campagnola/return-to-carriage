@@ -1,25 +1,32 @@
-"""The Pager dialog ("book"): model, key loop, and painter in one place.
+"""The Pager dialog ("book"): interactive state, key loop, and drawing in one widget.
 
-``Pager`` is a pure-data model of multi-page text; ``run_pager`` is the
-sequential key loop a DialogSession runs on its own thread; ``PagerPainter``
-renders the model into a screen-space CharGridLayer. See base.py for the
-change-tracking and painter contracts.
+``PagerWidget`` is a ``carriage_return.widgets.Widget`` holding multi-page
+text (a book, a scroll) viewed one page at a time, plus its own rendering.
+``run_pager`` is the sequential key loop a DialogSession runs on its own
+thread. See ``dialogs/__init__.py`` for how a PagerWidget is wrapped in a
+bordered ``GridFrame`` and composited to the screen.
 """
 from ..input import KeyPress
-from .base import CharGridPainter, Widget
+from ..widgets import FG, BG, HINT_FG, TITLE_FG, Widget
 
 
-class Pager(Widget):
+class PagerWidget(Widget):
     """Multi-page text (a book, a scroll) viewed one page at a time.
 
     ``pages`` is a list of strings, one per page (each possibly multi-line).
+    Every mutator repaints the widget's own cells before returning, so a
+    caller never needs to trigger a separate render pass.
     """
+
+    MIN_COLS = 30
 
     def __init__(self, title, pages):
         Widget.__init__(self)
         self.title = title
         self.pages = list(pages)
         self.page = 0
+        self.done = False
+        self.result = None
 
     @property
     def page_count(self):
@@ -37,6 +44,7 @@ class Pager(Widget):
         if page != self.page:
             self.page = page
             self._changed()
+            self.repaint()
 
     def next_page(self):
         self._set_page(self.page + 1)
@@ -49,6 +57,34 @@ class Pager(Widget):
             return
         self.done = True
         self._changed()
+        self.repaint()
+
+    # -- sizing/drawing ------------------------------------------------
+
+    def _footer(self):
+        return "page %d/%d   Left/Right flip  Esc close" % (
+            self.page + 1, max(self.page_count, 1))
+
+    def preferred_shape(self):
+        """(nrows, ncols) this pager wants: title/blank/page body/blank/footer, capped at 100 cols."""
+        page_lines = [page.splitlines() or [''] for page in self.pages] or [['']]
+        rows = max(len(lines) for lines in page_lines)
+        widths = [len(line) for lines in page_lines for line in lines]
+        widths += [len(self.title), len(self._footer()), self.MIN_COLS]
+        return rows + 4, min(max(widths), 100)
+
+    def _shape_changed(self):
+        self.repaint()
+
+    def repaint(self):
+        """Redraw the whole widget from current state (title, current page, footer)."""
+        self.clear(fg=FG, bg=BG)
+        self.write(0, 0, self.title, fg=TITLE_FG)
+        for i, line in enumerate(self.page_text.splitlines()):
+            if 2 + i >= self.nrows - 2:
+                break
+            self.write(2 + i, 0, line)
+        self.write(self.nrows - 1, 0, self._footer(), fg=HINT_FG)
 
 
 def run_pager(session, pager):
@@ -67,32 +103,3 @@ def run_pager(session, pager):
         elif event.key in ('Escape', 'Enter', 'Return'):
             pager.close()
             return None
-
-
-class PagerPainter(CharGridPainter):
-    """Paints a Pager: title, one page of text, page-count footer."""
-
-    MIN_COLS = 30
-
-    def _footer(self):
-        pager = self.model
-        return "page %d/%d   Left/Right flip  Esc close" % (
-            pager.page + 1, max(pager.page_count, 1))
-
-    def _content_shape(self):
-        pager = self.model
-        page_lines = [page.splitlines() or [''] for page in pager.pages] or [['']]
-        rows = max(len(lines) for lines in page_lines)
-        widths = [len(line) for lines in page_lines for line in lines]
-        widths += [len(pager.title), len(self._footer()), self.MIN_COLS]
-        # title, blank, page body, blank, footer
-        return rows + 4, min(max(widths), 100)
-
-    def _render_content(self):
-        pager = self.model
-        self._write_line(0, pager.title, fg=self.TITLE_FG)
-        for i, line in enumerate(pager.page_text.splitlines()):
-            if 2 + i >= self.nrows - 2:
-                break
-            self._write_line(2 + i, line)
-        self._write_line(self.nrows - 1, self._footer(), fg=self.HINT_FG)

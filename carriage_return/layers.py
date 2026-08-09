@@ -451,44 +451,11 @@ class CharGridLayer(GlyphLayer):
         self.bgcolor = np.zeros(self.shape + (4,), dtype='float32')
         self._changed(structure=True)
 
-    def write(self, row, col, text, fg=None, bg=None):
-        """Write *text* on *row* starting at *col*, clipped to the grid.
-
-        *fg*/*bg*, when given, recolor the written cells. One version bump
-        per call; writes that are entirely clipped away change nothing and
-        do not bump.
-        """
-        rows, cols = self.shape
-        if not (0 <= row < rows):
-            return
-        if col < 0:
-            text = text[-col:]
-            col = 0
-        n = min(len(text), cols - col)
-        if n <= 0:
-            return
-        self.glyph[row, col:col + n] = [self.registry[char] for char in text[:n]]
-        if fg is not None:
-            self.fgcolor[row, col:col + n] = fg
-        if bg is not None:
-            self.bgcolor[row, col:col + n] = bg
-        self._changed()
-
-    def fill_row(self, row, fg=None, bg=None):
-        """Recolor a full row (cursor highlight bars); glyphs are untouched."""
-        if fg is not None:
-            self.fgcolor[row, :] = fg
-        if bg is not None:
-            self.bgcolor[row, :] = bg
-        self._changed()
-
-    def clear(self, fg=None, bg=None):
-        """Reset every cell to a space, optionally recoloring the whole grid."""
-        self.glyph[:] = self.registry[' ']
-        if fg is not None:
-            self.fgcolor[:] = fg
-        if bg is not None:
-            self.bgcolor[:] = bg
+    def set_data(self, chars, fgcolor, bgcolor):
+        """Replace the grid's entire contents (compositor use only)."""
+        self.glyph = np.array([[self.registry[c] for c in row] for row in chars], dtype='uint32')
+        self.fgcolor = np.asarray(fgcolor, dtype='float32')
+        self.bgcolor = np.asarray(bgcolor, dtype='float32')
         self._changed()
 
 
