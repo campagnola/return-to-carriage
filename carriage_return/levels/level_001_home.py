@@ -29,7 +29,7 @@ HOME_ADAPT_LUMINANCE = 5000.0
 PATH_WIDTH = 2
 
 
-def _paint_town(maze, bt, seed=None, start=True):
+def paint_town(maze, bt, seed=None, start=True):
     """Paint a river, two dirt paths, a bridge, a handful of ruined buildings,
     and patchy grass colour into home's interior. Returns the river's
     :class:`~..terrain.water.WaterBody`.
@@ -63,49 +63,55 @@ def _paint_town(maze, bt, seed=None, start=True):
     # river, and the animation's display mask must see that final state --
     # see terrain.create_river.
     river = terrain.create_river(
-        maze, bt.id_of('river'), rng, (river_cx, y_lo), (river_cx, y_hi),
+        maze, bt.id_of('river'), rng, (river_cx, y_hi), (river_cx, y_lo), width=12,
         amplitude=int(cols * 0.06), wavelength=130, bounds=(x_lo, x_hi), animate=False)
 
-    # The east-west path: meanders in y, crossing the whole room (and, on the
-    # east side, the river).
-    path1_cy = rng.randint(y_lo + int(rows * 0.35), y_lo + int(rows * 0.60))
-    path1 = terrain.create_path(
-        rng, (x_lo, path1_cy), (x_hi, path1_cy), amplitude=int(rows * 0.10),
+    # The east-west path: meanders in y on each side of the river, but is
+    # built as two separate halves that both end exactly at crossing_y --
+    # the row the bridge below sits on -- so the path runs dead straight
+    # where it actually meets the river, rather than however a single
+    # meander across the whole room happened to be wandering at that point.
+    crossing_y = rng.randint(y_lo + int(rows * 0.35), y_lo + int(rows * 0.60))
+    half = PATH_WIDTH // 2
+    band_lo, band_hi = crossing_y - half, crossing_y - half + PATH_WIDTH
+    river_cols = np.nonzero(river.mask[band_lo:band_hi, :].any(axis=0))[0]
+    bridge_x_lo = max(river_cols.min() - 1, x_lo)
+    bridge_x_hi = min(river_cols.max() + 1, x_hi)
+
+    # meander() guarantees both ends of the centerline land exactly on the
+    # coordinates given here (see its Brownian-bridge correction), so the
+    # cell touching the bridge on each side is exactly crossing_y with no
+    # further nudging needed.
+    path1_west = terrain.create_path(
+        rng, (x_lo, crossing_y), (bridge_x_lo - 1, crossing_y), amplitude=int(rows * 0.10),
         wavelength=145, width=PATH_WIDTH, blocktype_id=dirt_id, bounds=(y_lo, y_hi))
-    path1.paint(maze)
+    path1_west.paint(maze)
+
+    path1_east = terrain.create_path(
+        rng, (bridge_x_hi + 1, crossing_y), (x_hi, crossing_y), amplitude=int(rows * 0.10),
+        wavelength=145, width=PATH_WIDTH, blocktype_id=dirt_id, bounds=(y_lo, y_hi))
+    path1_east.paint(maze)
 
     # The north-south path: meanders in x, starting at the north wall and
-    # running only until it meets the east-west path. Built over the room's
-    # full height first so the crossing can be found, then trimmed to it.
+    # running only until it meets the east-west path's western half. Built
+    # over the room's full height first so the crossing can be found, then
+    # trimmed to it.
     path2_cx = rng.randint(x_lo + int(cols * 0.15), x_lo + int(cols * 0.32))
     path2_full = terrain.create_path(
         rng, (path2_cx, y_lo), (path2_cx, y_hi), amplitude=int(cols * 0.03),
         wavelength=25, width=PATH_WIDTH, blocktype_id=dirt_id, bounds=(x_lo, x_hi))
     ys = np.arange(y_lo, y_hi + 1)
-    crossing_y = path1.centerline[path2_full.centerline - path1.lo]
-    intersection_y = ys[np.argmin(np.abs(crossing_y - ys))]
+    path1_y_at_path2_x = path1_west.centerline[path2_full.centerline - path1_west.lo]
+    intersection_y = ys[np.argmin(np.abs(path1_y_at_path2_x - ys))]
     path2 = path2_full.trimmed(intersection_y)
     path2.paint(maze)
 
-    # The bridge: a simple rectangle where the east-west path crosses the
-    # river -- as tall as path1's own band (so it doesn't spill outside the
-    # path), and as long as the river's width at that band plus one block of
-    # margin on each side. Found from where path1's mask and the river's
-    # actually overlap (a small, local patch of cells); the crossing's
-    # representative x is the middle of that patch. A full-column scan for
-    # the river's extent (any row it ever occupies across the whole room) is
-    # wrong here: the river is mean-reverting, so it lingers near the same x
-    # for long stretches, which would pick up nearly every row rather than
-    # just the crossing -- hence restricting the river's column extent to
-    # path1's own row-band at the crossing.
-    path1_mask = path1.mask(blocks.shape)
-    overlap_rows, overlap_cols = np.nonzero(path1_mask & river.mask)
-    bridge_x = int(np.median(overlap_cols))
-    by_lo, by_hi = path1.band_at(bridge_x)
-    river_cols = np.nonzero(river.mask[by_lo:by_hi, :].any(axis=0))[0]
-    bx_lo = max(river_cols.min() - 1, x_lo)
-    bx_hi = min(river_cols.max() + 1, x_hi)
-    blocks[by_lo:by_hi, bx_lo:bx_hi + 1] = bridge_id
+    # The bridge: a simple rectangle spanning the gap left between the two
+    # path halves above -- as tall as their shared band at crossing_y, and
+    # as wide as the river's extent in that band (already found above, with
+    # one block of margin on each side, when sizing where the path halves
+    # stop).
+    blocks[band_lo:band_hi, bridge_x_lo:bridge_x_hi + 1] = bridge_id
 
     # Now that the bridge has drawn over its stretch of the river, the
     # animation can snapshot which cells are still actually showing as river.
@@ -114,7 +120,7 @@ def _paint_town(maze, bt, seed=None, start=True):
     # Town centre: the stretch of the east-west path between the path
     # intersection and the bridge. A handful of ruined buildings line it,
     # plus a couple more scattered nearby.
-    town_x_lo, town_x_hi = sorted((path2_full.center_at(intersection_y), bridge_x))
+    town_x_lo, town_x_hi = sorted((path2_full.center_at(intersection_y), path1_west.hi))
     b_bounds = (x_lo, x_hi), (y_lo, y_hi)
     n_along = rng.randint(2, 5)
     for x in np.clip(
@@ -122,11 +128,11 @@ def _paint_town(maze, bt, seed=None, start=True):
             + rng.uniform(-6, 6, size=n_along),
             town_x_lo, town_x_hi).astype(int):
         side = rng.choice((-1, 1))
-        cx, cy = path1.point_at(x, side * rng.randint(6, 11))
+        cx, cy = path1_west.point_at(x, side * rng.randint(6, 11))
         terrain.try_place_building(blocks, bt, rng, cx, cy, *b_bounds)
 
     town_cx = (town_x_lo + town_x_hi) // 2
-    town_cy = path1.center_at(town_cx)
+    town_cy = path1_west.center_at(town_cx)
     for _ in range(2):
         radius = rng.randint(12, 24)
         angle = rng.uniform(0, 2 * np.pi)
@@ -146,7 +152,7 @@ def build_level(scene):
     bt = scene.world.blocktypes
     maze = Maze.filled((100, 300), bt, 'wall', obj_name='home')
     maze.blocks[1:-1, 1:-1] = bt.id_of('grass')
-    river = _paint_town(maze, bt)
+    river = paint_town(maze, bt)
 
     level = Level('home', maze)
     level.locations['start'] = (3, 5)             # where the player begins

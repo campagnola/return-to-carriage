@@ -21,6 +21,7 @@ import queue
 import sys
 import threading
 import time
+from collections import namedtuple
 
 import inputs
 import numpy as np
@@ -64,6 +65,14 @@ class GamepadEvent(InputEvent):
 
     def __init__(self, state):
         self.state = state
+
+
+class MovementTick(InputEvent):
+    """Posted by a ``MovementPacer`` thread onto the gameplay handler's own
+    queue: time for another movement step. Carries no data -- the gameplay
+    handler recomputes direction from its own live key/gamepad state -- and
+    exists so the pacer thread never touches game state itself, only routes,
+    like every other input source."""
 
 
 class FocusIn(InputEvent):
@@ -191,6 +200,83 @@ class QueuedInputHandler(InputHandler):
         return True
 
 
+#: A held direction (each axis in {-1, 0, 1}) and the speed it should be
+#: walked at. Equality-comparable so a handler can tell whether a recomputed
+#: velocity actually changed before forwarding it to the pacer.
+Velocity = namedtuple('Velocity', ('direction', 'speed'))
+
+
+class MovementPacer:
+    """Decides, on its own thread, when a held direction produces another
+    movement step -- and only that: it never touches the DM or player itself,
+    only posts a ``MovementTick`` to *tick_queue* (the owning
+    GameplayInputHandler's own event queue), so every actual game-state
+    mutation still happens on that single thread, same as any other input
+    source.
+
+    Fed by *velocity_queue*, onto which the owning handler pushes a new
+    ``Velocity`` each time the held keys/gamepad state make one. A held
+    direction ticks every ``1 / speed`` seconds. Starting a hold from a stop
+    waits out ``start_delay`` before its first tick -- short enough not to be
+    felt, long enough for the second key of a diagonal to arrive -- so a
+    diagonal starts diagonal instead of taking a stray orthogonal step in
+    whichever direction landed first. Any *other* velocity change -- adding
+    or dropping an axis while already moving, or a Shift-driven speed change
+    -- ticks immediately: this is what lets a diagonal formed mid-hold reach
+    a diagonal-only gap in a single, atomic combined step instead of drifting
+    each axis across its own cell boundary independently.
+
+    ``step()`` is the whole state machine as one plain, synchronous method
+    (``run()`` just calls it in a loop) so tests can drive pacing without
+    threads or sleeping.
+    """
+
+    def __init__(self, velocity_queue, tick_queue, start_delay, clock=time.monotonic):
+        self.velocity_queue = velocity_queue
+        self.tick_queue = tick_queue
+        self.start_delay = start_delay
+        self.clock = clock
+        self.velocity = Velocity((0, 0), 0.0)
+        self.hold_start = None  # when the current hold began; None if stopped
+        self.stepped = False    # has this hold posted its first tick yet?
+        self.next_due = None    # when the next tick is due; None if stopped
+
+    def run(self):
+        timeout = None
+        while True:
+            try:
+                velocity = self.velocity_queue.get(timeout=timeout)
+            except queue.Empty:
+                velocity = None
+            timeout = self.step(velocity, self.clock())
+
+    def step(self, velocity, now):
+        """Advance by one wakeup (a new *velocity*, or None for a scheduled
+        tick); return the delay before the pacer should be woken again
+        (None to block until the next velocity change)."""
+        if velocity is not None:
+            self.velocity = velocity
+            if velocity.direction == (0, 0):
+                self.hold_start = None
+                self.stepped = False
+                self.next_due = None
+                return None
+            if self.hold_start is None:
+                self.hold_start = now
+                self.stepped = False
+                self.next_due = now + self.start_delay
+            elif self.stepped:
+                self.next_due = now  # already moving: take effect right away
+
+        if self.next_due is None or now < self.next_due:
+            return None if self.next_due is None else self.next_due - now
+
+        self.tick_queue.put(MovementTick())
+        self.stepped = True
+        self.next_due = now + 1.0 / self.velocity.speed
+        return 1.0 / self.velocity.speed
+
+
 class GameplayInputHandler(QueuedInputHandler):
     """Keyboard and gamepad handling during normal gameplay.
 
@@ -201,38 +287,31 @@ class GameplayInputHandler(QueuedInputHandler):
 
     Movement
     --------
-    The player's real position is an integer cell, but while moving this
-    handler also carries a floating-point position so small time slices can be
-    integrated: each held arrow contributes a unit vector, the summed direction
-    is scaled by the current speed (walking, or running with Shift / the south
-    gamepad button), and ``pos += direction * speed * dt``. Whenever the
-    rounded float position leaves the current cell, that becomes a move
-    request. Opposed arrows sum to zero and stand still, as they should.
-
-    The float position is dropped the moment nothing is held, so a hold always
-    begins from a clean integer cell with no partial step banked from before.
-    Starting a hold also takes one step immediately — a tap should move you —
-    after a ``start_delay`` short enough not to be felt but long enough for the
-    second key of a diagonal to arrive, so a diagonal starts diagonal instead
-    of taking a stray orthogonal step in whichever direction landed first.
-
-    Walls are handled by resynchronizing: after a move the float position is
-    pulled back to wherever the player actually ended up, so running into a
-    wall diagonally keeps sliding along it instead of pushing the float
-    position ever deeper into rock.
+    Direction is the sum of unit vectors of the held arrows (plus the
+    gamepad hat), speed depends on Shift / the south gamepad button --
+    together a ``Velocity`` recomputed after every key/gamepad event. When it
+    changes, it is handed to a ``MovementPacer`` running on its own thread,
+    which decides the timing (see its docstring) and posts a ``MovementTick``
+    back onto this handler's own queue whenever a step is due. Handling that
+    tick -- reading the *current* held direction and asking the DM to move --
+    is the only thing that actually mutates game state, and it always
+    happens on this thread, so the "one thread mutates state at a time"
+    contract described in input.py's module docstring holds even though
+    timing now lives elsewhere. ``focused`` guards the same contract against
+    a tick that was already in flight when a dialog took the stack: it is
+    cleared on FocusOut, so a stray tick that arrives afterward is a no-op.
 
     While another handler (dialog, command prompt) sits above this one on the
     stack, no events arrive and the held-key state was cleared by FocusOut,
     so the loop simply blocks on its queue — suspension is a consequence of
     the stack, not a decision made here.
 
-    *clock* is injectable and the loop body is a plain method (``_process``)
-    so tests can drive movement timing synchronously, without threads.
+    *clock* is injectable and the pacer's ``step()`` is a plain method so
+    tests can drive movement timing synchronously, without threads.
     """
     walk_speed = 6.0    # cells / second
     run_speed = 18.0    # ... with Shift / BTN_SOUTH held
-    start_delay = 0.04  # grace before the first step, to catch diagonals
-    tick_wait = 0.01    # movement-loop wakeup while a direction is held
+    start_delay = 0.04  # grace before a fresh hold's first step, to catch diagonals
 
     def __init__(self, dm, player, interpreter=None, command_handler=None,
                  clock=time.monotonic, start_thread=True):
@@ -244,33 +323,27 @@ class GameplayInputHandler(QueuedInputHandler):
         self.clock = clock
         self.keys = set()
         self.gamepad_state = {}
-        self.float_pos = None   # sub-cell position while moving; None = stopped
-        self.stepped = False    # has this hold taken its immediate first step?
-        self.hold_start = None  # when the current direction hold began
-        self.last_tick = None
+        self.velocity = Velocity((0, 0), self.walk_speed)
+        self.focused = True
+        self.movement_queue = queue.Queue()
+        self.pacer = MovementPacer(self.movement_queue, self.queue, self.start_delay, clock)
         self.thread = None
+        self.pacer_thread = None
         if start_thread:
             self.thread = threading.Thread(target=self._run, name='gameplay-input',
                                            daemon=True)
             self.thread.start()
+            self.pacer_thread = threading.Thread(target=self.pacer.run,
+                                                  name='gameplay-movement', daemon=True)
+            self.pacer_thread.start()
 
     def _run(self):
         while True:
-            self._step()
-
-    def _step(self):
-        """One loop iteration: wait for input (or a repeat tick), process it."""
-        try:
-            if self._movement_direction() == (0, 0):
-                event = self.queue.get()  # idle: block until something happens
-            else:
-                event = self.queue.get(timeout=self.tick_wait)
-        except queue.Empty:
-            event = None
-        self._process(event)
+            self._process(self.queue.get())
 
     def _process(self, event):
-        """Handle one event (None means a movement tick), then advance movement."""
+        """Handle one event -- a real input event, or a pacer MovementTick
+        -- then forward the resulting velocity to the pacer if it changed."""
         if isinstance(event, KeyPress):
             self._key_press(event)
         elif isinstance(event, KeyRelease):
@@ -280,9 +353,27 @@ class GameplayInputHandler(QueuedInputHandler):
             # so movement does not resume by itself when focus returns
             self.keys.clear()
             self.gamepad_state = {}
+            self.focused = False
+        elif isinstance(event, FocusIn):
+            self.focused = True
         elif isinstance(event, GamepadEvent):
             self.gamepad_state = event.state
-        self._update_movement(self.clock())
+        elif isinstance(event, MovementTick):
+            self._move()
+
+        velocity = Velocity(self._movement_direction(), self._speed())
+        if velocity != self.velocity:
+            self.velocity = velocity
+            self.movement_queue.put(velocity)
+
+    def _move(self):
+        if not self.focused:
+            return  # a tick already in flight when a dialog took the stack
+        direction = np.array(self._movement_direction())
+        if not direction.any():
+            return
+        pos = np.array(self.player.location.slot)
+        self.dm.request_player_move(self.player, pos + direction)
 
     def _key_press(self, ev):
         scene = self.dm.scene
@@ -332,50 +423,6 @@ class GameplayInputHandler(QueuedInputHandler):
         if 'Down' in self.keys:
             dx[1] -= 1
         return (dx[0], dx[1])
-
-    def _update_movement(self, now):
-        """Integrate the float position along the held direction and step."""
-        direction = np.array(self._movement_direction(), dtype=float)
-        if not direction.any():
-            self.float_pos = None  # stopped: drop any partial step
-            self.hold_start = None
-            return
-
-        if self.float_pos is None:  # movement just began from a standstill
-            self.hold_start = now
-            self.last_tick = now
-            self.stepped = False
-            self.float_pos = np.array(self.player.location.slot, dtype=float)
-        dt = max(0.0, now - self.last_tick)
-        self.last_tick = now
-        if now - self.hold_start < self.start_delay:
-            return
-
-        if self.stepped:
-            self.float_pos += direction * self._speed() * dt
-        else:
-            # first step of the hold: a tap moves you, without waiting out a
-            # whole cell's worth of travel
-            self.float_pos += direction
-            self.stepped = True
-        self._step_toward(self.float_pos)
-
-    def _step_toward(self, float_pos):
-        """Move once *float_pos* is a full cell away, then resync it to reality.
-
-        Truncating rather than rounding the offset is what makes every step
-        cost a whole cell of travel; rounding would let the step right after
-        the hold's immediate one arrive in half the time.
-        """
-        pos = np.array(self.player.location.slot)
-        # one cell per step at most: a long dt must not teleport the player
-        newpos = pos + np.clip(np.trunc(float_pos - pos), -1, 1)
-        if (newpos == pos).all():
-            return
-        self.dm.request_player_move(self.player, newpos)
-        # the DM may have refused an axis (a wall); follow where we ended up so
-        # the float position cannot burrow into rock
-        self.float_pos += np.array(self.player.location.slot) - newpos
 
 
 class CommandInputHandler(QueuedInputHandler):

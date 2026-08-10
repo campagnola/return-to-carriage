@@ -104,7 +104,7 @@ def create_path(rng, start, end, amplitude, wavelength, width, blocktype_id, bou
     else:
         axis = 'y'
         lo, hi = min(y0, y1), max(y0, y1)
-        c0, c1 = (x0, x1) if y0 <= y1 else (x1, y0)
+        c0, c1 = (x0, x1) if y0 <= y1 else (x1, x0)
 
     centerline = meander(rng, hi - lo + 1, c0, c1, amplitude, wavelength)
     if bounds is not None:

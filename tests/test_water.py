@@ -11,7 +11,7 @@ from carriage_return.blocktypes import BlockTypes
 from carriage_return.layers import GlyphRegistry, SpriteLayer
 from carriage_return.levels import level_001_home
 from carriage_return.maze import Maze
-from carriage_return.terrain.water import WATER_COLOR_RAMP_RGB, WaterAnimation, WaterBody
+from carriage_return.terrain.water import WATER_COLOR_RAMP_RGB, WaterAnimation, WaterBody, create_river
 from carriage_return.world import Level
 
 
@@ -158,17 +158,36 @@ def test_flow_direction_is_unit_length_on_water_cells():
     bt = BlockTypes()
     maze = Maze.filled((100, 300), bt, 'wall', obj_name='home')
     maze.blocks[1:-1, 1:-1] = bt.id_of('grass')
-    river = level_001_home._paint_town(maze, bt, seed=0, start=False)
+    river = level_001_home.paint_town(maze, bt, seed=0, start=False)
 
     mags = np.linalg.norm(river.flow_dir[river.mask], axis=-1)
     assert np.allclose(mags, 1.0)
+
+
+def test_flow_direction_follows_start_to_end_regardless_of_coordinate_order():
+    bt = BlockTypes()
+    river_id = bt.id_of('river')
+
+    # a straight (zero-amplitude) river along y, first start < end...
+    maze = Maze.filled((20, 10), bt, 'grass')
+    Level('room-down', maze)
+    down = create_river(maze, river_id, np.random.RandomState(0), (5, 1), (5, 18),
+                         amplitude=0, animate=False)
+    assert np.allclose(down.flow_dir[down.mask], [0.0, 1.0])
+
+    # ...then start > end: flow must reverse to match, not stay +y.
+    maze = Maze.filled((20, 10), bt, 'grass')
+    Level('room-up', maze)
+    up = create_river(maze, river_id, np.random.RandomState(0), (5, 18), (5, 1),
+                       amplitude=0, animate=False)
+    assert np.allclose(up.flow_dir[up.mask], [0.0, -1.0])
 
 
 def test_bridge_cells_are_simulated_but_never_painted():
     bt = BlockTypes()
     maze = Maze.filled((100, 300), bt, 'wall', obj_name='home')
     maze.blocks[1:-1, 1:-1] = bt.id_of('grass')
-    river = level_001_home._paint_town(maze, bt, seed=0, start=False)
+    river = level_001_home.paint_town(maze, bt, seed=0, start=False)
     Level('home', maze)
 
     river_id = bt.id_of('river')

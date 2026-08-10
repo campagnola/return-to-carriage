@@ -253,15 +253,21 @@ subclasses with their own daemon thread, exactly like a `DialogSession`:
 **input-source threads never mutate game state.**
 
 - `GameplayInputHandler`: no vispy timer, no dispatch decisions. Its loop
-  blocks on the queue (or wakes on a movement-repeat timeout while a
-  direction key is held) and handles key presses — `t`/`r`/`d` call
-  `interpreter.take([])`/`read([])`/`drop([])`, `Tab` toggles the command
-  prompt, `Escape` sets `scene.quit_requested`. While a dialog sits above it
-  on the stack it receives nothing and holds no keys (cleared by
-  `FocusOut`), so it simply blocks — suspension is a *consequence of the
-  stack*, not a decision the handler makes. The clock is injectable
-  (`clock=time.monotonic`) and `_step`/`_process` are separate methods so
-  movement-repeat timing is testable without sleeping.
+  just blocks on the queue and handles whatever comes off it — key presses
+  (`t`/`r`/`d` call `interpreter.take([])`/`read([])`/`drop([])`, `Tab`
+  toggles the command prompt, `Escape` sets `scene.quit_requested`) and
+  `MovementTick`, a synthetic event posted by a `MovementPacer` running on
+  its own daemon thread. The pacer owns movement *timing* (direction/speed
+  changes are forwarded to it as a `Velocity`; it decides when a held
+  direction is due for another step) but never touches the DM or player
+  itself — it only posts ticks back onto the gameplay handler's own queue,
+  so game state is still mutated from exactly one thread, same as every
+  other input source. While a dialog sits above it on the stack it receives
+  nothing and holds no keys (cleared by `FocusOut`), so it simply blocks —
+  suspension is a *consequence of the stack*, not a decision the handler
+  makes. The clock is injectable (`clock=time.monotonic`) and the pacer's
+  `step()` is a plain method so movement-repeat timing is testable without
+  threads or sleeping.
 - `CommandInputHandler`: also its own thread; prompt editing targets
   `scene.log` (`set_last_line`/`write`/`remove_last_line`) — no vispy
   anywhere in the path.

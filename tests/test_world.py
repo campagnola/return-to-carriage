@@ -423,7 +423,7 @@ def test_homes_town_is_reachable_from_the_start():
     for seed in (0, 1, 2, 3, 99):
         maze = Maze.filled((100, 300), bt, 'wall', obj_name='home')
         maze.blocks[1:-1, 1:-1] = bt.id_of('grass')
-        level_001_home._paint_town(maze, bt, seed=seed, start=False)
+        level_001_home.paint_town(maze, bt, seed=seed, start=False)
 
         seen = _reachable(maze, (3, 5))
         for name, pos in (('start', (3, 5)), ('hole', (11, 5)), ('dungeon_stairs', (30, 30))):
@@ -435,7 +435,7 @@ def test_homes_town_has_a_river_a_bridge_and_paths():
     bt = BlockTypes()
     maze = Maze.filled((100, 300), bt, 'wall', obj_name='home')
     maze.blocks[1:-1, 1:-1] = bt.id_of('grass')
-    level_001_home._paint_town(maze, bt, seed=0, start=False)
+    level_001_home.paint_town(maze, bt, seed=0, start=False)
 
     for name in ('river', 'dirt', 'bridge'):
         assert (maze.blocks == bt.id_of(name)).any()
@@ -473,7 +473,7 @@ def test_homes_town_is_seeded():
     def painted(seed):
         maze = Maze.filled((100, 300), bt, 'wall', obj_name='home')
         maze.blocks[1:-1, 1:-1] = bt.id_of('grass')
-        level_001_home._paint_town(maze, bt, seed=seed, start=False)
+        level_001_home.paint_town(maze, bt, seed=seed, start=False)
         return maze.blocks
 
     a = painted(seed=7)

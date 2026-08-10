@@ -6,8 +6,8 @@ import numpy as np
 
 
 def meander(rng, length, start_center, end_center, amplitude, wavelength=25):
-    """An organic, wandering integer curve of *length* values, drifting from
-    *start_center* to *end_center*.
+    """An organic, wandering integer curve of *length* values, running
+    exactly from *start_center* to *end_center*.
 
     A mean-reverting random walk -- Brownian motion pulled back toward a
     centreline by an attractor, i.e. an Ornstein-Uhlenbeck process -- then
@@ -35,4 +35,17 @@ def meander(rng, length, start_center, end_center, amplitude, wavelength=25):
         k += 1
     padded = np.pad(v, (k // 2, k // 2), mode='edge')
     v = np.convolve(padded, np.ones(k) / k, mode='valid')
+
+    # The walk above only pulls loosely toward start_center/end_center --
+    # theta is weak by design, for a natural-looking wander -- and the box
+    # smooth above perturbs both ends again regardless. A caller that needs
+    # the curve to actually land on end_center (e.g. two path halves meeting
+    # a bridge at the same coordinate) can't rely on either. Corrected here
+    # the way a Brownian bridge is built from plain Brownian motion: spread
+    # each end's residual error across the whole curve as a linear ramp, so
+    # the curve settles smoothly into its endpoints instead of jumping to
+    # them on the last cell.
+    ramp = np.linspace(0.0, 1.0, length)
+    v += (start_center - v[0]) * (1.0 - ramp) + (end_center - v[-1]) * ramp
+
     return np.round(v).astype(int)

@@ -85,8 +85,7 @@ def create_river(maze, blocktype_id, rng, start, end, amplitude, wavelength=130,
     *wavelength* and *bounds*) -- the same curve generator a level's dirt
     paths use, so a river reads as the same kind of terrain feature, just
     with flow added: a unit vector per water cell, tangent to the
-    centreline, with +axis taken as downstream (an arbitrary but fixed
-    choice).
+    centreline, oriented from *start* toward *end*.
 
     *animate* attaches a :class:`WaterAnimation` (via *seed*/*start_animation*,
     see :meth:`WaterBody.animate`) before returning, which is what most
@@ -100,6 +99,15 @@ def create_river(maze, blocktype_id, rng, start, end, amplitude, wavelength=130,
     rows, cols = maze.blocks.shape
     half = path.width // 2
 
+    # create_path always lays the centerline out from lo to hi along its
+    # axis, regardless of which of start/end was larger there -- so the
+    # tangent computed below always points in +axis and has to be flipped
+    # whenever the caller's start is actually the hi end (i.e. flow runs from
+    # hi down to lo).
+    start_coord = start[1] if path.axis == 'y' else start[0]
+    end_coord = end[1] if path.axis == 'y' else end[0]
+    downstream = 1.0 if end_coord >= start_coord else -1.0
+
     mask = np.zeros((rows, cols), dtype=bool)
     flow_dir = np.zeros((rows, cols, 2), dtype='float32')
     d_perp = np.gradient(path.centerline.astype('float32'))
@@ -107,6 +115,7 @@ def create_river(maze, blocktype_id, rng, start, end, amplitude, wavelength=130,
         coord = path.lo + i
         d = (np.array([d_perp[i], 1.0], dtype='float32') if path.axis == 'y'
              else np.array([1.0, d_perp[i]], dtype='float32'))
+        d *= downstream
         d /= np.linalg.norm(d)
         if path.axis == 'y':
             y, x0 = coord, c - half
@@ -146,9 +155,9 @@ class WaterAnimation:
     covers them).
     """
     #: noise(t+1) = SELF_WEIGHT*noise(t) + NEIGHBOR_WEIGHT*neighbor_noise(t) + RANDOM_WEIGHT*random
-    SELF_WEIGHT = 0.5
-    NEIGHBOR_WEIGHT = 0.4
-    RANDOM_WEIGHT = 0.1
+    SELF_WEIGHT = 0.7
+    NEIGHBOR_WEIGHT = 0.25
+    RANDOM_WEIGHT = 0.05
 
     #: *random* above is drawn as ``uniform(0, 1) ** RANDOM_SKEW`` rather than
     #: flat: since SELF_WEIGHT + NEIGHBOR_WEIGHT sum to 0.9, the noise field's

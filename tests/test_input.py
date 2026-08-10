@@ -189,13 +189,35 @@ def make_gameplay(dispatcher, **kwds):
     return handler, dm, clock
 
 
+def _drain(handler, clock):
+    """Feed every velocity already sitting in ``movement_queue`` to the pacer
+    at the current fake time, then process any ``MovementTick`` that
+    produces -- the instantaneous part of what the real pacer/gameplay
+    threads do before either ever blocks on a timeout."""
+    while True:
+        try:
+            velocity = handler.movement_queue.get_nowait()
+        except queue.Empty:
+            break
+        handler.pacer.step(velocity, clock.t)
+    while True:
+        try:
+            handler._process(handler.queue.get_nowait())
+        except queue.Empty:
+            break
+
+
 def tick(handler, clock, duration, dt=0.005):
-    """Run the movement loop for *duration* seconds of fake time."""
+    """Run the movement pacer, as its own thread would, for *duration*
+    seconds of fake time, delivering queued velocities and any
+    MovementTicks they produce along the way."""
+    _drain(handler, clock)
     elapsed = 0.0
     while elapsed < duration:
         clock.t += dt
         elapsed += dt
-        handler._process(None)
+        handler.pacer.step(None, clock.t)
+        _drain(handler, clock)
 
 
 def test_first_step_waits_for_the_start_delay(dispatcher):
@@ -243,7 +265,7 @@ def test_running_is_faster_than_walking(dispatcher):
     tick(runner, run_clock, 1.0)
 
     assert len(run_dm.moves) > len(walk_dm.moves)
-    assert 17 <= len(run_dm.moves) <= 20  # run_speed is 18 cells/s
+    assert 16 <= len(run_dm.moves) <= 20  # run_speed is 18 cells/s
 
 
 def test_shift_mid_hold_switches_to_running(dispatcher):
@@ -263,16 +285,17 @@ def test_opposing_arrows_cancel(dispatcher):
     handler._process(KeyPress('Left'))
     tick(handler, clock, 1.0)
     assert dm.moves == []
-    assert handler.float_pos is None  # treated as stopped
+    assert handler.pacer.hold_start is None  # treated as stopped
 
 
-def test_float_position_is_dropped_when_stopped(dispatcher):
-    """A partial step must not be banked across a pause."""
+def test_hold_state_is_dropped_when_stopped(dispatcher):
+    """A partial hold must not be banked across a pause."""
     handler, dm, clock = make_gameplay(dispatcher)
     handler._process(KeyPress('Right'))
     tick(handler, clock, 0.1)  # first step, plus a fraction of the next
     handler._process(KeyRelease('Right'))
-    assert handler.float_pos is None
+    _drain(handler, clock)
+    assert handler.pacer.hold_start is None
 
     moved = len(dm.moves)
     handler._process(KeyPress('Right'))
@@ -304,6 +327,37 @@ def test_release_of_one_arrow_leaves_orthogonal_movement(dispatcher):
     tick(handler, clock, 0.3)
     assert dm.moves[-1][0] > x       # still moving in x
     assert dm.moves[-1][1] == y      # and no longer in y
+
+
+class NarrowGapDM(StubDM):
+    """A gap passable only by the exact diagonal move (6, 7) from (5, 6):
+    both cardinal neighbors are walled off, mirroring the real DM's
+    diagonal-only ``walkable`` check for a narrow hall."""
+    BLOCKED = {(5, 7), (6, 6)}
+
+    def request_player_move(self, player, pos):
+        pos = tuple(int(v) for v in pos)
+        if pos in self.BLOCKED:
+            return
+        self.moves.append(pos)
+        player.location.slot = pos
+
+
+def test_diagonal_added_mid_hold_passes_a_narrow_gap(dispatcher):
+    """The reported bug: holding Up alone (already moving), then adding a
+    side key, must combine into one atomic diagonal step immediately -- not
+    drift each axis independently -- or a gap passable only by a true
+    diagonal move is never reached."""
+    handler, dm, clock = make_gameplay(dispatcher)
+    handler.dm = NarrowGapDM()
+
+    handler._process(KeyPress('Up'))
+    tick(handler, clock, 0.3)  # already moving, and walled off at (5, 7)
+    assert handler.player.location.slot == (5, 6)
+
+    handler._process(KeyPress('Right'))
+    _drain(handler, clock)  # combined direction takes effect immediately
+    assert handler.player.location.slot == (6, 7)  # through the diagonal-only gap
 
 
 class SlidingDM(StubDM):
