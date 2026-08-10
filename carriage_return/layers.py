@@ -395,7 +395,11 @@ class SpriteSlot(object):
             layer.bgcolor[start:stop] = 0
 
         for mod in self._modifiers:
-            cells = (slice(start, stop) if mod.cells == slice(None)
+            # isinstance guards the == below: mod.cells may be an array (a
+            # modifier spanning many cells), and array == slice broadcasts to
+            # an array rather than a bool, which "if" can't test.
+            cells = (slice(start, stop)
+                     if isinstance(mod.cells, slice) and mod.cells == slice(None)
                      else _offset_cells(mod.cells, start))
             if mod.fg_emission is not None:
                 layer.fg_emission[cells] += mod.fg_emission

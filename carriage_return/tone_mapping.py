@@ -139,39 +139,60 @@ def pixel_color(albedo, emission, illuminance, exposure_value):
 # Memory
 # ---------------------------------------------------------------------------
 
-#: Illuminance (lux) above which more light no longer helps memory: a cell
-#: lit at least this well is lit well enough to see its layout, so a torch
-#: or a fireball up close can't burn a cell into memory any brighter than a
-#: normally-lit room does. Applied to the *arriving* light in
-#: :func:`memory_write_value`, before albedo -- a white wall still reads
+#: Exposed illuminance (``illuminance * exposure`` -- scale-free, since
+#: exposure already normalizes out a level's absolute light level) above
+#: which more light no longer helps memory: a cell lit at least this well
+#: *relative to how the eye is currently exposing the scene* is lit well
+#: enough to see its layout, so a torch or a fireball up close can't burn a
+#: cell into memory any brighter than a normally-lit room does. Applied
+#: before albedo, in :func:`memory_write_value` -- a white wall still reads
 #: brighter than a black one at the same illuminance, only the light itself
-#: saturates. Roughly a torch's illuminance a couple of tiles off; tune in
-#: the visual pass.
-MEMORY_ILLUM_SATURATION = 3.0
+#: saturates.
+#:
+#: Capping the raw *illuminance* here (in lux) instead would silently break
+#: on any level whose reference light level differs from the one the
+#: constant was tuned against: home's daylight is ~500x the sewer's torch
+#: light (see the module docstring), so a lux threshold tuned to "a torch a
+#: couple of tiles off" caps home's light to a sliver of itself while home's
+#: own exposure (tuned to *its* much brighter reference) barely amplifies
+#: that sliver back -- memory reads as black. Capping post-exposure instead
+#: means the same threshold means "well-lit for this level" everywhere,
+#: because exposure already carries the level's absolute scale. Tune in the
+#: visual pass.
+MEMORY_EXPOSED_SATURATION = 0.15
 
 #: Caps how bright a memory write can land, applied on top of the Reinhard
 #: curve in :func:`memory_write_value`.
 MEMORY_STRENGTH = 1.0
 
+#: Color the memory overlay is tinted when composited onto a fragment (see
+#: :class:`~.backends.vispy.graphics.TextureMaskFilter`'s fragment shader,
+#: which multiplies this by the scalar memory value per-channel). Slightly
+#: blue-shifted rather than neutral grey, so a remembered cell reads as a
+#: dim recollection rather than a flat desaturated copy of the lit scene.
+MEMORY_TINT = (1.0, 1.0, 1.0)
+
 
 def memory_write_value(albedo_luminance, illuminance_luminance, exposure_value):
     """What a glimpse of a cell burns into memory this frame.
 
-    The illuminance is capped first (:data:`MEMORY_ILLUM_SATURATION`), then
-    reflected off the surface (:func:`scene_reflected_luminance`), then run
-    through the same exposure + Reinhard curve (:func:`reinhard_tonemap`)
-    the live scene is drawn with this frame -- *exposure_value* is the
-    player's current :attr:`~.tone_mapping.EyeAdaptation.exposure`, not a
-    fixed reference. So a cell glimpsed while the eye is still adapted to a
+    The illuminance is exposed first -- *exposure_value* is the player's
+    current :attr:`~.tone_mapping.EyeAdaptation.exposure`, not a fixed
+    reference, so a cell glimpsed while the eye is still adapted to a
     brighter scene elsewhere reads as dim here too: you can't memorize what
-    you can't yet see. Called from :meth:`~.world.Level.update_sight`, whose
-    ``self.memory`` ratchets to the max of this value over every glimpse, so
-    once a cell has been seen well-adapted it stays remembered that way even
-    if a later glimpse is underexposed.
+    you can't yet see. The exposed illuminance is then capped
+    (:data:`MEMORY_EXPOSED_SATURATION`), reflected off the surface
+    (:func:`scene_reflected_luminance`), and run through the same Reinhard
+    curve (:func:`reinhard_tonemap`) the live scene is drawn with. Called
+    from :meth:`~.world.Level.update_sight`, whose ``self.memory`` ratchets
+    to the max of this value over every glimpse, so once a cell has been
+    seen well-adapted it stays remembered that way even if a later glimpse
+    is underexposed.
     """
-    capped = np.minimum(illuminance_luminance, MEMORY_ILLUM_SATURATION)
+    exposed_illuminance = illuminance_luminance * exposure_value
+    capped = np.minimum(exposed_illuminance, MEMORY_EXPOSED_SATURATION)
     Y_refl = scene_reflected_luminance(albedo_luminance, capped)
-    return reinhard_tonemap(Y_refl * exposure_value)
+    return reinhard_tonemap(Y_refl)
 
 
 def memory_overlay_pixel(memory_value):

@@ -4,7 +4,7 @@ import vispy.visuals, vispy.scene, vispy.gloo
 from vispy.visuals.shaders import ModularProgram, Function
 from vispy.visuals.transforms import STTransform, NullTransform
 
-from ...tone_mapping import GLSL_REINHARD_TONEMAP
+from ...tone_mapping import GLSL_REINHARD_TONEMAP, MEMORY_TINT
 
 
 # load support for opengl 3 features
@@ -693,7 +693,7 @@ class TextureMaskFilter(object):
                 vec3 refl = albedo * lgt.rgb * los;           // reflected luminance (linear)
                 vec3 out_lum = (refl + sprite_emission * los) * $exposure;   // exposed outgoing luminance
                 vec3 lit = $reinhard_tonemap(out_lum);         // Reinhard tone curve + display gamma
-                gl_FragColor = vec4(lit + vec3(mem*.5, mem*.5, mem*1.5), gl_FragColor.a);
+                gl_FragColor = vec4(lit + mem * $memory_tint, gl_FragColor.a);
             }
         """)
         self.fshader['light'] = light_texture
@@ -705,6 +705,7 @@ class TextureMaskFilter(object):
         # sane default exposure so the first frame (before any update pushes the
         # player's adaptation) is valid; see _DEFAULT_EXPOSURE.
         self.fshader['exposure'] = _DEFAULT_EXPOSURE
+        self.fshader['memory_tint'] = MEMORY_TINT
         self.scale_tr = STTransform(scale=scale) * STTransform(translate=(0.5, 0.5))
         self.fshader['transform'] = self.scale_tr * transform
         

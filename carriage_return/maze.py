@@ -36,9 +36,11 @@ class Maze(Entity):
         self._bg_color = None
         self._fg_emission = None
         self._bg_emission = None
+        self._bg_wash = None  # optional (rgb, amount, mask) blended into bg_color; see wash_bg_color
 
         # per-cell modifier registry: survives level rebuilds
         self._cell_modifiers = defaultdict(list)  # (row, col) → [ColorModifier, ...]
+        self._area_modifiers = []  # ColorModifiers already spanning many cells; see add_area_modifier
         self._scenery_slot = None  # the SpriteSlot currently displaying this maze
         self.appearance_changed = Observable()
 
@@ -87,6 +89,35 @@ class Maze(Entity):
                 pass  # modifier not attached (slot rebuilt since it was added)
         self.appearance_changed()
 
+    def add_area_modifier(self, cells, modifier):
+        """Register a ColorModifier spanning many maze cells at once.
+
+        *cells* is an array of flat row-major indices (``y * shape[1] + x``,
+        e.g. ``np.flatnonzero(mask.ravel())`` for some boolean cell mask). For
+        an effect too fine-grained for a single :meth:`wash_bg_color` blend
+        but too widespread for one-modifier-per-cell (see
+        :meth:`add_cell_modifier`) -- a river's per-cell animated shimmer,
+        say. Reattached automatically whenever :meth:`add_scenery` rebuilds
+        the slot, like a per-cell modifier, just tracked separately since it
+        is not keyed to one cell.
+        """
+        modifier.cells = np.asarray(cells)
+        self._area_modifiers.append(modifier)
+        if self._scenery_slot is not None:
+            self._scenery_slot.add_modifier(modifier)
+        self.appearance_changed()
+
+    def remove_area_modifier(self, modifier):
+        """Unregister a ColorModifier added via :meth:`add_area_modifier`."""
+        if modifier in self._area_modifiers:
+            self._area_modifiers.remove(modifier)
+        if self._scenery_slot is not None:
+            try:
+                self._scenery_slot.remove_modifier(modifier)
+            except ValueError:
+                pass  # modifier not attached (slot rebuilt since it was added)
+        self.appearance_changed()
+
     @classmethod
     def filled(cls, shape, blocktypes, blocktype='wall', obj_name=None):
         """A maze of *shape* ``(rows, cols)`` filled with one block type."""
@@ -121,7 +152,30 @@ class Maze(Entity):
                     rand = np.random.normal(scale=bt['bg_color_var'], size=(mask.sum(), 1))
                     self._bg_color[mask] += rand
 
+            if self._bg_wash is not None:
+                rgb, amount, mask = self._bg_wash
+                blended = self._bg_color[..., :3] * (1 - amount) + rgb * amount
+                if mask is None:
+                    self._bg_color[..., :3] = blended
+                else:
+                    self._bg_color[mask, :3] = blended[mask]
+
         return self._bg_color
+
+    def wash_bg_color(self, rgb, amount, mask=None):
+        """Blend *rgb* into the background colour by *amount* (0-1).
+
+        *rgb* is an ``(rows, cols, 3)`` colour field, *mask* an optional
+        ``(rows, cols)`` boolean array restricting where it applies (default:
+        everywhere). For static, spatially-varying terrain colour a single
+        per-blocktype colour can't express -- e.g. patches of parched grass.
+        Composed lazily into :attr:`bg_color`, alongside the blocktype colours
+        and per-cell noise (*bg_color_var*); call :meth:`invalidate_appearance`
+        first if a colour was already cached.
+        """
+        assert rgb.shape == self.shape + (3,)
+        self._bg_wash = (rgb, amount, mask)
+        self.invalidate_appearance()
 
     @property
     def fg_emission(self):
@@ -201,6 +255,8 @@ class Maze(Entity):
             for mod in mods:
                 mod.cells = idx
                 scenery.add_modifier(mod)
+        for mod in self._area_modifiers:
+            scenery.add_modifier(mod)
 
         return scenery
 

@@ -41,6 +41,11 @@ _default_blocktypes = [
     blocktype('grate', '#',  False,    0,       (.05, .05, .07, 1.0), (.55, .70, 1.0, 1.0),
               fg_emission=(0.05, 0.03, 0.0), bg_emission=(0.05, 0.03, 0.0)),
     blocktype('grass', '.',  True,     0,       (0.01, 0.16, 0.02, 1.0),    (0.01, 0.15, 0.01, 1.0), bg_color_var=0.003),
+    # A river: impassable like a wall (you cannot wade it, only cross by a
+    # bridge) but not opaque, so it neither blocks sight nor casts a shadow.
+    blocktype('river',  '~',  False,   0,       (.10, .30, .50, 1.0), (.05, .15, .45, 1.0), bg_color_var=0.005),
+    blocktype('dirt',   ':',  True,    0,       (.35, .25, .15, 1.0), (.30, .20, .10, 1.0), bg_color_var=0.01),
+    blocktype('bridge', '=',  True,    0,       (.45, .32, .18, 1.0), (.35, .24, .12, 1.0), bg_color_var=0.02),
 ]
 
 

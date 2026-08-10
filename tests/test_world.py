@@ -4,10 +4,11 @@ import pytest
 
 from carriage_return.blocktypes import BlockTypes
 from carriage_return.dm import DungeonMaster
-from carriage_return.levels import build_world, level_002_sewer
+from carriage_return.levels import build_world, level_001_home, level_002_sewer
 from carriage_return.maze import Maze
 from carriage_return.player import Player
 from carriage_return.portal import Door, Hole, StairsDown, StairsUp
+from carriage_return.terrain.buildings import place_building
 from carriage_return.scene import Scene
 from carriage_return.world import Level, LevelPortal, World
 
@@ -380,6 +381,24 @@ def test_an_unlit_level_renders_dark_rather_than_failing(played_world):
 
 # -- the shipped levels -------------------------------------------------------
 
+def _reachable(maze, start_xy):
+    """Boolean ``[y, x]`` array of every cell walkable-reachable from *start_xy*."""
+    walkable = maze.blocktypes['walkable'][maze.blocks]
+    seen = np.zeros(maze.shape, dtype=bool)
+    x, y = start_xy
+    stack = [(y, x)]
+    seen[y, x] = True
+    while stack:
+        y, x = stack.pop()
+        for dy, dx in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+            ny, nx = y + dy, x + dx
+            if (0 <= ny < maze.shape[0] and 0 <= nx < maze.shape[1]
+                    and walkable[ny, nx] and not seen[ny, nx]):
+                seen[ny, nx] = True
+                stack.append((ny, nx))
+    return seen
+
+
 def test_home_is_a_walled_room_with_a_hole():
     world = build_world(Scene())
     home = world.levels['home']
@@ -387,11 +406,81 @@ def test_home_is_a_walled_room_with_a_hole():
     hole = home.locations['hole']
 
     # the hole is a portal entity placed by the sewer builder, not terrain here
-    assert maze.blocktype_at(hole[1], hole[0])['name'] == 'path'
+    assert maze.blocktype_at(hole[1], hole[0])['walkable']
     border = np.concatenate([maze.blocks[0], maze.blocks[-1],
                              maze.blocks[:, 0], maze.blocks[:, -1]])
     assert (border == maze.blocktypes.id_of('wall')).all()
-    assert (maze.blocks[1:-1, 1:-1] == maze.blocktypes.id_of('path')).all()
+
+
+def test_homes_town_is_reachable_from_the_start():
+    """start, hole and dungeon_stairs must all be walkable-reachable, for any seed.
+
+    The town (river, paths, bridge, buildings) is painted well clear of that
+    corner, but the buildings' broken walls and the bridge crossing are random,
+    so this is the check that they never wall off the fixed points.
+    """
+    bt = BlockTypes()
+    for seed in (0, 1, 2, 3, 99):
+        maze = Maze.filled((100, 300), bt, 'wall', obj_name='home')
+        maze.blocks[1:-1, 1:-1] = bt.id_of('grass')
+        level_001_home._paint_town(maze, bt, seed=seed, start=False)
+
+        seen = _reachable(maze, (3, 5))
+        for name, pos in (('start', (3, 5)), ('hole', (11, 5)), ('dungeon_stairs', (30, 30))):
+            x, y = pos
+            assert seen[y, x], "seed %s: %s unreachable" % (seed, name)
+
+
+def test_homes_town_has_a_river_a_bridge_and_paths():
+    bt = BlockTypes()
+    maze = Maze.filled((100, 300), bt, 'wall', obj_name='home')
+    maze.blocks[1:-1, 1:-1] = bt.id_of('grass')
+    level_001_home._paint_town(maze, bt, seed=0, start=False)
+
+    for name in ('river', 'dirt', 'bridge'):
+        assert (maze.blocks == bt.id_of(name)).any()
+
+    # a river cell is never walkable -- crossing it requires the bridge
+    assert not bt.get('river')['walkable']
+
+
+def test_homes_buildings_avoid_the_path_and_each_other():
+    bt = BlockTypes()
+    blocks = np.full((30, 30), bt.id_of('wall'), dtype='uint8')
+    blocks[1:-1, 1:-1] = bt.id_of('grass')
+    blocks[15, 1:-1] = bt.id_of('dirt')  # a path straight across the middle
+
+    # centred right on the path -- must be rejected, path left untouched
+    assert not place_building(
+        blocks, bt, np.random.RandomState(0), 15, 15, (1, 28), (1, 28))
+    assert (blocks[15, 1:-1] == bt.id_of('dirt')).all()
+
+    # clear of the path -- must succeed
+    assert place_building(
+        blocks, bt, np.random.RandomState(0), 15, 5, (1, 28), (1, 28))
+
+    # a second building attempted right on top of the first -- must be
+    # rejected, and must not touch what the first one drew
+    before = blocks.copy()
+    assert not place_building(
+        blocks, bt, np.random.RandomState(1), 15, 5, (1, 28), (1, 28))
+    assert (blocks == before).all()
+
+
+def test_homes_town_is_seeded():
+    bt = BlockTypes()
+
+    def painted(seed):
+        maze = Maze.filled((100, 300), bt, 'wall', obj_name='home')
+        maze.blocks[1:-1, 1:-1] = bt.id_of('grass')
+        level_001_home._paint_town(maze, bt, seed=seed, start=False)
+        return maze.blocks
+
+    a = painted(seed=7)
+    b = painted(seed=7)
+    c = painted(seed=8)
+    assert (a == b).all()
+    assert not (a == c).all()
 
 
 def test_the_sewer_is_the_same_every_time():
@@ -406,19 +495,8 @@ def test_the_sewer_hallways_join_up():
     """The stairs must be walkable-reachable from the hole, for any seed."""
     for seed in (20240719, 1, 2, 3, 99):
         maze, loc, _ = level_002_sewer._generate(BlockTypes(), seed=seed)
-        hole, stairs = loc['hole'], loc['stairs_down']
-        walkable = maze.blocktypes['walkable'][maze.blocks]
-        seen = np.zeros(maze.shape, dtype=bool)
-        stack = [(hole[1], hole[0])]
-        seen[stack[0]] = True
-        while stack:
-            y, x = stack.pop()
-            for dy, dx in ((1, 0), (-1, 0), (0, 1), (0, -1)):
-                ny, nx = y + dy, x + dx
-                if (0 <= ny < maze.shape[0] and 0 <= nx < maze.shape[1]
-                        and walkable[ny, nx] and not seen[ny, nx]):
-                    seen[ny, nx] = True
-                    stack.append((ny, nx))
+        seen = _reachable(maze, loc['hole'])
+        stairs = loc['stairs_down']
         assert seen[stairs[1], stairs[0]], "seed %s: stairs unreachable" % seed
 
 
