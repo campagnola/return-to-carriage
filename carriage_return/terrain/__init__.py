@@ -12,11 +12,13 @@ from .buildings import place_building, try_place_building
 from .grass import grass_wash, paint_grass_wash
 from .meander import meander
 from .path import Path, create_path
-from .water import WaterAnimation, WaterBody, create_river
+from .water import (
+    RiverBanks, RiverGreenery, WaterAnimation, WaterBody,
+    create_river, paint_river_banks, paint_river_greenery)
 
 __all__ = [
-    'Path', 'WaterAnimation', 'WaterBody',
-    'create_path', 'create_river',
+    'Path', 'RiverBanks', 'RiverGreenery', 'WaterAnimation', 'WaterBody',
+    'create_path', 'create_river', 'paint_river_banks', 'paint_river_greenery',
     'grass_wash', 'paint_grass_wash',
     'meander',
     'place_building', 'try_place_building',

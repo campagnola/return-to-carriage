@@ -31,8 +31,12 @@ PATH_WIDTH = 2
 
 def paint_town(maze, bt, seed=None, start=True):
     """Paint a river, two dirt paths, a bridge, a handful of ruined buildings,
-    and patchy grass colour into home's interior. Returns the river's
-    :class:`~..terrain.water.WaterBody`.
+    sandy river banks, lush riverside greenery, and patchy grass colour into
+    home's interior. Returns ``(river, town_center)``: the river's
+    :class:`~..terrain.water.WaterBody` (with its banks attached as ``.banks``
+    and greenery as ``.greenery``, see :func:`~..terrain.water.paint_river_banks`
+    and :func:`~..terrain.water.paint_river_greenery`), and the ``(x, y)`` cell
+    at the middle of the town.
 
     This is home's own placement logic -- where the river runs, where the
     paths run and where they meet, where the bridge crosses, where buildings
@@ -64,7 +68,8 @@ def paint_town(maze, bt, seed=None, start=True):
     # see terrain.create_river.
     river = terrain.create_river(
         maze, bt.id_of('river'), rng, (river_cx, y_hi), (river_cx, y_lo), width=12,
-        amplitude=int(cols * 0.06), wavelength=130, bounds=(x_lo, x_hi), animate=False)
+        amplitude=int(cols * 0.06), wavelength=130, bounds=(x_lo, x_hi), animate=False,
+        bed_albedo=(.3, .2, .05))
 
     # The east-west path: meanders in y on each side of the river, but is
     # built as two separate halves that both end exactly at crossing_y --
@@ -115,7 +120,7 @@ def paint_town(maze, bt, seed=None, start=True):
 
     # Now that the bridge has drawn over its stretch of the river, the
     # animation can snapshot which cells are still actually showing as river.
-    river.animate(maze, seed=seed, start=start)
+    # river.animate(maze, seed=seed, start=start)
 
     # Town centre: the stretch of the east-west path between the path
     # intersection and the bridge. A handful of ruined buildings line it,
@@ -133,6 +138,7 @@ def paint_town(maze, bt, seed=None, start=True):
 
     town_cx = (town_x_lo + town_x_hi) // 2
     town_cy = path1_west.center_at(town_cx)
+    town_center = (town_cx, town_cy)
     for _ in range(2):
         radius = rng.randint(12, 24)
         angle = rng.uniform(0, 2 * np.pi)
@@ -140,11 +146,23 @@ def paint_town(maze, bt, seed=None, start=True):
         cy = town_cy + int(radius * np.sin(angle))
         terrain.try_place_building(blocks, bt, rng, cx, cy, *b_bounds)
 
+    # Sandy banks: 0-1 blocks of sand just outside the river's edges, over
+    # whatever grass is still exposed now that paths, the bridge and
+    # buildings have all claimed their own footprint. Kept on the river
+    # itself (river.banks) so the greenery pass below can start just past it.
+    river.banks = terrain.paint_river_banks(maze, bt, river, rng)
+
+    # Lush greenery: 0-3 blocks of a deep, saturated green wash just past the
+    # banks, fading back into ordinary grass -- built directly on river.banks
+    # so it starts exactly where the actually-placed sand ends.
+    river.greenery = terrain.paint_river_greenery(maze, bt, river, river.banks, rng)
+
     # Patchy grass colour, mixed lightly into the grass floor everywhere it
-    # still shows -- painted last so it follows the final grass footprint.
+    # still shows -- painted last so it composes on top of the greenery wash
+    # above (washes layer, see Maze.wash_bg_color) rather than replacing it.
     terrain.paint_grass_wash(maze, bt, rng)
 
-    return river
+    return river, town_center
 
 
 def build_level(scene):
@@ -152,12 +170,13 @@ def build_level(scene):
     bt = scene.world.blocktypes
     maze = Maze.filled((100, 300), bt, 'wall', obj_name='home')
     maze.blocks[1:-1, 1:-1] = bt.id_of('grass')
-    river = paint_town(maze, bt)
+    river, town_center = paint_town(maze, bt)
 
     level = Level('home', maze)
     level.locations['start'] = (3, 5)             # where the player begins
     level.locations['hole'] = (11, 5)             # the sewer's hole lands here
     level.locations['dungeon_stairs'] = (30, 30)  # a shortcut down to the dungeon
+    level.locations['town'] = town_center         # the town centre, by the bridge
 
     # Home holds the eye at a fixed daylight exposure rather than sampling its
     # floor (see HOME_ADAPT_LUMINANCE). Equal bounds pin it; leaving the eye

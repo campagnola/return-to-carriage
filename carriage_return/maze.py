@@ -36,7 +36,7 @@ class Maze(Entity):
         self._bg_color = None
         self._fg_emission = None
         self._bg_emission = None
-        self._bg_wash = None  # optional (rgb, amount, mask) blended into bg_color; see wash_bg_color
+        self._bg_washes = []  # list of (rgb, amount, mask, blocktype_id) layered into bg_color, in order; see wash_bg_color
 
         # per-cell modifier registry: survives level rebuilds
         self._cell_modifiers = defaultdict(list)  # (row, col) → [ColorModifier, ...]
@@ -48,19 +48,28 @@ class Maze(Entity):
     def shape(self):
         return self.blocks.shape
 
-    def invalidate_appearance(self):
+    def invalidate_appearance(self, clear_washes=False):
         """Drop the cached opacity/colour arrays after ``blocks`` was edited.
 
         The three are derived from ``blocks`` and cached on first use, so
         anything that writes into ``blocks`` after construction -- stamping a
         portal end, most notably -- must call this or the maze keeps drawing
         (and casting shadows) as it looked beforehand.
+
+        *clear_washes*, if set, also drops every layer accumulated by
+        :meth:`wash_bg_color`. Ordinary block edits leave washes alone (a
+        wash targets specific cells regardless of what else on the maze
+        changed); pass ``True`` only when repainting a maze from scratch --
+        e.g. re-running level placement on a reused ``Maze`` -- so the new
+        layout doesn't inherit stale washes from the previous one.
         """
         self._opacity = None
         self._fg_color = None
         self._bg_color = None
         self._fg_emission = None
         self._bg_emission = None
+        if clear_washes:
+            self._bg_washes = []
 
     def add_cell_modifier(self, pos, modifier):
         """Register a ColorModifier for maze cell pos=(x, y).
@@ -152,8 +161,10 @@ class Maze(Entity):
                     rand = np.random.normal(scale=bt['bg_color_var'], size=(mask.sum(), 1))
                     self._bg_color[mask] += rand
 
-            if self._bg_wash is not None:
-                rgb, amount, mask = self._bg_wash
+            for rgb, amount, mask, blocktype_id in self._bg_washes:
+                if blocktype_id is not None:
+                    still_that_blocktype = self.blocks == blocktype_id
+                    mask = still_that_blocktype if mask is None else (mask & still_that_blocktype)
                 blended = self._bg_color[..., :3] * (1 - amount) + rgb * amount
                 if mask is None:
                     self._bg_color[..., :3] = blended
@@ -162,19 +173,39 @@ class Maze(Entity):
 
         return self._bg_color
 
-    def wash_bg_color(self, rgb, amount, mask=None):
+    def wash_bg_color(self, rgb, amount, mask=None, blocktype_id=None):
         """Blend *rgb* into the background colour by *amount* (0-1).
 
         *rgb* is an ``(rows, cols, 3)`` colour field, *mask* an optional
         ``(rows, cols)`` boolean array restricting where it applies (default:
         everywhere). For static, spatially-varying terrain colour a single
         per-blocktype colour can't express -- e.g. patches of parched grass.
-        Composed lazily into :attr:`bg_color`, alongside the blocktype colours
+
+        *blocktype_id*, if given, is re-checked against ``self.blocks`` every
+        time :attr:`bg_color` is rebuilt rather than once at call time: the
+        wash then only ever lands on cells that *currently* still hold that
+        blocktype, on top of whatever *mask* also restricts. Use this for a
+        wash tied to a specific material -- a river's depth colour, say --
+        so it doesn't keep bleeding through onto a cell something else draws
+        over later (a bridge stamped over part of the river, after the river
+        already queued its depth wash). Without it, *mask* is a one-time
+        snapshot: a cell it covers keeps getting washed forever, even after
+        its blocktype changes to something the wash was never meant for.
+
+        Washes *layer*: each call appends a new ``(rgb, amount, mask,
+        blocktype_id)`` entry rather than replacing whatever was there
+        before, and :attr:`bg_color` folds them into the running colour in
+        the order they were applied -- so independent features (a river's
+        depth colour, sandy banks, patchy grass, ...) can each wash their own
+        cells, or even overlap, without one silently erasing another.
+        Composed lazily into :attr:`bg_color`, after the blocktype colours
         and per-cell noise (*bg_color_var*); call :meth:`invalidate_appearance`
-        first if a colour was already cached.
+        first if a colour was already cached. To start over from no washes
+        (e.g. repainting a reused maze), call
+        ``invalidate_appearance(clear_washes=True)`` before repainting.
         """
         assert rgb.shape == self.shape + (3,)
-        self._bg_wash = (rgb, amount, mask)
+        self._bg_washes.append((rgb, amount, mask, blocktype_id))
         self.invalidate_appearance()
 
     @property

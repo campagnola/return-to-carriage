@@ -24,6 +24,12 @@ if __name__ == '__main__':
     parser.add_argument('--test', action='store_true',
                         help='test mode: speed up slow real-time behaviours '
                              '(e.g. eye adaptation) for hands-on testing')
+    parser.add_argument('--location', metavar='LEVEL:NAME',
+                        help='start the player at a named location instead of '
+                             'home\'s start, e.g. "home:town" or "sewer:hole" '
+                             '-- each level records its own named cells '
+                             '(start, portals, points of interest). Give an '
+                             'unknown LEVEL or NAME to see what is available.')
     args = parser.parse_args()
     # Set before anything is built so construction-time reads (eye adaptation
     # time constants, etc.) see it.
@@ -39,6 +45,20 @@ if __name__ == '__main__':
     dm = DungeonMaster(scene)
 
     world, player = new_game(scene)
+
+    if args.location is not None:
+        level_name, _, loc_name = args.location.partition(':')
+        level = world.levels.get(level_name)
+        if level is None:
+            parser.error('unknown level %r for --location; available levels: '
+                         '%s' % (level_name, ', '.join(sorted(world.levels))))
+        pos = level.locations.get(loc_name)
+        if pos is None:
+            parser.error('unknown location %r on level %r for --location; '
+                         'available: %s' % (loc_name, level_name,
+                                            ', '.join(sorted(level.locations))))
+        scene.set_level(level)
+        player.location.update(level.maze, pos)
 
     # application wiring -- deliberately not in game.py, since the screenshot
     # harness omits all of it

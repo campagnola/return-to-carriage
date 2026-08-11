@@ -45,7 +45,11 @@ _default_blocktypes = [
     # bridge) but not opaque, so it neither blocks sight nor casts a shadow.
     blocktype('river',  '~',  False,   0,       (.10, .30, .50, 1.0), (.05, .15, .45, 1.0), bg_color_var=0.002),
     blocktype('dirt',   ':',  True,    0,       (.35, .25, .15, 1.0), (.30, .20, .10, 1.0), bg_color_var=0.01),
-    blocktype('bridge', '=',  True,    0,       (.45, .32, .18, 1.0), (.35, .24, .12, 1.0), bg_color_var=0.02),
+    blocktype('bridge', '=',  True,    0,       (.45, .32, .18, 1.0), (.15, .12, .06, 1.0), bg_color_var=0.02),
+    # A river's dry bank: loose sand/gravel just outside the water's edge.
+    # Warm and light -- brighter than water.RIVER_BED_ALBEDO's submerged,
+    # silty tone, since this sand is never underwater.
+    blocktype('sand',   ',',  True,    0,       (.78, .70, .50, 1.0), (.72, .63, .42, 1.0), bg_color_var=0.006),
 ]
 
 
