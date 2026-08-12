@@ -6,7 +6,7 @@ from .light import PointLight
 from .location import Location
 from .sprite import SingleCharSprite
 from .units import lm
-from .random import RandomDist
+from .random.random_dist import RandomDist
 from .perception import AUTO_LOG_SALIENCE
 
 

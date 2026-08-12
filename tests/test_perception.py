@@ -21,7 +21,7 @@ from carriage_return.levels import build_world
 from carriage_return.maze import Maze
 from carriage_return.perception import ContinuousPercept, Percept, TransientPercept, VisualPercept
 from carriage_return.player import Player
-from carriage_return.random import RandomDist
+from carriage_return.random.random_dist import RandomDist
 from carriage_return.scene import AUTO_LOG_SALIENCE, Scene
 from carriage_return.world import Level
 
