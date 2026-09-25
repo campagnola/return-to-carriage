@@ -23,6 +23,14 @@ def gaussian_spectrum(sigma_freq, amp=1.0, center_freq=0.0):
     return lambda freq: amp * np.exp(-0.5 * ((freq - center_freq) / sigma_freq) ** 2)
 
 
+def gaussian_blur_sigma_freq(spatial_sigma):
+    """The ``sigma_freq`` a centered :func:`gaussian_spectrum` needs to
+    reproduce a spatial gaussian blur of *spatial_sigma* (in the same units as
+    the noise's ``voxel_size_um``) -- a plain gaussian's Fourier transform is
+    itself gaussian, with reciprocal width."""
+    return 1.0 / (2 * np.pi * spatial_sigma)
+
+
 def exponential_spectrum(scale_freq, amp=1.0):
     return lambda freq: amp * np.exp(-freq / scale_freq)
 
