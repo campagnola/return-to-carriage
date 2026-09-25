@@ -5,3 +5,5 @@ agent_helpers/
 .pytest_cache/
 /vispy/
 conda_env*
+.venv/
+*.egg-info/

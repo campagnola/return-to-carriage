@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "carriage_return"
+version = "0.0.0"
+description = "Return to Carriage"
+requires-python = ">=3.10"
+dependencies = [
+    "inputs",
+    "numpy",
+    "pillow",
+    "pyopengl",
+    "pyqt5",
+    "pyqtgraph",
+    "scipy",
+    "vispy",
+]
+
+[dependency-groups]
+dev = ["pytest"]
+# Only needed by llm_testbench.py; sync with `uv sync --group llm`.
+llm = ["accelerate", "bitsandbytes", "torch", "transformers"]
+
+[tool.setuptools.packages.find]
+include = ["carriage_return*"]
+
+[tool.uv]
+default-groups = ["dev"]
