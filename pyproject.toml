@@ -28,3 +28,5 @@ include = ["carriage_return*"]
 
 [tool.uv]
 default-groups = ["dev"]
+# Newer pyqt5-qt5 releases ship no Windows wheels.
+constraint-dependencies = ["pyqt5-qt5<=5.15.2"]
