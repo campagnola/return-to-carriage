@@ -61,9 +61,9 @@ def test_update_sight(scene):
 def test_memory_decay_is_time_based(scene):
     scene.update_sight(1/60.)
 
-    # update_sight now re-accumulates max(memory, current_lit) BEFORE decaying,
-    # so to isolate pure decay we dominate the accumulation: set memory far
-    # above any lit value, so the max() keeps it and only the decay acts.
+    # update_sight re-accumulates max(memory, seen) BEFORE decaying, so to
+    # isolate pure decay we dominate the accumulation: set memory far
+    # above any seen value, so the max() keeps it and only the decay acts.
     scene.memory[:] = 1e6
     mem = scene.memory.copy()
 

@@ -3,6 +3,7 @@ import numpy as np
 
 from .entity import Component
 from .events import Observable
+from .layers import upsample_to_field
 from .units import CELL_SIZE_M, m
 
 
@@ -369,7 +370,7 @@ class ArrayLight(Light):
                 % (arr.shape[:2], tuple(maze.shape[:2])))
             # nearest-neighbour upsample from maze cells to field cells, the
             # same maze->field scaling the point light's mgrid produces
-            base = np.repeat(np.repeat(arr, supersample, axis=0), supersample, axis=1)
+            base = upsample_to_field(arr, supersample)
             if base.ndim == 2:
                 base = base[:, :, None]
             self._base_map = base

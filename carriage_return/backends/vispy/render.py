@@ -139,6 +139,7 @@ class VispySceneRenderer(object):
     - uploads the level's ``light`` and ``memory_overlay`` FieldLayers to two
       textures (each only when its version changed) and applies them to the
       sprites as a mask filter that gates reflection/emission by line of sight
+      and composites memory with ``max``
 
     The sight update runs from the sprite visual's _prepare_draw, right after
     the glyph positions are latched, so a frame draws the glyph and the light
@@ -220,10 +221,10 @@ class VispySceneRenderer(object):
                                                   interpolation='linear', wrapping='repeat')
         # Memory: single-channel float, the display-space memory overlay. The
         # shader reads it as .r. r32f keeps the display-space value at full
-        # precision; the filter samples .r regardless of channel count.
+        # precision; nearest sampling keeps the one-texel wall lines crisp.
         self.memory_texture = vispy.gloo.Texture2D(shape=(*level.field_shape[:2], 1), format='red',
                                                    internalformat='r32f',
-                                                   interpolation='linear', wrapping='repeat')
+                                                   interpolation='nearest', wrapping='repeat')
         # The tone map that turns these into displayable color, and the gating
         # of reflection/emission by line of sight, live in TextureMaskFilter
         # (per fragment).
@@ -263,7 +264,7 @@ class VispySceneRenderer(object):
         # The field textures themselves only re-upload on a version change
         # below. When there is no player, keep the last exposure -- line of
         # sight is 0 in that case anyway, so reflection and emission are gated
-        # off on the GPU and only the memory overlay shows.
+        # off on the GPU and only memory shows.
         player = self.scene.player
         if player is not None:
             self.sight_filter.set_exposure(player.adaptation.exposure)

@@ -12,14 +12,14 @@ it (see :mod:`.levels`), not here.
 This module holds everything downstream of that light: the eye's adaptation
 state (:class:`EyeAdaptation`), the exposure it produces, and the Reinhard +
 display-gamma curve that turns exposed linear luminance into a display pixel.
-Two call sites need the same curve -- the live scene, which the GPU draws
+Two call sites need the same formula -- the live scene, which the GPU draws
 (:class:`~.backends.vispy.graphics.TextureMaskFilter`), and the memory
-overlay, which the CPU draws (:meth:`~.world.Level.update_sight`) -- so the
-curve and its constants (:data:`DISPLAY_GAMMA`) are defined once, here, and
-both call sites use them. Where the same formula must also run on the GPU,
+write, which the CPU makes (:meth:`~.world.Level.update_sight`) -- so
+:func:`display_value` and its constants are defined once, here, and both
+call sites use them. Where the same formula must also run on the GPU,
 its GLSL twin is defined right next to the Python version below (see
-:data:`GLSL_REINHARD_TONEMAP`) -- edit both together, they are not allowed to
-drift apart.
+:data:`GLSL_REINHARD_TONEMAP` and :data:`GLSL_DISPLAY_VALUE`) -- edit both
+together, they are not allowed to drift apart.
 
 Game-side module: no rendering library may be imported here. Only ``math``
 and numpy are used.
@@ -48,7 +48,7 @@ LUMINANCE_WEIGHTS = np.array([0.2126, 0.7152, 0.0722], dtype='float32')
 #: The display transfer function exponent applied after every Reinhard curve
 #: in the game, on both the CPU and GPU paths: the live scene
 #: (:data:`GLSL_REINHARD_TONEMAP`, run by TextureMaskFilter) and a memory
-#: write (:func:`memory_write_value`, run by Level.update_sight when a cell
+#: write (:func:`display_value`, run by Level.update_sight when a wall face
 #: is seen) both gamma-correct with ``x ** (1 / DISPLAY_GAMMA)``. One
 #: constant so the two paths cannot drift apart. Currently mid-experiment on
 #: the middle-grey key
@@ -103,67 +103,59 @@ def reflected_luminance(albedo, illuminance):
     live scene (no BRDF normalization) -- gating by line of sight and adding
     emission is the caller's job (see
     :class:`~.backends.vispy.graphics.TextureMaskFilter`). Contrast
-    :func:`scene_reflected_luminance`, which *does* apply the Lambertian
-    1/pi, for the physically-estimated luminance the eye adapts to.
+    :func:`scene_reflected_luminance`, which applies the Lambertian 1/pi to
+    this for eye adaptation.
     """
     return np.asarray(albedo, dtype=float) * np.asarray(illuminance, dtype=float)
 
 
-def scene_reflected_luminance(albedo_luminance, illuminance_luminance):
+def scene_reflected_luminance(reflected):
     """Reflected luminance (cd/m^2) of a Lambertian surface, for eye adaptation.
 
     A Lambertian surface of reflectance ``rho`` lit by ``E`` lux has luminance
     leaving it of ``rho * E / pi``; the 1/pi turns arriving light into light
-    leaving the surface toward the eye. Used to build the adaptation target
-    the eye samples (:meth:`~.world.Level.update_sight`) -- *not* the same
-    quantity :func:`reflected_luminance` computes for the actual displayed
-    pixel, which omits the 1/pi.
+    leaving the surface toward the eye. *reflected* is ``rho * E`` from
+    :func:`reflected_luminance`.
     """
-    return albedo_luminance * illuminance_luminance / math.pi
+    return np.asarray(reflected, dtype=float) / math.pi
+
+
+def display_value(reflected, emission, exposure_value):
+    """Reflected + emitted linear luminance -> displayed brightness.
+
+    GLSL twin: :data:`GLSL_DISPLAY_VALUE` -- keep the two in sync.
+    """
+    out_lum = np.asarray(reflected, dtype=float) + np.asarray(emission, dtype=float)
+    return reinhard_tonemap(out_lum * exposure_value)
+
+
+#: GLSL twin of :func:`display_value`. ``$reinhard_tonemap`` is filled by the
+#: backend with :data:`GLSL_REINHARD_TONEMAP`.
+GLSL_DISPLAY_VALUE = """
+vec3 display_value(vec3 reflected, vec3 emission, float exposure_value) {
+    return $reinhard_tonemap((reflected + emission) * exposure_value);
+}
+"""
 
 
 def pixel_color(albedo, emission, illuminance, exposure_value):
     """albedo, emission, illuminance, exposure -> displayed rgb, per channel.
 
-    The exact math :class:`~.backends.vispy.graphics.TextureMaskFilter` runs
-    per-fragment on the GPU, reproduced in Python for tools (see
+    What :class:`~.backends.vispy.graphics.TextureMaskFilter` draws in full
+    line of sight, for tools (see
     ``agent_helpers/tonemap_demo.ipynb``) that want to predict what a color
     will look like on screen without a GL context.
     """
-    refl = reflected_luminance(albedo, illuminance)
-    out_lum = refl + np.asarray(emission, dtype=float)
-    return reinhard_tonemap(out_lum * exposure_value)
+    return display_value(reflected_luminance(albedo, illuminance), emission,
+                         exposure_value)
 
 
 # ---------------------------------------------------------------------------
 # Memory
 # ---------------------------------------------------------------------------
 
-#: Exposed illuminance (``illuminance * exposure`` -- scale-free, since
-#: exposure already normalizes out a level's absolute light level) above
-#: which more light no longer helps memory: a cell lit at least this well
-#: *relative to how the eye is currently exposing the scene* is lit well
-#: enough to see its layout, so a torch or a fireball up close can't burn a
-#: cell into memory any brighter than a normally-lit room does. Applied
-#: before albedo, in :func:`memory_write_value` -- a white wall still reads
-#: brighter than a black one at the same illuminance, only the light itself
-#: saturates.
-#:
-#: Capping the raw *illuminance* here (in lux) instead would silently break
-#: on any level whose reference light level differs from the one the
-#: constant was tuned against: home's daylight is ~500x the sewer's torch
-#: light (see the module docstring), so a lux threshold tuned to "a torch a
-#: couple of tiles off" caps home's light to a sliver of itself while home's
-#: own exposure (tuned to *its* much brighter reference) barely amplifies
-#: that sliver back -- memory reads as black. Capping post-exposure instead
-#: means the same threshold means "well-lit for this level" everywhere,
-#: because exposure already carries the level's absolute scale. Tune in the
-#: visual pass.
-MEMORY_EXPOSED_SATURATION = 0.15
-
-#: Caps how bright a memory write can land, applied on top of the Reinhard
-#: curve in :func:`memory_write_value`.
-MEMORY_STRENGTH = 1.0
+#: Display-space cap on a remembered wall face (see Level.update_sight).
+MEMORY_MAX = 0.12
 
 #: Color the memory overlay is tinted when composited onto a fragment (see
 #: :class:`~.backends.vispy.graphics.TextureMaskFilter`'s fragment shader,
@@ -171,40 +163,6 @@ MEMORY_STRENGTH = 1.0
 #: blue-shifted rather than neutral grey, so a remembered cell reads as a
 #: dim recollection rather than a flat desaturated copy of the lit scene.
 MEMORY_TINT = (1.0, 1.0, 1.0)
-
-
-def memory_write_value(albedo_luminance, illuminance_luminance, exposure_value):
-    """What a glimpse of a cell burns into memory this frame.
-
-    The illuminance is exposed first -- *exposure_value* is the player's
-    current :attr:`~.tone_mapping.EyeAdaptation.exposure`, not a fixed
-    reference, so a cell glimpsed while the eye is still adapted to a
-    brighter scene elsewhere reads as dim here too: you can't memorize what
-    you can't yet see. The exposed illuminance is then capped
-    (:data:`MEMORY_EXPOSED_SATURATION`), reflected off the surface
-    (:func:`scene_reflected_luminance`), and run through the same Reinhard
-    curve (:func:`reinhard_tonemap`) the live scene is drawn with. Called
-    from :meth:`~.world.Level.update_sight`, whose ``self.memory`` ratchets
-    to the max of this value over every glimpse, so once a cell has been
-    seen well-adapted it stays remembered that way even if a later glimpse
-    is underexposed.
-    """
-    exposed_illuminance = illuminance_luminance * exposure_value
-    capped = np.minimum(exposed_illuminance, MEMORY_EXPOSED_SATURATION)
-    Y_refl = scene_reflected_luminance(albedo_luminance, capped)
-    return reinhard_tonemap(Y_refl)
-
-
-def memory_overlay_pixel(memory_value):
-    """Remembered value -> display-space memory overlay value.
-
-    ``self.memory`` already holds a Reinhard-tonemapped, live-exposed value
-    from the moment it was last (re)written (see :func:`memory_write_value`)
-    -- there is nothing left to tonemap here, only :data:`MEMORY_STRENGTH`
-    to scale by. Used by :meth:`~.world.Level.update_sight` to paint
-    ``memory_overlay``.
-    """
-    return np.asarray(memory_value, dtype=float) * MEMORY_STRENGTH
 
 
 # ---------------------------------------------------------------------------

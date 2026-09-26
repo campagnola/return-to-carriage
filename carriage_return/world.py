@@ -17,9 +17,10 @@ import numpy as np
 from .array_cache import ArraySumCache
 from .blocktypes import BlockTypes
 from .events import Observable
-from .layers import FieldLayer
-from .tone_mapping import (LUMINANCE_WEIGHTS, memory_overlay_pixel,
-                           memory_write_value, scene_reflected_luminance)
+from .layers import FieldLayer, upsample_to_field
+from .maze import SIDE_OFFSETS, neighbour_shifts
+from .tone_mapping import (LUMINANCE_WEIGHTS, MEMORY_MAX, display_value,
+                           reflected_luminance, scene_reflected_luminance)
 
 
 #: Resolution of the sight fields relative to maze cells. One number, shared by
@@ -49,7 +50,8 @@ class Level:
 
     ``memory`` is per level for the same reason it is useful: what you saw of
     a level is a fact about that level, and survives going elsewhere and
-    coming back.
+    coming back. It holds display-space brightness on seen wall faces only
+    (see :meth:`update_sight`).
     """
 
     #: sight memory fades to this fraction of itself per second (equivalent to
@@ -76,8 +78,7 @@ class Level:
         ms = maze.shape
         h, w = ms[0] * supersample, ms[1] * supersample
         # Line of sight and lighting are still three-channel (an RGB shadow map
-        # times RGB light); memory is a single already-tonemapped scalar per
-        # cell (see tone_mapping.memory_write_value).
+        # times RGB light); memory is a single display-space scalar per texel.
         self.field_shape = (h, w, 3)
         self.memory = np.zeros((h, w), dtype='float32')
         self.line_of_sight = np.zeros(self.field_shape, dtype='float32')
@@ -100,12 +101,9 @@ class Level:
         self._illuminance_dirty = False
         self.light_cache = ArraySumCache()
 
-        # Per-cell material reflectance luminance at field resolution, (h, w, 1).
-        # Built once from the fixed maze -- each block id maps to the luminance
-        # of its base ``bg_color`` -- and kept, since the maze never changes. It
-        # relates arriving light (illuminance) to reflected luminance for the
-        # eye-adaptation target and the memory field.
-        self._albedo_lum = None
+        # lazily built from the fixed maze; see _block_field / wall_face_mask
+        self._block_fields = {}
+        self._wall_face_mask = None
 
         # The two composited fields the renderer uploads, each owned by the
         # level so its identity is stable for a backend that captured it and
@@ -114,9 +112,7 @@ class Level:
         #    illuminance E (NOT gated by line of sight); channel [3] is the
         #    line-of-sight scalar in 0..1. The GPU multiplies the two, so
         #    reflection and emission are both gated by line of sight there.
-        #  - memory_overlay: single-channel float32, the display-space memory
-        #    overlay ``mem_disp * (1 - los)``, already gamma-encoded and masked
-        #    to the cells not currently in view.
+        #  - memory_overlay: single-channel float32, a copy of ``memory``.
         self.light = FieldLayer('light', shape=(h, w, 4))
         self.memory_overlay = FieldLayer('memory', shape=(h, w))
 
@@ -210,7 +206,8 @@ class Level:
         Called when the level becomes the displayed one. Blanks the composited
         fields and the illuminance cache so the first frame is built from
         scratch, matching what a freshly-entered level should look like. The
-        albedo map is *not* dropped: it depends only on the fixed maze.
+        block fields and wall-face mask are *not* dropped: they depend only on
+        the fixed maze.
         """
         self.illuminance = None
         self._illuminance_dirty = False
@@ -218,22 +215,38 @@ class Level:
         self.light.set_data(np.zeros((*self.memory.shape, 4), dtype='float32'))
         self.memory_overlay.set_data(np.zeros(self.memory.shape, dtype='float32'))
 
-    def _build_albedo_lum(self):
-        """Per-cell reflectance luminance at field resolution, ``(h, w, 1)``.
+    def _block_field(self, column):
+        """Luminance of blocktype colour *column* (e.g. ``'bg_color'``) as a
+        cached ``(h, w)`` field.
 
-        Built from the *base* blocktype table (``blocktypes.data['bg_color']``),
-        not the jittered ``maze.bg_color()``, so it is static and cacheable:
-        each block id maps to the luminance of its background colour, the maze's
-        block grid indexes that lookup, and the result is nearest-neighbour
-        upsampled by ``supersample`` -- the same maze->field scaling an
-        ArrayLight uses (see :meth:`ArrayLight._render_light_map`).
+        Uses the base blocktype table, not the jittered ``maze.bg_color``.
         """
-        bg = self.maze.blocktypes.data['bg_color'][:, :3]     # (n_blocktypes, 3)
-        bt_lum = (bg @ LUMINANCE_WEIGHTS).astype('float32')   # (n_blocktypes,)
-        cell_lum = bt_lum[self.maze.blocks]                   # (maze_h, maze_w)
-        ss = self.supersample
-        up = np.repeat(np.repeat(cell_lum, ss, axis=0), ss, axis=1)
-        return up[:, :, None]
+        field = self._block_fields.get(column)
+        if field is None:
+            rgb = self.maze.blocktypes.data[column][:, :3]         # (n_blocktypes, 3)
+            bt_lum = (rgb @ LUMINANCE_WEIGHTS).astype('float32')  # (n_blocktypes,)
+            field = upsample_to_field(bt_lum[self.maze.blocks], self.supersample)
+            self._block_fields[column] = field
+        return field
+
+    def wall_face_mask(self):
+        """Cached ``(h, w)`` bool field: the one-texel edge of each opaque cell
+        facing a non-opaque side neighbour. The map edge makes no face.
+        """
+        if self._wall_face_mask is None:
+            opaque = self.maze.opaque
+            neighbours = neighbour_shifts(opaque, pad=True)
+            ss = self.supersample
+            # texel offset within a cell of the edge facing a -1 / +1 neighbour
+            edge = {-1: 0, 1: ss - 1}
+            mask = np.zeros(self.memory.shape, dtype=bool)
+            for dr, dc in SIDE_OFFSETS:
+                exposed = upsample_to_field(opaque & ~neighbours[dr, dc], ss)
+                side = (slice(edge[dr], None, ss) if dr else slice(None),
+                        slice(edge[dc], None, ss) if dc else slice(None))
+                mask[side] |= exposed[side]
+            self._wall_face_mask = mask
+        return self._wall_face_mask
 
     def update_sight(self, dt, player):
         """Advance this level's sight/memory fields by *dt* seconds, writing the
@@ -245,24 +258,30 @@ class Level:
         this one level's, sized to this one maze, so no interleaving with a
         level switch on another thread can compose arrays of two shapes.
 
-        The CPU no longer tone-maps, and it no longer conflates lighting with
-        line of sight. The ``light`` field carries raw linear HDR illuminance in
-        channels [0:3] (NOT gated by line of sight) and the line-of-sight scalar
-        in channel [3]; the GPU gates both reflection and emission by that
-        scalar, applies albedo, and runs the Reinhard curve + display gamma
-        under the player's eye-adaptation exposure. Keeping line of sight
-        separate is what lets a self-emitting glyph in an unlit but in-view cell
-        still show -- its emission is gated by line of sight, not by local
-        light. This method also drives that adaptation, from the reflected
-        luminance of the blocks in a window around the player, and maintains the
-        display-space memory overlay in ``memory_overlay``.
+        The CPU does not tone-map the live image, and it does not conflate
+        lighting with line of sight. The ``light`` field carries raw linear HDR
+        illuminance in channels [0:3] (NOT gated by line of sight) and the
+        line-of-sight scalar in channel [3]; the GPU gates both reflection and
+        emission by that scalar, applies albedo, and runs
+        :func:`~.tone_mapping.display_value`'s GLSL twin under the player's
+        eye-adaptation exposure. Keeping line of sight separate is what lets a
+        self-emitting glyph in an unlit but in-view cell still show -- its
+        emission is gated by line of sight, not by local light.
+
+        This method also drives that adaptation and updates memory::
+
+            seen   = los * display_value(albedo * E, emission, exposure)
+            memory = max(memory, min(seen, MEMORY_MAX) * wall_face_mask) * decay
+
+        ``memory_overlay`` is ``memory`` unmasked; the GPU draws
+        ``max(lit, memory * tint)``.
 
         When *player* is not standing on this level the view is fully blocked:
         line of sight is zero, so reflection and emission are gated off on the
-        GPU and only the memory overlay survives. That is what the renderer
-        shows in the brief window after it has switched to a new level but
-        before the player has been moved onto it -- the level's memory, for
-        free.
+        GPU and only the memory shows. That is
+        what the renderer shows in the brief window after it has switched to a
+        new level but before the player has been moved onto it -- the level's
+        memory, for free.
         """
         watched = player is not None and player.level is self
         h, w = self.memory.shape
@@ -278,18 +297,14 @@ class Level:
             # animator/flicker thread may mark it dirty mid-frame; the worst that
             # costs is one stale frame.
             illuminance = self.illuminance_map()
-            if self._albedo_lum is None:
-                self._albedo_lum = self._build_albedo_lum()
 
             # Line of sight is effectively a scalar (opaque occluders, so the
             # shadow map's three channels are identical); collapse it to one.
             los_scalar = line_of_sight.max(axis=2)
 
-            # Reflected luminance per cell (cd/m^2): what the eye adapts to
-            # (see tone_mapping.scene_reflected_luminance). Memory below uses
-            # its own, illuminance-capped version of this (memory_write_value).
+            # albedo * E, shared by eye adaptation and the memory write
             lumE = illuminance @ LUMINANCE_WEIGHTS
-            Y_refl = scene_reflected_luminance(self._albedo_lum[:, :, 0], lumE)
+            refl = reflected_luminance(self._block_field('bg_color'), lumE)
 
             # This level decides how far the eye may open up or stop down while
             # the player is on it; a level that specifies nothing resets the eye
@@ -308,34 +323,23 @@ class Level:
             win_w = los_scalar[y0:y1, x0:x1]
             wsum = win_w.sum()
             if wsum > 0:
-                L_scene = float((Y_refl[y0:y1, x0:x1] * win_w).sum() / wsum)
+                Y_refl = scene_reflected_luminance(refl[y0:y1, x0:x1])
+                L_scene = float((Y_refl * win_w).sum() / wsum)
                 player.adaptation.adapt(L_scene, dt)
 
-            # Remember the brightest this cell has ever been perceived: the
-            # illuminance is capped (so a torch or spell can't burn a cell in
-            # brighter than any well-lit room) and seen through the player's
-            # *current* adaptation exposure (so a cell glimpsed while the eye
-            # hasn't adjusted yet barely registers). See
-            # tone_mapping.memory_write_value.
-            perceived = memory_write_value(self._albedo_lum[:, :, 0], lumE,
-                                           player.adaptation.exposure)
-            self.memory = np.maximum(self.memory, perceived * los_scalar)
+            # remember seen wall faces; in place so memory stays float32
+            exposure = player.adaptation.exposure
+            seen = los_scalar * display_value(refl, self._block_field('bg_emission'),
+                                              exposure)
+            np.maximum(self.memory, np.minimum(seen, MEMORY_MAX) * self.wall_face_mask(),
+                       out=self.memory)
         else:
-            # fully blocked: no live view, memory shows in full. Zero
-            # illuminance and zero line of sight gate reflection and emission
-            # off on the GPU; the memory overlay still shows because (1-los)=1.
+            # fully blocked: no live view, only memory shows
             illuminance = 0.0
             los_scalar = 0.0
 
         # forget
         self.memory *= self.MEMORY_DECAY_RATE ** dt
-
-        # Memory overlay: self.memory is already display-tonemapped as of the
-        # frame it was (re)written (see tone_mapping.memory_write_value), so a
-        # remembered area does not glow just because the eye is now
-        # dark-adapted -- there's no live exposure left to apply, only
-        # MEMORY_STRENGTH. See tone_mapping.memory_overlay_pixel.
-        mem_disp = memory_overlay_pixel(self.memory)
 
         # Pack the light field: [0:3] raw linear HDR illuminance (ungated by
         # line of sight), [3] the line-of-sight scalar the GPU gates against.
@@ -344,8 +348,7 @@ class Level:
         light[:, :, 3] = los_scalar
         self.light.set_data(light)
 
-        # Memory overlay: shown only where the cell is not currently in view.
-        self.memory_overlay.set_data(mem_disp * (1.0 - los_scalar))
+        self.memory_overlay.set_data(self.memory)
 
     def _composite_illuminance(self):
         """Sum this level's light maps into one HDR illuminance field (lux, RGB).

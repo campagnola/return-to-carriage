@@ -498,6 +498,14 @@ class LayerList(object):
         self.changed()
 
 
+def upsample_to_field(cell_array, supersample):
+    """Nearest-neighbour upsample a per-cell array to field resolution.
+
+    Scales the first two axes by *supersample*; trailing axes and dtype are kept.
+    """
+    return np.repeat(np.repeat(cell_array, supersample, axis=0), supersample, axis=1)
+
+
 class FieldLayer(object):
     """A named float32 scalar/vector field covering the maze (light, LOS, memory, ...)."""
     def __init__(self, name, shape=None, data=None):
