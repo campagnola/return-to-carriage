@@ -856,15 +856,21 @@ class ShadowRenderer(object):
         self.program['center'] = pos
         img = None
         with self.fbo:
-            vispy.gloo.clear(color=(1, 1, 1))
-            vispy.gloo.set_viewport(0, 0, *self.size[::-1])
-            #vispy.gloo.set_state(cull_face=True)
-            self.program.draw(mode='points', check_error=True)
+            # The viewport is global GL state and this runs mid-draw (from the
+            # sprite visual's _prepare_draw), so hand it back exactly as found;
+            # the canvas's stack is what knows that. A computed full-canvas size
+            # would drop an enclosing ViewBox's sub-viewport, and on a HiDPI or
+            # fractionally-scaled screen (physical_size > size) would confine the
+            # rest of the frame to one corner of the window.
+            self.canvas.push_viewport((0, 0) + self.size[::-1])
+            try:
+                vispy.gloo.clear(color=(1, 1, 1))
+                self.program.draw(mode='points', check_error=True)
+                if read:
+                    img = self.fbo.read()[::-1]
+            finally:
+                self.canvas.pop_viewport()
 
-            vispy.gloo.set_viewport(0, 0, *self.canvas.size)
-            if read:
-                img = self.fbo.read()[::-1]
-        
         return img
 
 
