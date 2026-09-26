@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-from carriage_return.layers import FieldLayer, GlyphRegistry, SpriteLayer
+from carriage_return.layers import FieldLayer, GlyphRegistry, SpriteLayer, upsample_to_field
 
 
 # ---------------------------------------------------------------- GlyphRegistry
@@ -235,3 +235,25 @@ def test_observer_is_optional():
     layer = SpriteLayer('test')
     slot = layer.add_sprites((1,))
     slot.position = (0, 0, 0)  # nothing connected: must not raise
+
+
+def test_upsample_to_field_2d():
+    cells = np.array([[1, 2, 3],
+                      [4, 5, 6]], dtype='float32')
+    up = upsample_to_field(cells, 2)
+    assert up.dtype == cells.dtype
+    assert np.array_equal(up, [[1, 1, 2, 2, 3, 3],
+                               [1, 1, 2, 2, 3, 3],
+                               [4, 4, 5, 5, 6, 6],
+                               [4, 4, 5, 5, 6, 6]])
+
+
+def test_upsample_to_field_3d_keeps_channels():
+    cells = np.arange(2 * 3 * 3, dtype='uint8').reshape(2, 3, 3)
+    ss = 3
+    up = upsample_to_field(cells, ss)
+    assert up.shape == (2 * ss, 3 * ss, 3) and up.dtype == cells.dtype
+    for i in range(2 * ss):
+        for j in range(3 * ss):
+            assert np.array_equal(up[i, j], cells[i // ss, j // ss])
+    assert np.array_equal(upsample_to_field(cells, 1), cells)

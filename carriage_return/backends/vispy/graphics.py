@@ -4,7 +4,7 @@ import vispy.visuals, vispy.scene, vispy.gloo
 from vispy.visuals.shaders import ModularProgram, Function
 from vispy.visuals.transforms import STTransform, NullTransform
 
-from ...tone_mapping import GLSL_REINHARD_TONEMAP, MEMORY_TINT
+from ...tone_mapping import GLSL_DISPLAY_VALUE, GLSL_REINHARD_TONEMAP, MEMORY_TINT
 
 
 # load support for opengl 3 features
@@ -646,6 +646,13 @@ class CharAtlas(object):
         self.sprite_coords[:,1::2] /= self.atlas.shape[1]
         
 
+def display_value_function():
+    """``GLSL_DISPLAY_VALUE`` as a vispy Function, wired to its Reinhard dependency."""
+    fn = Function(GLSL_DISPLAY_VALUE)
+    fn['reinhard_tonemap'] = Function(GLSL_REINHARD_TONEMAP)
+    return fn
+
+
 class TextureMaskFilter(object):
     """Tone-maps the sprites against the level's light and memory fields.
 
@@ -657,9 +664,12 @@ class TextureMaskFilter(object):
     display-space memory overlay in r. The fragment's outgoing luminance is
     reflected plus emitted -- ``albedo*illuminance + emission`` -- with BOTH
     terms gated by line of sight, then exposed and run through a Reinhard curve
-    + display gamma together. An emitter (a torch flame) therefore adds its own
-    light on top of what it reflects, and bright light physically blows a
-    surface toward white rather than capping at its albedo.
+    + display gamma together (``$display_value``). An emitter (a torch flame)
+    therefore adds its own light on top of what it reflects, and bright light
+    physically blows a surface toward white rather than capping at its albedo.
+
+    Memory is composited as ``max(lit, memory * tint)``, so losing sight of a
+    texel never brightens it.
 
     Gating on line of sight rather than on local light is the point of the two
     textures: emission rides on the sprite as ``sprite_emission``
@@ -668,7 +678,7 @@ class TextureMaskFilter(object):
     shows, because its emission is gated by line of sight (a) and not by whether
     any light happens to fall on the cell. Outside the player's view line of
     sight is zero, so a glyph behind a wall neither reflects nor glows -- only
-    its remembered overlay shows. Exposure is driven by the player's eye
+    its memory shows. Exposure is driven by the player's eye
     adaptation (set_exposure, once per frame).
     """
     def __init__(self, light_texture, memory_texture, transform, scale):
@@ -685,23 +695,17 @@ class TextureMaskFilter(object):
                 tex_pos /= tex_pos.w;
                 vec4 lgt = texture2D($light, tex_pos.xy);     // rgb = HDR illuminance (ungated), a = line of sight
                 float los = lgt.a;
-                float mem = texture2D($memory, tex_pos.xy).r; // display-space remembered overlay (masked to unseen)
+                float mem = texture2D($memory, tex_pos.xy).r; // display-space memory
                 vec3 albedo = gl_FragColor.rgb;
-                // Outgoing luminance = reflected + emitted; both gated by line
-                // of sight (neither is visible through a wall), then exposed and
-                // tone-mapped together.
-                vec3 refl = albedo * lgt.rgb * los;           // reflected luminance (linear)
-                vec3 out_lum = (refl + sprite_emission * los) * $exposure;   // exposed outgoing luminance
-                vec3 lit = $reinhard_tonemap(out_lum);         // Reinhard tone curve + display gamma
-                gl_FragColor = vec4(lit + mem * $memory_tint, gl_FragColor.a);
+                // reflected + emitted, both gated by line of sight
+                vec3 lit = $display_value(albedo * lgt.rgb * los, sprite_emission * los, $exposure);
+                gl_FragColor = vec4(max(lit, mem * $memory_tint), gl_FragColor.a);
             }
         """)
         self.fshader['light'] = light_texture
         self.fshader['memory'] = memory_texture
-        # Reinhard curve + display gamma, defined once in tone_mapping.py and
-        # shared with the CPU-side memory overlay (Level.update_sight) -- see
-        # tone_mapping.reinhard_tonemap, its Python twin.
-        self.fshader['reinhard_tonemap'] = Function(GLSL_REINHARD_TONEMAP)
+        # GLSL twin of tone_mapping.display_value
+        self.fshader['display_value'] = display_value_function()
         # sane default exposure so the first frame (before any update pushes the
         # player's adaptation) is valid; see _DEFAULT_EXPOSURE.
         self.fshader['exposure'] = _DEFAULT_EXPOSURE

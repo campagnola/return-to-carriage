@@ -15,8 +15,8 @@ only the consumer side of one pipeline, never game logic.
  Monster, DM,            sprite_layers,          ├─ SpriteLayer           camera, frame tick)
  CommandInterpreter,     grids (LayerList),       │    (sparse, world)   render.py   (sprite
  dialogs/ (Menu,         log (MessageLog),       └─ CharGridLayer         layers -> GL)
- Pager, DialogSession)   glyphs, sight            (dense, screen)      grids.py    (generic
-                                                 FieldLayer 'sight'         CharGridLayer -> GL)
+ Pager, DialogSession)   glyphs, level            (dense, screen)      grids.py    (generic
+                                                 FieldLayers light, memory  CharGridLayer -> GL)
                      ←  scene.visibility                              ←  graphics.py (visuals,
                      ←  scene.update_sight(dt)                            CharAtlas, GL shadow
                                                                            renderer)
@@ -74,7 +74,8 @@ GlyphLayer            name, version, structure_version, changed, _changed()
   function (the vispy backend connects its dirty-flag setter,
   `MainWindow.mark_dirty`) so game-state changes repaint without polling;
   sync still happens at draw time by diffing versions. Do **not**
-  observe the `sight` FieldLayer from a draw-scheduling callback — it is
+  observe the `light`/`memory_overlay` FieldLayers from a draw-scheduling
+  callback — they are
   recomputed during every draw, which would schedule draws forever.
 
 ### GlyphRegistry (`scene.glyphs`)
@@ -153,18 +154,24 @@ List order is draw order among screen-space grids (later = on top);
 `structure_version` bumps on add/remove so a backend can diff membership at
 sync time without polling every grid.
 
-### FieldLayer (`scene.sight`)
+### FieldLayers (`level.light`, `level.memory_overlay`)
 
 A named float32 array plus `version` (`set_data()` copies in place and bumps;
-`bump()` declares an in-place mutation). Field shape is
-`(maze_h * supersample, maze_w * supersample, 3)` with `scene.supersample = 4`;
-`scene.field_shape` is authoritative. `sight` holds the fully composited
-visibility field: `memory * (1 - line_of_sight) + lighting * line_of_sight`,
-normalized log-scaled lighting summed over light-source items (with
-`ArraySumCache` reuse). Backends apply it as a per-cell brightness/color
-mask over the sprites (the vispy backend uploads it to a texture and attaches
-`TextureMaskFilter`; a terminal backend could threshold it into
-visible/remembered/dark).
+`bump()` declares an in-place mutation). Fields are `supersample = 4` texels
+per maze cell (`scene.field_shape` is authoritative). They live on the
+`Level`; `Level.update_sight` writes both each frame:
+
+- `light` (RGBA): rgb = HDR illuminance `E` (not gated by line of sight),
+  a = line of sight (0..1).
+- `memory_overlay`: a copy of the CPU-side `Level.memory` (display space),
+  non-zero only on wall faces (`Level.wall_face_mask()`):
+  `memory = max(memory, min(seen, MEMORY_MAX) * wall_face_mask) * decay`,
+  `seen = los * display_value(albedo * E, emission, exposure)`.
+
+The vispy `TextureMaskFilter` draws `max(lit, memory * MEMORY_TINT)`, so
+losing sight of a wall never brightens it. `display_value` and its GLSL twin
+live together in `tone_mapping.py`. A terminal backend could threshold the
+same fields into visible/remembered/dark.
 
 ## Visibility provider (`scene.visibility`, injected)
 
@@ -306,8 +313,8 @@ renderer may read a half-finished turn (player moved, monster not yet). If
 that ever shows visibly, the fix is a scene-level "turn" version/snapshot —
 out of scope here.
 
-The never-observe-`sight` rule from the layer bridge section is part of the
-same discipline: `sight` is recomputed on every draw
+The never-observe-the-sight-fields rule from the layer bridge section is part
+of the same discipline: `light`/`memory_overlay` are recomputed on every draw
 (`VispySceneRenderer.update`), so connecting `mark_dirty` to it would
 schedule a draw from inside every draw, forever.
 
@@ -549,7 +556,8 @@ ui.follow_entity(player)
 1. Consume `scene.glyphs` + `scene.sprite_layers` + `scene.grids` (all
    version-gated; `scene.grids` additionally diffed by
    `structure_version` for add/remove).
-2. Consume `scene.sight` (version-gated) and apply it as a mask.
+2. Consume `scene.light` and `scene.memory_overlay` (version-gated) and
+   apply them as a mask.
 3. Provide `scene.visibility` (GL, CPU shadowcaster, or trivial).
 4. Call `scene.update_sight(dt)` once per frame.
 5. Render `scene.log`'s tail *only if* it writes its own HUD — normally it

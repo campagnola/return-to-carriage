@@ -2,14 +2,17 @@
 import numpy as np
 import pytest
 
-from carriage_return.blocktypes import BlockTypes
+from carriage_return.blocktypes import BlockTypes, blocktype
 from carriage_return.dm import DungeonMaster
+from carriage_return.layers import upsample_to_field
 from carriage_return.levels import build_world, level_001_home, level_002_sewer
+from carriage_return.light import ArrayLight
 from carriage_return.maze import Maze
 from carriage_return.player import Player
 from carriage_return.portal import Door, Hole, StairsDown, StairsUp
 from carriage_return.terrain.buildings import place_building
 from carriage_return.scene import Scene
+from carriage_return.tone_mapping import MEMORY_MAX, display_value
 from carriage_return.world import Level, LevelPortal, World
 
 
@@ -377,6 +380,182 @@ def test_an_unlit_level_renders_dark_rather_than_failing(played_world):
     assert scene.light.data.shape == scene.field_shape[:2] + (4,)
     assert not scene.light.data[..., :3].any()
     assert not scene.memory_overlay.data.any()
+
+
+# -- wall memory ----------------------------------------------------------------
+
+#: Emission of the test-only glow wall; low enough to stay under MEMORY_MAX.
+GLOW_EMISSION = 0.1
+
+#: Eye adaptation is pinned here, so exposure is fixed.
+_SIGHT_EXPOSURE_LUMINANCE = 1.0
+
+
+def _sight_maze(pattern, blocktypes):
+    """A maze from strings: ``'#'`` wall, ``'.'`` path, ``'G'`` glow wall.
+
+    Row ``i`` of *pattern* is ``blocks[i]``, i.e. maze row ``y = i``.
+    """
+    names = {'#': 'wall', '.': 'path', 'G': 'glow wall'}
+    blocks = np.array([[blocktypes.id_of(names[c]) for c in row] for row in pattern],
+                      dtype='uint8')
+    return Maze(blocks, blocktypes)
+
+
+def _glow_blocktypes():
+    """Default blocktypes plus an opaque, emissive ``'glow wall'``."""
+    bt = BlockTypes()
+    bt.add([blocktype('glow wall', '#', False, 1, (.0, .0, .0, 1.0), (.4, .4, .4, 1.0),
+                      bg_emission=(GLOW_EMISSION,) * 3)])
+    return bt
+
+
+def _sight_level(pattern, player_xy, light=0.0, adapt_luminance=_SIGHT_EXPOSURE_LUMINANCE):
+    """A one-level world built from *pattern*, fully visible, with the player
+    at *player_xy* and a uniform grey ArrayLight of illuminance *light* (lux).
+
+    The eye is pinned to *adapt_luminance*, so exposure is fixed.
+    Returns ``(scene, level, player, lamp)``.
+    """
+    bt = _glow_blocktypes()
+    world = World(bt)
+    maze = _sight_maze(pattern, bt)
+    level = world.add_level(Level('room', maze))
+    level.min_adapt_luminance = level.max_adapt_luminance = adapt_luminance
+    lamp = maze.add_light(ArrayLight(maze, np.ones(maze.shape[:2]), color=(light,) * 3),
+                          pos=(0, 0))
+
+    scene = Scene()
+    _auto_visibility(scene)
+    scene.set_world(world)
+    player = Player(scene)
+    player.location.update(maze, player_xy)
+    return scene, level, player, lamp
+
+
+def _reference_face_mask(opaque, ss):
+    """Per-cell rewrite of the wall-face rule: an opaque cell's outermost texel
+    row/column on each side whose in-map neighbour is open."""
+    rows, cols = opaque.shape
+    out = np.zeros((rows * ss, cols * ss), dtype=bool)
+    for y in range(rows):
+        for x in range(cols):
+            if not opaque[y, x]:
+                continue
+            block = out[y * ss:(y + 1) * ss, x * ss:(x + 1) * ss]
+            if y > 0 and not opaque[y - 1, x]:
+                block[0, :] = True
+            if y < rows - 1 and not opaque[y + 1, x]:
+                block[-1, :] = True
+            if x > 0 and not opaque[y, x - 1]:
+                block[:, 0] = True
+            if x < cols - 1 and not opaque[y, x + 1]:
+                block[:, -1] = True
+    return out
+
+
+#: A lone wall in the map corner and a 3-thick wall block, on open floor.
+FACE_PATTERN = ['#.......',
+                '........',
+                '..###...',
+                '..###...',
+                '..###...',
+                '........',
+                '........']
+
+
+def test_wall_face_mask_is_the_outer_texel_ring_on_open_sides():
+    level = Level('faces', _sight_maze(FACE_PATTERN, BlockTypes()))
+    ss = level.supersample
+    mask = level.wall_face_mask()
+    assert mask.dtype == bool and mask.shape == level.memory.shape
+    assert mask is level.wall_face_mask()      # built once, cached
+    assert np.array_equal(mask, _reference_face_mask(level.maze.opaque, ss))
+
+    # The 3x3 block (maze rows/cols 2..4): exactly its outer texel ring, one
+    # texel wide -- nothing inside, including the whole centre cell.
+    block = mask[2 * ss:5 * ss, 2 * ss:5 * ss]
+    ring = np.ones_like(block)
+    ring[1:-1, 1:-1] = False
+    assert np.array_equal(block, ring)
+
+    # Floors are never marked.
+    floor = upsample_to_field(~level.maze.opaque, ss)
+    assert not mask[floor].any()
+
+    # Side orientation, on the corner wall (maze cell y=0, x=0): its open
+    # neighbours are row y+1 and column x+1, so only texel row ss-1 and
+    # column ss-1 of its block are faces. Its row 0 and column 0 border the
+    # map edge, which makes no face.
+    corner = mask[:ss, :ss]
+    expected = np.zeros((ss, ss), dtype=bool)
+    expected[-1, :] = True
+    expected[:, -1] = True
+    assert np.array_equal(corner, expected)
+
+
+def test_only_wall_faces_are_remembered():
+    scene, level, player, _ = _sight_level(FACE_PATTERN, (6, 6), light=0.1)
+    level.update_sight(1 / 60., player)
+
+    mask = level.wall_face_mask()
+    assert (level.memory[mask] > 0).all()      # every face is lit and in view
+    assert not level.memory[~mask].any()       # floors and wall interiors are not
+
+
+def test_memory_is_capped():
+    """However bright the light and however wide open the eye, memory stays dim."""
+    scene, level, player, _ = _sight_level(FACE_PATTERN, (6, 6), light=1e6,
+                                           adapt_luminance=1e-3)
+    level.update_sight(0.0, player)
+    assert level.memory.max() <= MEMORY_MAX
+    assert np.isclose(level.memory.max(), MEMORY_MAX)
+
+
+def test_an_emissive_wall_is_remembered_in_the_dark():
+    """Block emission counts toward what is seen, exactly as reflected light does."""
+    scene, level, player, _ = _sight_level(['........',
+                                            '..G..#..',
+                                            '........'], (0, 0), light=0.0)
+    level.update_sight(0.0, player)
+    assert not level.illuminance.any()         # truly unlit
+
+    ss = level.supersample
+    glow = level.memory[1 * ss:2 * ss, 2 * ss:3 * ss]
+    plain = level.memory[1 * ss:2 * ss, 5 * ss:6 * ss]
+    face = level.wall_face_mask()[1 * ss:2 * ss, 2 * ss:3 * ss]
+    expected = display_value(0.0, GLOW_EMISSION, player.adaptation.exposure)
+    assert 0 < expected < MEMORY_MAX
+    assert np.allclose(glow[face], expected)
+    assert not glow[~face].any()
+    assert not plain.any()                     # unlit and not emissive
+
+
+def test_memory_stacks_under_the_view_rather_than_hiding_in_it():
+    scene, level, player, _ = _sight_level(FACE_PATTERN, (6, 6), light=0.1)
+    level.update_sight(1 / 60., player)
+    assert level.line_of_sight.all()           # everything in view...
+    assert level.memory_overlay.data.any()     # ...and memory still uploaded
+    assert np.array_equal(level.memory_overlay.data, level.memory)
+
+
+def test_a_brighter_glimpse_raises_memory_and_a_dimmer_one_does_not_lower_it():
+    scene, level, player, lamp = _sight_level(FACE_PATTERN, (6, 6), light=0.05)
+    mask = level.wall_face_mask()
+    # dt=0 throughout, so no decay muddies the comparison
+    level.update_sight(0.0, player)
+    dim = level.memory.copy()
+    assert (dim[mask] > 0).all()
+
+    lamp.color = (0.2,) * 3
+    level.update_sight(0.0, player)
+    bright = level.memory.copy()
+    assert (bright[mask] > dim[mask]).all()
+    assert bright.max() < MEMORY_MAX           # the rise is not the cap
+
+    lamp.color = (0.01,) * 3
+    level.update_sight(0.0, player)
+    assert np.array_equal(level.memory, bright)
 
 
 # -- the shipped levels -------------------------------------------------------

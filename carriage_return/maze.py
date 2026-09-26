@@ -9,6 +9,28 @@ from .inventory import Inventory
 from .location import Location
 
 
+#: ``(drow, dcol)`` offsets of the side and diagonal neighbours, numpy (y, x)
+#: order; the keys of :func:`neighbour_shifts`.
+SIDE_OFFSETS = ((-1, 0), (1, 0), (0, -1), (0, 1))
+DIAGONAL_OFFSETS = ((-1, -1), (-1, 1), (1, -1), (1, 1))
+
+
+def neighbour_shifts(mask, pad):
+    """Map each offset to *mask* shifted so ``[i, j]`` is ``mask[i+drow, j+dcol]``.
+
+    Off-map neighbours read as *pad*. Results are read-only views of one
+    padded copy.
+    """
+    mask = np.asarray(mask, dtype=bool)
+    rows, cols = mask.shape
+    padded = np.full((rows + 2, cols + 2), pad, dtype=bool)
+    padded[1:-1, 1:-1] = mask
+    return {
+        (dr, dc): padded[1 + dr:1 + dr + rows, 1 + dc:1 + dc + cols]
+        for dr, dc in SIDE_OFFSETS + DIAGONAL_OFFSETS
+    }
+
+
 class Maze(Entity):
     """Data defining the landscape.
     """
@@ -32,6 +54,7 @@ class Maze(Entity):
         self.level = None
 
         self._opacity = None
+        self._opaque = None
         self._fg_color = None
         self._bg_color = None
         self._fg_emission = None
@@ -51,7 +74,7 @@ class Maze(Entity):
     def invalidate_appearance(self, clear_washes=False):
         """Drop the cached opacity/colour arrays after ``blocks`` was edited.
 
-        The three are derived from ``blocks`` and cached on first use, so
+        They are all derived from ``blocks`` and cached on first use, so
         anything that writes into ``blocks`` after construction -- stamping a
         portal end, most notably -- must call this or the maze keeps drawing
         (and casting shadows) as it looked beforehand.
@@ -64,6 +87,7 @@ class Maze(Entity):
         layout doesn't inherit stale washes from the previous one.
         """
         self._opacity = None
+        self._opaque = None
         self._fg_color = None
         self._bg_color = None
         self._fg_emission = None
@@ -142,6 +166,13 @@ class Maze(Entity):
         if self._opacity is None:
             self._opacity = self.blocktypes['opacity'][self.blocks].astype('float32')
         return self._opacity
+
+    @property
+    def opaque(self):
+        """Boolean mask of the cells that block sight (``opacity > 0.5``)."""
+        if self._opaque is None:
+            self._opaque = self.opacity > 0.5
+        return self._opaque
 
     @property
     def fg_color(self):
@@ -310,21 +341,21 @@ class Maze(Entity):
         return isocurve(m.astype(float), level=0.5, connected=True)
 
     def _opaque_geometry_mask(self):
-        opaque = self.opacity > 0.5
-        padded = np.zeros((opaque.shape[0] + 2, opaque.shape[1] + 2), dtype=bool)
-        padded[1:-1, 1:-1] = opaque
+        """Opaque cells at 3x resolution, joined to opaque neighbours."""
+        opaque = self.opaque
+        n = neighbour_shifts(opaque, pad=False)
         opaque_mask = np.empty((opaque.shape[0] * 3, opaque.shape[1] * 3), dtype=bool)
 
         opaque_mask[1::3, 1::3] = opaque
 
-        opaque_mask[0::3, 1::3] = padded[:-2,  1:-1] & opaque
-        opaque_mask[2::3, 1::3] = padded[2:,   1:-1] & opaque
-        opaque_mask[1::3, 0::3] = padded[1:-1,  :-2] & opaque
-        opaque_mask[1::3, 2::3] = padded[1:-1,   2:] & opaque
+        opaque_mask[0::3, 1::3] = n[-1, 0] & opaque
+        opaque_mask[2::3, 1::3] = n[1, 0] & opaque
+        opaque_mask[1::3, 0::3] = n[0, -1] & opaque
+        opaque_mask[1::3, 2::3] = n[0, 1] & opaque
 
-        opaque_mask[0::3, 0::3] = padded[:-2, :-2] & opaque_mask[0::3, 1::3] & opaque_mask[1::3, 0::3]
-        opaque_mask[2::3, 0::3] = padded[2:,  :-2] & opaque_mask[2::3, 1::3] & opaque_mask[1::3, 0::3]
-        opaque_mask[0::3, 2::3] = padded[:-2,  2:] & opaque_mask[0::3, 1::3] & opaque_mask[1::3, 2::3]
-        opaque_mask[2::3, 2::3] = padded[2:,   2:] & opaque_mask[2::3, 1::3] & opaque_mask[1::3, 2::3]
+        opaque_mask[0::3, 0::3] = n[-1, -1] & opaque_mask[0::3, 1::3] & opaque_mask[1::3, 0::3]
+        opaque_mask[2::3, 0::3] = n[1, -1] & opaque_mask[2::3, 1::3] & opaque_mask[1::3, 0::3]
+        opaque_mask[0::3, 2::3] = n[-1, 1] & opaque_mask[0::3, 1::3] & opaque_mask[1::3, 2::3]
+        opaque_mask[2::3, 2::3] = n[1, 1] & opaque_mask[2::3, 1::3] & opaque_mask[1::3, 2::3]
 
         return opaque_mask
