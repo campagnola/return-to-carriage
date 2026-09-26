@@ -69,6 +69,37 @@ class GamepadEvent(InputEvent):
         self.state = state
 
 
+class MouseEvent(InputEvent):
+    """A mouse event, located by the screen-space grid cell under the pointer.
+
+    ``grid`` is the topmost CharGridLayer under the pointer and ``row``/
+    ``col`` the cell within it; all three are None when the pointer is over
+    the map rather than any grid.
+    """
+
+    def __init__(self, grid, row, col):
+        self.grid = grid
+        self.row = row
+        self.col = col
+
+
+class MouseWheel(MouseEvent):
+    """The wheel turned. ``steps`` is in wheel notches (fractional for smooth
+    scrolling); positive is away from the user."""
+
+    def __init__(self, grid, row, col, steps):
+        MouseEvent.__init__(self, grid, row, col)
+        self.steps = steps
+
+
+class MouseClick(MouseEvent):
+    """A button went down. ``button`` is 'left', 'middle' or 'right'."""
+
+    def __init__(self, grid, row, col, button):
+        MouseEvent.__init__(self, grid, row, col)
+        self.button = button
+
+
 class MovementTick(InputEvent):
     """Posted by a ``MovementPacer`` thread onto the gameplay handler's own
     queue: time for another movement step. Carries no data -- the gameplay
@@ -285,7 +316,9 @@ class GameplayInputHandler(QueuedInputHandler):
     Like a dialog, gameplay runs as a sequential loop on its own daemon
     thread, fed by the event queue: movement keys move the player while held,
     action keys hand off to the scene/interpreter, Tab toggles the command
-    prompt, Escape requests quit.
+    prompt, Escape requests quit. Mouse events over the HUD console (given as
+    *hud*) are claimed too: the wheel scrolls it and a click opens the message
+    log; every other mouse event falls through to the map camera.
 
     Movement
     --------
@@ -316,12 +349,13 @@ class GameplayInputHandler(QueuedInputHandler):
     start_delay = 0.04  # grace before a fresh hold's first step, to catch diagonals
 
     def __init__(self, dm, player, interpreter=None, command_handler=None,
-                 clock=time.monotonic, start_thread=True):
+                 hud=None, clock=time.monotonic, start_thread=True):
         QueuedInputHandler.__init__(self)
         self.dm: 'DungeonMaster' = dm
         self.player = player
         self.interpreter = interpreter
         self.command_handler = command_handler
+        self.hud = hud
         self.clock = clock
         self.keys = set()
         self.gamepad_state = {}
@@ -339,6 +373,14 @@ class GameplayInputHandler(QueuedInputHandler):
                                                   name='gameplay-movement', daemon=True)
             self.pacer_thread.start()
 
+    def handle(self, event):
+        if isinstance(event, MouseEvent) and not self._over_console(event):
+            return False  # left to whatever sits below, i.e. the map camera
+        return QueuedInputHandler.handle(self, event)
+
+    def _over_console(self, event):
+        return self.hud is not None and self.hud.console_at(event)
+
     def _run(self):
         while True:
             self._process(self.queue.get())
@@ -348,6 +390,11 @@ class GameplayInputHandler(QueuedInputHandler):
         -- then forward the resulting velocity to the pacer if it changed."""
         if isinstance(event, KeyPress):
             self._key_press(event)
+        elif isinstance(event, MouseWheel):
+            self.hud.console.scroll_wheel(event.steps)
+        elif isinstance(event, MouseClick):
+            if event.button == 'left':
+                self.interpreter.log([])
         elif isinstance(event, KeyRelease):
             self.keys.discard(event.key)
         elif isinstance(event, FocusOut):
@@ -434,7 +481,7 @@ class CommandInputHandler(QueuedInputHandler):
     line of *log* (a scene MessageLog); Enter runs it through *interpreter*
     on this handler's thread. Escape and Tab are refused (handle() returns
     False) so they fall through to the gameplay handler, which owns toggling
-    command mode.
+    command mode; so are mouse events, which the prompt has no use for.
     """
 
     def __init__(self, log, interpreter, start_thread=True):
@@ -461,6 +508,8 @@ class CommandInputHandler(QueuedInputHandler):
         self.clear_prompt()
 
     def handle(self, event):
+        if isinstance(event, MouseEvent):
+            return False
         if isinstance(event, KeyPress) and event.key in ('Escape', 'Tab'):
             # gameplay handler below owns quit / command-mode toggling
             return False

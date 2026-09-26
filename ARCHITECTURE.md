@@ -205,6 +205,9 @@ consumers match by `isinstance`, never on type strings:
 InputEvent            # base
 ├── KeyPress(key, text=None)     # key: plain string name; text: typed chars
 ├── KeyRelease(key, text=None)   # same fields
+├── MouseEvent(grid, row, col)   # cell under the pointer; all None over the map
+│   ├── MouseWheel(.., steps)    # wheel notches, positive = away from the user
+│   └── MouseClick(.., button)   # 'left' / 'middle' / 'right'
 ├── GamepadEvent(state)          # state: dict of evdev-style codes -> values
 ├── FocusIn                      # delivered on handler-stack changes, below
 ├── FocusOut
@@ -213,7 +216,12 @@ InputEvent            # base
 
 Key normalization (native key object → plain string name) happens once, at
 the backend boundary, in `backends/vispy/input.py`; game-side code only ever
-sees strings.
+sees strings. Mouse events are located there too: `GridRenderer.cell_at`
+hit-tests the pixel against the drawn grids and the event carries the
+topmost `CharGridLayer` plus the cell within it, so game-side code never sees
+pixels. A mouse event some handler consumes is blocked from the canvas's own
+scene handling (the map camera's wheel zoom / drag pan); one nobody consumes
+falls through to it.
 
 ### Dispatcher and handlers
 
@@ -275,6 +283,11 @@ subclasses with their own daemon thread, exactly like a `DialogSession`:
   makes. The clock is injectable (`clock=time.monotonic`) and the pacer's
   `step()` is a plain method so movement-repeat timing is testable without
   threads or sleeping.
+- Mouse: `GameplayInputHandler.handle()` claims only mouse events over the
+  HUD console (`hud.console_at(event)`) and returns False for the rest, so
+  they reach the camera. Over the console the wheel scrolls it and a left
+  click opens the message log dialog (`interpreter.log`). The command prompt
+  passes mouse events through the same way.
 - `CommandInputHandler`: also its own thread; prompt editing targets
   `scene.log` (`set_last_line`/`write`/`remove_last_line`) — no vispy
   anywhere in the path.
@@ -334,6 +347,7 @@ carriage_return/dialogs/
     base.py             # Widget base (version/changed/done/result), CharGridPainter base
     menu.py              # Menu, MenuItem, run_menu(), MenuPainter
     pager.py             # Pager, run_pager(), PagerPainter    ("book")
+    log.py                # LogDialog, run_log()     (scrollable message log)
 ```
 
 ### Lifecycle

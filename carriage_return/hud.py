@@ -21,6 +21,8 @@ Console lines fade with age (turns since written) and salience: see
 :func:`brightness`.
 """
 import math
+import threading
+from itertools import islice
 
 from .widgets import GridFrame, Widget, WidgetGridLayer
 
@@ -45,6 +47,11 @@ B_LOW, B_HIGH = 0.5, 1.5
 TAU_MIN, TAU_MAX = 40.0, 400.0
 BRIGHTNESS_FLOOR, BRIGHTNESS_CEIL = 0.4, 1.0
 
+# Console scrolling: rows moved per mouse wheel notch, and the scroll bar's colors.
+WHEEL_ROWS = 3
+SCROLL_TRACK_BG = (0.2, 0.2, 0.25, 1.0)
+SCROLL_THUMB_BG = (0.6, 0.6, 0.65, 1.0)
+
 
 def brightness(age, salience):
     """Console text brightness for a line *age* turns old with *salience* (0-1).
@@ -65,29 +72,102 @@ def wrap(line, width):
 
 
 class ConsoleWidget(Widget):
-    """Renders the tail of scene.log into its own cells, newest last.
+    """Renders scene.log into its own cells, newest last, scrollable.
 
-    Each line is drawn at its :func:`brightness`.
+    Each line is drawn at its :func:`brightness` of *fg*. ``scroll`` is how
+    many rows the view sits back from the newest line (0 follows the log's
+    tail); it returns to 0 whenever an entry is added or removed. With
+    *scroll_bar*, the last column holds a scroll bar drawn in cell
+    backgrounds.
+
+    Repaints come from whichever thread wrote a message, and scrolling from
+    the gameplay thread, which can overlap the command prompt's writes -- so
+    both hold a lock.
     """
 
-    def __init__(self, scene):
+    def __init__(self, scene, fg=FG, scroll_bar=False):
         self.scene = scene
+        self.fg = fg
+        self.scroll_bar = scroll_bar
+        self.scroll = 0.0
+        self._entry_count = len(scene.log.entries)
+        self._thumb = None  # (top row, length) of the scroll bar thumb, if any
+        self._lock = threading.RLock()
         Widget.__init__(self)
         scene.log.changed.connect(self.repaint)
 
-    def repaint(self):
-        """Repaint from the log tail (runs on whatever thread wrote the message)."""
-        rows, cols = self.nrows, self.ncols
+    def scroll_by(self, rows):
+        """Move the view *rows* back into history (negative: toward the newest)."""
+        with self._lock:
+            self.scroll = max(self.scroll + rows, 0.0)
+            self.repaint()
+
+    def scroll_wheel(self, steps):
+        """Scroll for *steps* wheel notches (positive: back into history)."""
+        self.scroll_by(steps * WHEEL_ROWS)
+
+    def scroll_page(self, pages):
+        """Scroll *pages* pages back into history (negative: toward the newest)."""
+        self.scroll_by(pages * (self.nrows - 1))
+
+    def click_scroll_bar(self, row, col):
+        """Page toward a click on the scroll bar's track, given as a cell of
+        the root widget's grid; clicks elsewhere are ignored."""
+        row, col = self.local_cell(row, col)
+        if (self._thumb is None or col != self.ncols - 1
+                or not 0 <= row < self.nrows):
+            return
+        top, length = self._thumb
+        if row < top:
+            self.scroll_page(1)
+        elif row >= top + length:
+            self.scroll_page(-1)
+
+    def _rows_newest_first(self, cols):
+        """Yield (text, fg) for each wrapped row of the log, newest first."""
         log = self.scene.log
-        self.clear()
-        chunks = []  # (text, fg) per wrapped row
-        for entry in log.entries[-rows:]:
+        for entry in reversed(log.entries):
             k = brightness(log.turn - entry.turn, entry.salience)
-            fg = (FG[0] * k, FG[1] * k, FG[2] * k, FG[3])
-            chunks.extend((chunk, fg) for chunk in wrap(entry.text, cols))
-        tail = chunks[-rows:]
-        for i, (text, fg) in enumerate(tail, start=rows - len(tail)):
+            fg = (self.fg[0] * k, self.fg[1] * k, self.fg[2] * k, self.fg[3])
+            for chunk in reversed(wrap(entry.text, cols)):
+                yield chunk, fg
+
+    def repaint(self):
+        """Repaint from the log (runs on whatever thread wrote the message)."""
+        with self._lock:
+            self._repaint()
+
+    def _repaint(self):
+        log = self.scene.log
+        if len(log.entries) != self._entry_count:
+            self._entry_count = len(log.entries)
+            self.scroll = 0.0
+        rows = self.nrows
+        text_cols = self.ncols - 2 if self.scroll_bar else self.ncols
+        back = int(round(self.scroll))
+        fetched = list(islice(self._rows_newest_first(text_cols), back + rows))
+        if len(fetched) < back + rows:  # scrolled past the oldest row
+            back = max(len(fetched) - rows, 0)
+            self.scroll = float(back)
+        window = fetched[back:]
+        self.clear()
+        for i, (text, fg) in enumerate(reversed(window), start=rows - len(window)):
             self.write(i, 0, text, fg=fg)
+        if self.scroll_bar:
+            total = sum(len(wrap(entry.text, text_cols)) for entry in log.entries)
+            self._paint_scroll_bar(total, back)
+
+    def _paint_scroll_bar(self, total, back):
+        """Draw the scroll bar for a view *back* rows from the newest of *total* rows."""
+        rows, col = self.nrows, self.ncols - 1
+        self.fill_rect(0, col, rows, 1, bg=SCROLL_TRACK_BG)
+        if total <= rows:
+            self._thumb = None
+            return
+        length = max(1, round(rows * rows / total))
+        top = round((1 - back / (total - rows)) * (rows - length))
+        self._thumb = (top, length)
+        self.fill_rect(top, col, length, 1, bg=SCROLL_THUMB_BG)
 
     def _shape_changed(self):
         self.repaint()
@@ -162,6 +242,10 @@ class Hud(object):
         info_cols = max(int(round(content_width * self.info_frac)), 1)
         console_cols = max(content_width - info_cols, 1)
         return ([self.stats_rows - 2, self.box_rows - 2], [info_cols, console_cols])
+
+    def console_at(self, event):
+        """True if the mouse *event* is over the console panel."""
+        return event.grid is self.layer.grid and self.console.contains(event.row, event.col)
 
     def _screen_changed(self):
         row_heights, col_widths = self._sizes()

@@ -1,11 +1,11 @@
 """Game-side dialog subpackage: widgets, key loops, and the
-open_menu/open_pager/open_cast lifecycle helpers.
+open_menu/open_pager/open_cast/open_log lifecycle helpers.
 
 A dialog is entirely game state: its display is a screen-space CharGridLayer
 in ``scene.grids`` (composited from a ``carriage_return.widgets`` tree by a
 ``WidgetGridLayer``) and its input is the dispatcher stack (the
 DialogSession is itself the top handler). ``open_menu``/``open_pager``/
-``open_cast`` own the whole lifecycle -- build the content widget, wrap it
+``open_cast`` (and ``open_log``, which builds its own frame) own the whole lifecycle -- build the content widget, wrap it
 in a bordered ``GridFrame``, wrap that in a ``WidgetGridLayer``, push the
 session, arrange teardown, and start the dialog thread -- so opening a
 dialog needs no UI and works headless by construction.
@@ -15,15 +15,16 @@ dialog thread with the session); ``session.result`` is None on cancel.
 """
 from ..widgets import GridFrame, WidgetGridLayer
 from .cast import CastWidget, run_cast
+from .log import LogDialog, run_log
 from .menu import MenuItem, MenuWidget, run_menu
 from .pager import PagerWidget, run_pager
 from .session import DialogClosed, DialogSession
 
 __all__ = [
-    'open_menu', 'open_pager', 'open_cast',
+    'open_menu', 'open_pager', 'open_cast', 'open_log',
     'DialogSession', 'DialogClosed',
-    'MenuWidget', 'MenuItem', 'PagerWidget', 'CastWidget',
-    'run_menu', 'run_pager', 'run_cast',
+    'MenuWidget', 'MenuItem', 'PagerWidget', 'CastWidget', 'LogDialog',
+    'run_menu', 'run_pager', 'run_cast', 'run_log',
 ]
 
 
@@ -95,9 +96,20 @@ def open_cast(scene, spells):
     return _run_dialog(lambda s: run_cast(s, prompt), layer, "cast")
 
 
-def _run_dialog(body, layer, name):
-    """Wire a dialog body to its WidgetGridLayer and start it.
+def open_log(scene):
+    """Open the modal message-log view and return its (started) session.
 
+    A near-full-screen, scrollable view of ``scene.log`` that stays live
+    while open; teardown runs on the dialog thread like the other dialogs.
+    """
+    dialog = LogDialog(scene)
+    return _run_dialog(lambda s: run_log(s, dialog), dialog, "log")
+
+
+def _run_dialog(body, layer, name):
+    """Wire a dialog body to its layer and start it.
+
+    *layer* is a WidgetGridLayer, or any object with the same ``close()``.
     Pushes the session onto the dispatcher stack, arranges teardown (drop the
     session, close the layer) on completion, and starts the dialog thread.
     """

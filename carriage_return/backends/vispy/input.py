@@ -12,7 +12,9 @@ let go and pressed again many times a second — movement would keep restarting
 from a standstill. Filtering at the boundary lets the rest of the game treat a
 key as simply down or up.
 """
-from ...input import KeyPress, KeyRelease
+from ...input import KeyPress, KeyRelease, MouseClick, MouseWheel
+
+BUTTON_NAMES = {1: 'left', 2: 'right', 3: 'middle'}
 
 
 def _key_name(key):
@@ -42,17 +44,26 @@ def _is_auto_repeat(event):
 
 
 class CanvasInputSource(object):
-    """Connects a vispy SceneCanvas's key events to an InputDispatcher.
+    """Connects a vispy SceneCanvas's key and mouse events to an InputDispatcher.
 
     Runs on the GUI thread; per the input contract it only constructs events
     and dispatches them — handlers enqueue, nothing mutates game state here.
+
+    Mouse events are located by *cell_at*, a callable mapping a canvas pixel
+    to ``(grid, row, col)`` (all None over no grid). An event some handler
+    consumes is blocked from the canvas's own scene handling, so a wheel turned
+    over the console does not also zoom the map.
     """
 
-    def __init__(self, canvas, dispatcher):
+    def __init__(self, canvas, dispatcher, cell_at):
         self.canvas = canvas
         self.dispatcher = dispatcher
+        self.cell_at = cell_at
         canvas.events.key_press.connect(self._key_pressed)
         canvas.events.key_release.connect(self._key_released)
+        # first, so a consumed event is blocked before the scene sees it
+        canvas.events.mouse_wheel.connect(self._mouse_wheel, position='first')
+        canvas.events.mouse_press.connect(self._mouse_pressed, position='first')
 
     def _key_pressed(self, event):
         if _is_auto_repeat(event):
@@ -65,3 +76,15 @@ class CanvasInputSource(object):
             return
         self.dispatcher.dispatch(KeyRelease(_key_name(event.key),
                                             getattr(event, 'text', None)))
+
+    def _mouse_wheel(self, event):
+        self._dispatch_mouse(event, MouseWheel, steps=event.delta[1])
+
+    def _mouse_pressed(self, event):
+        self._dispatch_mouse(event, MouseClick, button=BUTTON_NAMES[event.button])
+
+    def _dispatch_mouse(self, event, event_class, **fields):
+        """Dispatch a *event_class* at the pointer's cell; block *event* from
+        the scene if a handler consumed it."""
+        consumer = self.dispatcher.dispatch(event_class(*self.cell_at(event.pos), **fields))
+        event.blocked = consumer is not None

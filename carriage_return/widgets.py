@@ -138,6 +138,14 @@ class Widget(object):
             self.bgcolor[row, :] = bg
         self._changed()
 
+    def fill_rect(self, row, col, nrows, ncols, fg=None, bg=None):
+        """Recolor a block of cells (scroll bars); glyphs are untouched."""
+        if fg is not None:
+            self.fgcolor[row:row + nrows, col:col + ncols] = fg
+        if bg is not None:
+            self.bgcolor[row:row + nrows, col:col + ncols] = bg
+        self._changed()
+
     def clear(self, fg=None, bg=None):
         """Reset every cell to a space, optionally recoloring the whole widget."""
         self.glyph[:] = ' '
@@ -146,6 +154,23 @@ class Widget(object):
         if bg is not None:
             self.bgcolor[:] = bg
         self._changed()
+
+    # -- geometry --------------------------------------------------------
+
+    def local_cell(self, row, col):
+        """Translate a cell of the root widget's grid to this widget's own
+        coordinates (the result may lie outside the widget)."""
+        widget = self
+        while widget.parent is not None:
+            row -= widget.row_offset
+            col -= widget.col_offset
+            widget = widget.parent
+        return row, col
+
+    def contains(self, row, col):
+        """True if the root-grid cell (*row*, *col*) lies inside this widget."""
+        row, col = self.local_cell(row, col)
+        return 0 <= row < self.nrows and 0 <= col < self.ncols
 
     # -- sizing ------------------------------------------------------------
 

@@ -165,6 +165,12 @@ class CommandInterpreter(object):
             session.finished.connect(
                 lambda s: s.result is not None and self.player.read(s.result))
 
+    # -- log ----------------------------------------------------------------
+
+    def log(self, args):
+        """Open the scrollable message log."""
+        return dialogs.open_log(self.scene)
+
     # -- helpers ------------------------------------------------------------
 
     def _match_args(self, args, items):

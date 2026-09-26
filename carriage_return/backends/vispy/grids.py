@@ -175,6 +175,20 @@ class GridRenderer(object):
         for visual in self._visuals.values():
             visual.sync()
 
+    def cell_at(self, pos):
+        """(grid, row, col) of the topmost grid cell under canvas pixel *pos*,
+        or (None, None, None) if no grid is there."""
+        x, y = pos
+        cw, ch = self.char_size
+        for grid in reversed(list(self.scene.grids)):
+            visual = self._visuals.get(grid)
+            if visual is None:
+                continue  # added to scene.grids since the last sync()
+            (left, top), (width, height) = visual.view.pos, visual.view.size
+            if left <= x < left + width and top <= y < top + height:
+                return grid, int((y - top) // ch), int((x - left) // cw)
+        return None, None, None
+
     def _update_screen(self):
         """Publish the canvas size in cells to the game (``scene.screen``).
 

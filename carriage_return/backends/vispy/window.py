@@ -24,9 +24,9 @@ class MainWindow:
         self.debug_line_of_sight = False
         self.debug_los_tex = False
 
-        # feed canvas keyboard events into the game-side dispatcher
+        # feed canvas keyboard and mouse events into the game-side dispatcher
         self.input_dispatcher = dispatcher
-        self.input_source = CanvasInputSource(self.canvas, dispatcher)
+        self.input_source = CanvasInputSource(self.canvas, dispatcher, self._cell_at)
 
         # setup UI
         self.view = self.canvas.central_widget.add_view()
@@ -71,6 +71,12 @@ class MainWindow:
         self.game_scene = scene
         self.grid_renderer = GridRenderer(self.canvas, scene, self.mark_dirty)
         scene.level_changed.connect(self._level_changed)
+
+    def _cell_at(self, pos):
+        """(grid, row, col) under canvas pixel *pos*; see GridRenderer.cell_at."""
+        if self.grid_renderer is None:
+            return None, None, None
+        return self.grid_renderer.cell_at(pos)
 
     def _level_changed(self):
         """Snap the camera on a level change instead of scrolling to it.

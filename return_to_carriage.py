@@ -67,7 +67,7 @@ if __name__ == '__main__':
     interp = CommandInterpreter(scene)
     cmd_input_handler = CommandInputHandler(scene.log, interp)
     gameplay = GameplayInputHandler(dm, player, interpreter=interp,
-                                    command_handler=cmd_input_handler)
+                                    command_handler=cmd_input_handler, hud=hud)
     gameplay.activate()
     start_gamepad(dispatcher)
 
