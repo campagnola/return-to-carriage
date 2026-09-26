@@ -476,6 +476,16 @@ textured maze background instead of drawing on the grid's default
 transparent-black cells. Dialog painters set their own, different colors
 (`dialogs/base.py::CharGridPainter`) and are untouched by this.
 
+Console lines fade with age and salience. `MessageLog.entries` holds
+`LogEntry(text, salience, turn)` records (`lines` is a read-only snapshot of
+their text); the log counts turns itself (`advance_turn()`, called from
+`DungeonMaster.end_turn()`) so it can stamp each entry without knowing the
+scene. Salience is 0-1 (`Scene.write(msg, salience=DEFAULT_SALIENCE)`; out of
+range raises). The console scales each line's `FG` RGB by
+`hud.brightness(age, salience)`, clamped to [0.2, 1.0]; the constants live at
+the top of `hud.py`. The command prompt is written at salience 1.0 so it never
+dims.
+
 `scene.messages` (a vispy-style `EventEmitter`) does not exist; `scene.log`
 is the one mechanism for game-to-display messages.
 

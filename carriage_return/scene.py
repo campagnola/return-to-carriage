@@ -1,4 +1,5 @@
 import time
+from collections import namedtuple
 
 from .layers import GlyphRegistry, SpriteLayer, LayerList
 from .maze import Maze
@@ -9,6 +10,17 @@ from .perception import AUTO_LOG_SALIENCE
 
 
 
+#: Bounds of a log message's salience, and the value given when it isn't
+#: specified (see :class:`LogEntry`).
+MIN_SALIENCE, MAX_SALIENCE = 0.0, 1.0
+DEFAULT_SALIENCE = 0.5
+
+#: One line of the message log: its text, how much it matters (0-1; the
+#: console draws salient lines brighter and fades them more slowly), and the
+#: log turn it was written on.
+LogEntry = namedtuple('LogEntry', 'text salience turn')
+
+
 class MessageLog(object):
     """Messages shown to the user, held as game state (``scene.log``).
 
@@ -16,24 +28,43 @@ class MessageLog(object):
     mutation and the ``changed`` Observable is invoked after each bump. Game
     threads write messages; a game-side painter (hud.py) renders the tail into
     a CharGridLayer — nothing rendering-side reads the log directly.
+
+    The log counts turns (``turn``, advanced by :meth:`advance_turn`) so each
+    entry can be stamped with when it was written; a painter derives an
+    entry's age as ``log.turn - entry.turn``.
     """
     def __init__(self):
-        self.lines = []
+        self.entries = []
+        self.turn = 0
         self.version = 0
         self.changed = Observable()
 
-    def write(self, text):
-        """Append *text* to the log, splitting on newlines."""
-        self.lines.extend(text.split('\n'))
+    @property
+    def lines(self):
+        """The entries' text, oldest first (a snapshot, not a live list)."""
+        return [entry.text for entry in self.entries]
+
+    def write(self, text, salience=DEFAULT_SALIENCE):
+        """Append *text* to the log, one entry per line of a newline split."""
+        if not MIN_SALIENCE <= salience <= MAX_SALIENCE:
+            raise ValueError("salience must be in [%s, %s], got %r"
+                             % (MIN_SALIENCE, MAX_SALIENCE, salience))
+        self.entries.extend(LogEntry(line, salience, self.turn)
+                            for line in text.split('\n'))
         self._changed()
 
     def set_last_line(self, line):
-        """Replace the last line (command-prompt editing)."""
-        self.lines[-1] = line
+        """Replace the last line's text (command-prompt editing)."""
+        self.entries[-1] = self.entries[-1]._replace(text=line)
         self._changed()
 
     def remove_last_line(self):
-        self.lines.pop(-1)
+        self.entries.pop(-1)
+        self._changed()
+
+    def advance_turn(self):
+        """Age every entry by one turn."""
+        self.turn += 1
         self._changed()
 
     def _changed(self):
@@ -294,9 +325,9 @@ class Scene(Entity):
     def add_item(self, item):
         self.items.append(item)
 
-    def write(self, message):
+    def write(self, message, salience=DEFAULT_SALIENCE):
         """Display a message to the user."""
-        self.log.write(message)
+        self.log.write(message, salience)
 
     def perceive(self, percept, who=None):
         """Central perception resolver: decide whether *who* notices *percept*

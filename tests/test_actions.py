@@ -65,10 +65,10 @@ def interp(scene):
 
 @pytest.fixture
 def messages(scene):
-    # scene.log.lines, empty at fixture time, so tests read exactly the
-    # messages written during the test
+    # the scene log, empty at fixture time, so tests read ``.lines`` and see
+    # exactly the messages written during the test
     assert scene.log.lines == []
-    return scene.log.lines
+    return scene.log
 
 
 def press(session, *keys):
@@ -133,7 +133,7 @@ def test_player_take_and_drop(scene):
 
 def test_take_nothing_here(scene, interp, messages, dispatcher):
     interp.take([])
-    assert messages == ["You take, but nothing gives."]
+    assert messages.lines == ["You take, but nothing gives."]
     assert list(scene.grids) == []  # no dialog opened
 
 
@@ -142,7 +142,7 @@ def test_take_single_item_skips_menu(scene, interp, messages, dispatcher):
     scroll = Scroll(location=(scene.maze, pos), scene=scene)
     interp.take([])
     assert scroll.location.container is scene.player
-    assert messages == ["Taken: %s." % scroll.description]
+    assert messages.lines == ["Taken: %s." % scroll.description]
     assert list(scene.grids) == []  # single item => no menu
 
 
@@ -162,7 +162,7 @@ def test_take_menu_selection(scene, interp, messages, dispatcher):
 
     assert torch.location.container is scene.player
     assert scroll.location.container is scene.maze
-    assert messages == ["Taken: %s." % torch.description]
+    assert messages.lines == ["Taken: %s." % torch.description]
     assert list(scene.grids) == []                 # menu grid removed
     assert dispatcher.handlers == []               # session popped
 
@@ -178,7 +178,7 @@ def test_take_menu_cancel(scene, interp, messages, dispatcher):
     finish(session)
 
     assert scene.items_at(pos) != []   # nothing was taken
-    assert messages == []              # and the take callback never ran
+    assert messages.lines == []        # and the take callback never ran
     assert list(scene.grids) == []
     assert dispatcher.handlers == []
 
@@ -190,7 +190,7 @@ def test_take_by_name(scene, interp, messages, dispatcher):
 
     interp.take(['scroll'])  # unambiguous name match: no menu
     assert scroll.location.container is scene.player
-    assert messages == ["Taken: %s." % scroll.description]
+    assert messages.lines == ["Taken: %s." % scroll.description]
     assert list(scene.grids) == []
 
 
@@ -198,7 +198,7 @@ def test_take_by_name(scene, interp, messages, dispatcher):
 
 def test_read_nothing(scene, interp, messages, dispatcher):
     interp.read([])
-    assert messages == ["You have nothing to read."]
+    assert messages.lines == ["You have nothing to read."]
 
 
 def test_read_single_opens_pager(scene, interp, dispatcher):
@@ -241,7 +241,7 @@ def test_read_menu_multiple(scene, interp, dispatcher):
 
 def test_drop_nothing(scene, interp, messages, dispatcher):
     interp.drop([])
-    assert messages == ["You have nothing to drop."]
+    assert messages.lines == ["You have nothing to drop."]
     assert list(scene.grids) == []
 
 

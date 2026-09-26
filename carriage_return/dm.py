@@ -89,6 +89,7 @@ class DungeonMaster:
         return True
 
     def end_turn(self):
+        self.scene.log.advance_turn()
         for mlist in list(self.scene.monsters.values()):
             for m in mlist:
                 m.take_turn()

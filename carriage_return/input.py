@@ -26,6 +26,8 @@ from collections import namedtuple
 import inputs
 import numpy as np
 
+from .scene import MAX_SALIENCE
+
 
 class InputEvent(object):
     """Base class for normalized user-input events.
@@ -487,7 +489,7 @@ class CommandInputHandler(QueuedInputHandler):
         if cursor:
             line += '_'
         if not self.console_line_started:
-            self.log.write("\n" + line)
+            self.log.write("\n" + line, salience=MAX_SALIENCE)
             self.console_line_started = True
         else:
             self.log.set_last_line(line)

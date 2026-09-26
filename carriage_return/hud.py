@@ -16,7 +16,12 @@ columns -- with text re-wrapped -- whenever the window is resized.
 
 The console repaints whenever ``scene.log`` changes -- ConsoleWidget
 subscribes to its ``changed`` event.
+
+Console lines fade with age (turns since written) and salience: see
+:func:`brightness`.
 """
+import math
+
 from .widgets import GridFrame, Widget, WidgetGridLayer
 
 # placeholder content, hard-coded until real stats/inspection exist
@@ -31,6 +36,26 @@ FG = (1.0, 1.0, 1.0, 0.5)
 BG = (0.0, 0.0, 0.0, 0.4)
 BORDER_FG = (1.0, 1.0, 1.0, 0.3)
 
+# Console line fade. A line's brightness starts at b0(salience), interpolated
+# linearly from B_LOW to B_HIGH, and decays exponentially with a time constant
+# in turns interpolated geometrically from TAU_MIN to TAU_MAX. It is then
+# clamped to [BRIGHTNESS_FLOOR, BRIGHTNESS_CEIL]; B_HIGH > BRIGHTNESS_CEIL, so
+# high-salience lines hold at full brightness before they start to fade.
+B_LOW, B_HIGH = 0.5, 1.5
+TAU_MIN, TAU_MAX = 40.0, 400.0
+BRIGHTNESS_FLOOR, BRIGHTNESS_CEIL = 0.4, 1.0
+
+
+def brightness(age, salience):
+    """Console text brightness for a line *age* turns old with *salience* (0-1).
+
+    1.0 is the console's ``FG`` unscaled.
+    """
+    initial = B_LOW + (B_HIGH - B_LOW) * salience
+    tau = TAU_MIN * (TAU_MAX / TAU_MIN) ** salience
+    faded = initial * math.exp(-age / tau)
+    return min(BRIGHTNESS_CEIL, max(BRIGHTNESS_FLOOR, faded))
+
 
 def wrap(line, width):
     """Split *line* into chunks of at most *width* characters."""
@@ -40,7 +65,10 @@ def wrap(line, width):
 
 
 class ConsoleWidget(Widget):
-    """Renders the tail of scene.log into its own cells, newest last."""
+    """Renders the tail of scene.log into its own cells, newest last.
+
+    Each line is drawn at its :func:`brightness`.
+    """
 
     def __init__(self, scene):
         self.scene = scene
@@ -50,13 +78,16 @@ class ConsoleWidget(Widget):
     def repaint(self):
         """Repaint from the log tail (runs on whatever thread wrote the message)."""
         rows, cols = self.nrows, self.ncols
+        log = self.scene.log
         self.clear()
-        lines = []
-        for line in self.scene.log.lines[-rows:]:
-            lines.extend(wrap(line, cols))
-        tail = lines[-rows:]
-        for i, line in enumerate(tail, start=rows - len(tail)):
-            self.write(i, 0, line)
+        chunks = []  # (text, fg) per wrapped row
+        for entry in log.entries[-rows:]:
+            k = brightness(log.turn - entry.turn, entry.salience)
+            fg = (FG[0] * k, FG[1] * k, FG[2] * k, FG[3])
+            chunks.extend((chunk, fg) for chunk in wrap(entry.text, cols))
+        tail = chunks[-rows:]
+        for i, (text, fg) in enumerate(tail, start=rows - len(tail)):
+            self.write(i, 0, text, fg=fg)
 
     def _shape_changed(self):
         self.repaint()
