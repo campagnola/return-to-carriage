@@ -12,7 +12,10 @@ from carriage_return.player import Player
 from carriage_return.portal import Door, Hole, StairsDown, StairsUp
 from carriage_return.terrain.buildings import place_building
 from carriage_return.scene import Scene
-from carriage_return.tone_mapping import MEMORY_MAX, display_value
+from carriage_return.sight_memory import (MEMORY_BASE_DECAY_TIME, MEMORY_MAX_RETENTION,
+                                          MEMORY_MIN_RETENTION, MEMORY_RETENTION_GAIN,
+                                          MEMORY_VISIBLE_THRESHOLD)
+from carriage_return.tone_mapping import MEMORY_MAX_BRIGHTNESS, display_value
 from carriage_return.world import Level, LevelPortal, World
 
 
@@ -314,7 +317,8 @@ def test_compositing_a_level_the_player_has_left_uses_its_own_shape():
     world = World()
     bt = world.blocktypes
     world.add_level(Level('small', Maze.filled((8, 9), bt, 'path', obj_name='small')))
-    world.add_level(Level('big', Maze.filled((20, 30), bt, 'path', obj_name='big')))
+    world.add_level(Level('big', _sight_maze(['.' * 30] * 9 + ['..#' + '.' * 27]
+                                             + ['.' * 30] * 10, bt)))
     small, big = world.levels['small'], world.levels['big']
 
     scene = Scene()
@@ -323,7 +327,9 @@ def test_compositing_a_level_the_player_has_left_uses_its_own_shape():
     player = Player(scene)
     player.location.update(small.maze, (1, 1))
 
-    big.memory[:] = 0.25                   # something remembered on the big level
+    # something freshly remembered on the big level
+    big.sight_memory.peak[:] = 0.25
+    big.sight_memory.seen_at[:] = world.time
 
     # the renderer's situation mid-transition: showing 'big' while the player
     # is still on 'small'. This used to raise "operands could not be broadcast
@@ -384,7 +390,7 @@ def test_an_unlit_level_renders_dark_rather_than_failing(played_world):
 
 # -- wall memory ----------------------------------------------------------------
 
-#: Emission of the test-only glow wall; low enough to stay under MEMORY_MAX.
+#: Emission of the test-only glow wall; low enough to stay under MEMORY_MAX_BRIGHTNESS.
 GLOW_EMISSION = 0.1
 
 #: Eye adaptation is pinned here, so exposure is fixed.
@@ -508,8 +514,8 @@ def test_memory_is_capped():
     scene, level, player, _ = _sight_level(FACE_PATTERN, (6, 6), light=1e6,
                                            adapt_luminance=1e-3)
     level.update_sight(0.0, player)
-    assert level.memory.max() <= MEMORY_MAX
-    assert np.isclose(level.memory.max(), MEMORY_MAX)
+    assert level.memory.max() <= MEMORY_MAX_BRIGHTNESS
+    assert np.isclose(level.memory.max(), MEMORY_MAX_BRIGHTNESS)
 
 
 def test_an_emissive_wall_is_remembered_in_the_dark():
@@ -525,7 +531,7 @@ def test_an_emissive_wall_is_remembered_in_the_dark():
     plain = level.memory[1 * ss:2 * ss, 5 * ss:6 * ss]
     face = level.wall_face_mask()[1 * ss:2 * ss, 2 * ss:3 * ss]
     expected = display_value(0.0, GLOW_EMISSION, player.adaptation.exposure)
-    assert 0 < expected < MEMORY_MAX
+    assert 0 < expected < MEMORY_MAX_BRIGHTNESS
     assert np.allclose(glow[face], expected)
     assert not glow[~face].any()
     assert not plain.any()                     # unlit and not emissive
@@ -551,7 +557,7 @@ def test_a_brighter_glimpse_raises_memory_and_a_dimmer_one_does_not_lower_it():
     level.update_sight(0.0, player)
     bright = level.memory.copy()
     assert (bright[mask] > dim[mask]).all()
-    assert bright.max() < MEMORY_MAX           # the rise is not the cap
+    assert bright.max() < MEMORY_MAX_BRIGHTNESS           # the rise is not the cap
 
     lamp.color = (0.01,) * 3
     level.update_sight(0.0, player)
@@ -708,3 +714,149 @@ def test_every_level_shares_one_blocktype_table():
     world = build_world(Scene())
     for level in world.levels.values():
         assert level.maze.blocktypes is world.blocktypes
+
+
+# -- memory decay ---------------------------------------------------------------
+
+#: A lone wall on open floor, lit and in full view of a player at (6, 6).
+LONE_WALL = ['........',
+             '..#.....',
+             '........',
+             '........',
+             '........',
+             '........',
+             '........']
+
+
+def _look(level, player, dt=0.0):
+    """One frame with the player's view as it currently is."""
+    level.update_sight(dt, player)
+
+
+def _look_away(level, dt):
+    """Let *dt* seconds pass with nothing on *level* in view."""
+    level.update_sight(dt, None)
+
+
+def _faces(level):
+    """Memory of the level's wall faces, in SightMemory order."""
+    return level.memory.reshape(-1)[level.sight_memory.faces]
+
+
+def test_decay_time_is_the_base_raised_to_the_retention():
+    level = Level('faces', _sight_maze(LONE_WALL, BlockTypes()))
+    assert np.allclose(level.sight_memory.decay_time,
+                       MEMORY_BASE_DECAY_TIME ** MEMORY_MIN_RETENTION)
+
+
+def test_first_sight_gains_the_full_retention():
+    scene, level, player, _ = _sight_level(LONE_WALL, (6, 6), light=0.1)
+    mem = level.sight_memory
+    assert np.all(mem.retention == MEMORY_MIN_RETENTION)
+    _look(level, player)
+    expected = MEMORY_MIN_RETENTION + MEMORY_RETENTION_GAIN
+    assert np.allclose(mem.retention, expected)
+    assert np.allclose(mem.decay_time, MEMORY_BASE_DECAY_TIME ** expected)   # ~48 s
+
+
+def test_staying_in_view_does_not_grow_retention():
+    scene, level, player, _ = _sight_level(LONE_WALL, (6, 6), light=0.1)
+    _look(level, player)
+    retention = level.sight_memory.retention.copy()
+    for _ in range(100):
+        _look(level, player, dt=1.0)
+    assert np.array_equal(level.sight_memory.retention, retention)
+
+
+def test_returning_half_expired_gains_half_the_retention():
+    scene, level, player, _ = _sight_level(LONE_WALL, (6, 6), light=0.1)
+    mem = level.sight_memory
+    _look(level, player)
+    first = mem.retention.copy()
+    _look_away(level, mem.decay_time[0] / 2)
+    _look(level, player)
+    assert np.allclose(mem.retention, first + MEMORY_RETENTION_GAIN / 2)
+
+
+def test_memory_fades_linearly_to_nothing_over_its_decay_time():
+    scene, level, player, _ = _sight_level(LONE_WALL, (6, 6), light=0.1)
+    _look(level, player)
+    seen = _faces(level).copy()
+    assert (seen > 0).all()
+    decay_time = float(level.sight_memory.decay_time[0])
+
+    _look_away(level, decay_time / 4)
+    assert np.allclose(_faces(level), seen * 0.75)
+    _look_away(level, decay_time / 2)
+    assert np.allclose(_faces(level), seen * 0.25)
+    _look_away(level, decay_time / 4)
+    assert not level.memory.any()              # expired
+
+
+def test_spaced_revisits_make_memory_last_longer():
+    scene, level, player, _ = _sight_level(LONE_WALL, (6, 6), light=0.1)
+    mem = level.sight_memory
+    decay_times = []
+    for _ in range(3):
+        _look(level, player)
+        decay_times.append(float(mem.decay_time[0]))
+        _look_away(level, decay_times[-1])     # fully expire before coming back
+    assert decay_times[0] < decay_times[1] < decay_times[2]
+
+
+def test_retention_is_capped():
+    scene, level, player, _ = _sight_level(LONE_WALL, (6, 6), light=0.1)
+    mem = level.sight_memory
+    visits = int(np.ceil((MEMORY_MAX_RETENTION - MEMORY_MIN_RETENTION) / MEMORY_RETENTION_GAIN))
+    for _ in range(visits + 1):
+        _look(level, player)
+        _look_away(level, float(mem.decay_time[0]))
+    assert np.allclose(mem.retention, MEMORY_MAX_RETENTION)
+    assert np.allclose(mem.decay_time, MEMORY_BASE_DECAY_TIME ** MEMORY_MAX_RETENTION)
+
+
+def test_time_on_another_level_counts_toward_the_fade(played_world):
+    """Memory is timed by the world clock, which runs while the player is away."""
+    scene, world, player, dm = played_world
+    upper, lower = world.levels['upper'], world.levels['lower']
+    t0 = world.time
+    lower.update_sight(10.0, None)             # the frames drawn elsewhere
+    assert upper.now == world.time == t0 + 10.0
+
+
+def test_coming_back_after_a_level_switch_counts_as_a_new_sighting(played_world):
+    """Leaving a level drops what was in view, so returning is a rising edge."""
+    scene, world, player, dm = played_world
+    upper = world.levels['upper']
+    upper.sight_memory.in_view[:] = True
+    scene.set_level(world.levels['lower'])
+    assert not upper.sight_memory.in_view.any()
+
+
+def test_a_face_too_dim_to_make_out_is_not_in_view():
+    """Faint light in line of sight is not a sighting: it neither refreshes nor
+    grows retention."""
+    scene, level, player, lamp = _sight_level(LONE_WALL, (6, 6), light=1e-6)
+    _look(level, player)
+    assert level.line_of_sight.all()           # in sight...
+    assert not level.memory.any()              # ...but too dim to remember
+    assert not level.sight_memory.in_view.any()
+    assert np.all(level.sight_memory.retention == MEMORY_MIN_RETENTION)
+
+
+def test_flashes_of_light_from_a_fixed_spot_are_each_a_new_sighting():
+    """Standing still in a dark hallway, each flash (a fireball, say) that
+    fades back below the visible threshold makes the next one count again."""
+    scene, level, player, lamp = _sight_level(LONE_WALL, (6, 6), light=0.0)
+    mem = level.sight_memory
+    retentions = []
+    for _ in range(3):
+        lamp.color = (0.1,) * 3                # flash
+        _look(level, player, dt=1.0)
+        assert (_faces(level) >= MEMORY_VISIBLE_THRESHOLD).all()
+        retentions.append(float(mem.retention[0]))
+        lamp.color = (1e-6,) * 3               # fades to a glimmer, not to black
+        _look(level, player, dt=float(mem.decay_time[0]) / 2)
+        assert not mem.in_view.any()
+    assert retentions[0] < retentions[1] < retentions[2]
+

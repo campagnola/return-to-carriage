@@ -155,7 +155,7 @@ def pixel_color(albedo, emission, illuminance, exposure_value):
 # ---------------------------------------------------------------------------
 
 #: Display-space cap on a remembered wall face (see Level.update_sight).
-MEMORY_MAX = 0.12
+MEMORY_MAX_BRIGHTNESS = 0.12
 
 #: Color the memory overlay is tinted when composited onto a fragment (see
 #: :class:`~.backends.vispy.graphics.TextureMaskFilter`'s fragment shader,

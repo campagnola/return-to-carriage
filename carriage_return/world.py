@@ -19,8 +19,10 @@ from .blocktypes import BlockTypes
 from .events import Observable
 from .layers import FieldLayer, upsample_to_field
 from .maze import SIDE_OFFSETS, neighbour_shifts
-from .tone_mapping import (LUMINANCE_WEIGHTS, MEMORY_MAX, display_value,
-                           reflected_luminance, scene_reflected_luminance)
+from .sight_memory import SightMemory
+from .tone_mapping import (LUMINANCE_WEIGHTS, MEMORY_MAX_BRIGHTNESS,
+                           display_value, reflected_luminance,
+                           scene_reflected_luminance)
 
 
 #: Resolution of the sight fields relative to maze cells. One number, shared by
@@ -51,12 +53,9 @@ class Level:
     ``memory`` is per level for the same reason it is useful: what you saw of
     a level is a fact about that level, and survives going elsewhere and
     coming back. It holds display-space brightness on seen wall faces only
-    (see :meth:`update_sight`).
+    (see :meth:`update_sight`); how long each face stays remembered is kept by
+    :attr:`sight_memory`, timed by :attr:`now`.
     """
-
-    #: sight memory fades to this fraction of itself per second (equivalent to
-    #: the historical 0.999-per-frame decay at 60 fps)
-    MEMORY_DECAY_RATE = 0.999 ** 60
 
     def __init__(self, name, maze, supersample=SIGHT_SUPERSAMPLE):
         self.name = name
@@ -104,6 +103,11 @@ class Level:
         # lazily built from the fixed maze; see _block_field / wall_face_mask
         self._block_fields = {}
         self._wall_face_mask = None
+        self._sight_memory = None
+
+        # the level's own clock (seconds), used only when it is not in a World;
+        # see ``now``
+        self._clock = 0.0
 
         # The two composited fields the renderer uploads, each owned by the
         # level so its identity is stable for a backend that captured it and
@@ -145,6 +149,8 @@ class Level:
         what stops the flicker thread burning flames nobody can see.
         """
         self.line_of_sight[:] = 0
+        if self._sight_memory is not None:
+            self._sight_memory.lose_sight()
 
     def add_light(self, light):
         """Register *light* as shining on this level.
@@ -248,6 +254,26 @@ class Level:
             self._wall_face_mask = mask
         return self._wall_face_mask
 
+    @property
+    def sight_memory(self):
+        """The :class:`~.sight_memory.SightMemory` decay state of this level's
+        wall faces, built lazily from the fixed maze."""
+        if self._sight_memory is None:
+            self._sight_memory = SightMemory(self.wall_face_mask())
+        return self._sight_memory
+
+    @property
+    def now(self):
+        """Clock time (seconds) memory is timed by: the world's, so time spent on
+        other levels counts, or the level's own when it has no world."""
+        return self.world.time if self.world is not None else self._clock
+
+    def _advance_clock(self, dt):
+        if self.world is not None:
+            self.world.time += dt
+        else:
+            self._clock += dt
+
     def update_sight(self, dt, player):
         """Advance this level's sight/memory fields by *dt* seconds, writing the
         result into ``self.light`` and ``self.memory_overlay``.
@@ -271,7 +297,13 @@ class Level:
         This method also drives that adaptation and updates memory::
 
             seen   = los * display_value(albedo * E, emission, exposure)
-            memory = max(memory, min(seen, MEMORY_MAX) * wall_face_mask) * decay
+            memory = sight_memory.update(now, min(seen, MEMORY_MAX_BRIGHTNESS))
+
+        which fades each wall face linearly from the brightness it was last
+        seen at, over a decay time that lengthens each time the face comes
+        back into view (see :mod:`.sight_memory`). Only wall faces are kept.
+        Drawing a level advances the clock by *dt*; there is one level drawn per
+        frame, so the world's clock advances once per frame.
 
         ``memory_overlay`` is ``memory`` unmasked; the GPU draws
         ``max(lit, memory * tint)``.
@@ -285,6 +317,7 @@ class Level:
         """
         watched = player is not None and player.level is self
         h, w = self.memory.shape
+        self._advance_clock(dt)
 
         if watched:
             if self._need_los_update:
@@ -327,19 +360,18 @@ class Level:
                 L_scene = float((Y_refl * win_w).sum() / wsum)
                 player.adaptation.adapt(L_scene, dt)
 
-            # remember seen wall faces; in place so memory stays float32
             exposure = player.adaptation.exposure
             seen = los_scalar * display_value(refl, self._block_field('bg_emission'),
                                               exposure)
-            np.maximum(self.memory, np.minimum(seen, MEMORY_MAX) * self.wall_face_mask(),
-                       out=self.memory)
+            seen = np.minimum(seen, MEMORY_MAX_BRIGHTNESS)
         else:
             # fully blocked: no live view, only memory shows
             illuminance = 0.0
             los_scalar = 0.0
+            seen = None
 
-        # forget
-        self.memory *= self.MEMORY_DECAY_RATE ** dt
+        # remember seen wall faces and fade the rest; in place so memory stays float32
+        self.sight_memory.update(self.now, self.memory, seen)
 
         # Pack the light field: [0:3] raw linear HDR illuminance (ungated by
         # line of sight), [3] the line-of-sight scalar the GPU gates against.
@@ -475,6 +507,9 @@ class World:
         self.levels = {}
         self.portals = []
         self.current = None
+        # game time (seconds), advanced by whichever level is drawn each frame;
+        # the one clock sight memory on every level is timed by
+        self.time = 0.0
 
     def add_level(self, level):
         """Add *level* to the world; the first one added becomes current."""
