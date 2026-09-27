@@ -58,24 +58,6 @@ def test_update_sight(scene):
     assert scene.light.data[..., 3].max() > 0
 
 
-def test_memory_decay_is_time_based(scene):
-    scene.update_sight(1/60.)
-
-    # update_sight re-accumulates max(memory, seen) BEFORE decaying, so to
-    # isolate pure decay we dominate the accumulation: set memory far
-    # above any seen value, so the max() keeps it and only the decay acts.
-    scene.memory[:] = 1e6
-    mem = scene.memory.copy()
-
-    # one 2-second step decays the same as two 1-second steps
-    scene_mem_a = mem * scene.MEMORY_DECAY_RATE ** 2.0
-    scene_mem_b = (mem * scene.MEMORY_DECAY_RATE ** 1.0) * scene.MEMORY_DECAY_RATE ** 1.0
-    assert np.allclose(scene_mem_a, scene_mem_b)
-
-    scene.update_sight(2.0)
-    assert np.allclose(scene.memory, scene_mem_a)
-
-
 def test_write_message(scene):
     n0 = len(scene.log.lines)
     version = scene.log.version

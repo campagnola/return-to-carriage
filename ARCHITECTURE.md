@@ -165,8 +165,20 @@ per maze cell (`scene.field_shape` is authoritative). They live on the
   a = line of sight (0..1).
 - `memory_overlay`: a copy of the CPU-side `Level.memory` (display space),
   non-zero only on wall faces (`Level.wall_face_mask()`):
-  `memory = max(memory, min(seen, MEMORY_MAX) * wall_face_mask) * decay`,
+  `memory = sight_memory.update(now, min(seen, MEMORY_MAX_BRIGHTNESS))`,
   `seen = los * display_value(albedo * E, emission, exposure)`.
+
+Each wall-face texel fades linearly to nothing over its own decay time
+(`sight_memory.py`). A face is in view when `seen >= MEMORY_VISIBLE_THRESHOLD`
+(0.03): line of sight alone is not enough, it must be lit or glowing enough to
+make out. When a face comes back into view -- the rising edge; staying in view
+does not count, but dimming below the threshold and relighting does --
+`retention += 0.4 * age` (`age` is the elapsed fraction of its last decay time)
+and `decay_time = 16 s ** retention`, with retention capped at 4.1 (~24 h). So
+spaced revisits build long-term memory and crammed ones barely do. Fading is
+timestamp based on `World.time` (advanced once per frame by the drawn level):
+levels the player is not on do no work, but the time away still counts when
+they return.
 
 The vispy `TextureMaskFilter` draws `max(lit, memory * MEMORY_TINT)`, so
 losing sight of a wall never brightens it. `display_value` and its GLSL twin
@@ -534,9 +546,9 @@ ui.follow_entity(player)
 
 - The backend calls `scene.update_sight(dt)` once per rendered frame
   (dt in seconds), from `VispySceneRenderer._on_draw`. LOS recomputes only
-  when the player moved; lighting only when invalidated; memory decays by
-  `MEMORY_DECAY_RATE ** dt` (time-based, equivalent to the historical
-  0.999/frame at 60 fps).
+  when the player moved; lighting only when invalidated; the drawn level
+  advances `World.time` by dt, and memory fades by elapsed time since each
+  wall face was last seen (see `sight_memory.py`).
 - Sprite-layer sync (`VispyLayerRenderer.sync`) is version-gated and runs
   inside the sprites visual's `_prepare_draw`, so it also covers offscreen
   `SceneCanvas.render()` calls, which do not emit `canvas.events.draw`.

@@ -90,10 +90,6 @@ class Scene(Entity):
     for a light/viewer at a maze position.
     """
 
-    # sight memory decay now lives on the Level (which does the compositing);
-    # kept here as an alias for callers that reach for scene.MEMORY_DECAY_RATE
-    MEMORY_DECAY_RATE = Level.MEMORY_DECAY_RATE
-
     def __init__(self):
         Entity.__init__(self, entity_type='scene')
         self._player = None
