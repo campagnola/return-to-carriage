@@ -332,14 +332,17 @@ class GridFrame(Widget):
 
     def _shape_changed(self):
         layout = self._build_layout()
+        # Clear and draw borders before placing children: children are views
+        # into these arrays and repaint themselves when moved, so clearing
+        # afterwards would wipe their content.
+        self.clear(fg=self.fg, bg=self.bg)
+        for row, col, char in layout.border_cells():
+            self.write(row, col, char, fg=self.border_fg)
         for (widget, _row, _col, _rowspan, _colspan), rect in zip(self._cells, layout.cell_rects):
             if widget.parent is self:
                 widget._move_to(*rect)
             else:
                 self.add_child(widget, *rect)
-        self.clear(fg=self.fg, bg=self.bg)
-        for row, col, char in layout.border_cells():
-            self.write(row, col, char, fg=self.border_fg)
 
 
 class WidgetGridLayer(object):
