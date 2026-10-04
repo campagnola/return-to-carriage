@@ -7,6 +7,7 @@ from carriage_return.terrain import (
     RIDGE_EAST_WEST, STRAW_HUES, Building, plain_roof, straw_color, thatched_roof)
 from carriage_return.terrain.buildings import place_building
 from carriage_return.tone_mapping import LUMINANCE_WEIGHTS
+from carriage_return.units import CELL_DISPLAY_ASPECT
 
 
 def test_place_building_returns_its_footprint():
@@ -162,11 +163,20 @@ def test_straw_hues():
             assert np.abs(means[h1] - means[h2]).max() > 0.03, (h1, h2)
 
 
-def test_home_ridges_some_roofs_east_west():
-    buildings = [Building(0, 0, 8, 6) for _ in range(60)]
-    roofs = level_001_home.thatch_roofs(buildings, np.random.RandomState(0))
-    east_west = sum(_ridge_is_east_west(r) for r in roofs)
-    assert 0.15 * len(roofs) < east_west < 0.6 * len(roofs)
+def test_home_ridges_run_along_the_longer_side_as_shown():
+    """Cells are drawn CELL_DISPLAY_ASPECT (0.6) as wide as tall, so the side
+    that looks longer is what counts, not the cell count."""
+    assert CELL_DISPLAY_ASPECT == 0.6  # the sizes below are chosen for it
+    rng = np.random.RandomState(0)
+    wide = level_001_home.thatch_roofs([Building(0, 0, 12, 6)] * 10, rng)   # 7.2 x 6 shown
+    tall = level_001_home.thatch_roofs([Building(0, 0, 11, 7)] * 10, rng)   # 6.6 x 7 shown
+    assert all(_ridge_is_east_west(r) for r in wide)
+    assert not any(_ridge_is_east_west(r) for r in tall)
+
+    # a building that looks square has no longer side: either way will do
+    square = level_001_home.thatch_roofs([Building(0, 0, 10, 6)] * 40, rng)
+    east_west = sum(_ridge_is_east_west(r) for r in square)
+    assert 0 < east_west < len(square)
 
 
 def _ridge_is_east_west(roof):

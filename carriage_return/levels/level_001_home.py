@@ -10,6 +10,7 @@ import numpy as np
 from .. import terrain
 from ..light import AmbientLight
 from ..maze import Maze
+from ..units import CELL_DISPLAY_ASPECT
 from ..world import Level
 
 
@@ -27,10 +28,6 @@ HOME_ADAPT_LUMINANCE = 5000.0
 #: 'start', 'hole' and 'dungeon_stairs' all sit in the top-left corner (x<31,
 #: y<31); the town is kept well clear of that corner so it never overwrites them.
 PATH_WIDTH = 2
-
-#: Chance each of the town's thatched roofs is ridged east-west rather than
-#: north-south.
-EAST_WEST_RIDGE_CHANCE = 0.35
 
 #: How often each straw hue (see terrain.STRAW_HUES) thatches a roof, as
 #: relative weights: mostly ordinary tan, with the rest for variety.
@@ -177,16 +174,22 @@ def paint_town(maze, bt, seed=None, start=True):
 
 
 def thatch_roofs(buildings, rng):
-    """A thatched roof for each of *buildings*: most ridged north-south, some
-    east-west (see EAST_WEST_RIDGE_CHANCE), each of a straw hue drawn from
+    """A thatched roof for each of *buildings*, its ridge running along the
+    building's longer side as it looks on screen -- cells are drawn
+    CELL_DISPLAY_ASPECT as wide as they are tall -- (either way, at random,
+    on a building that looks square), of a straw hue drawn from
     ROOF_STRAW_HUES."""
     hues = list(ROOF_STRAW_HUES)
     weights = np.array(list(ROOF_STRAW_HUES.values()), dtype=float)
     weights /= weights.sum()
     roofs = []
     for building in buildings:
-        ridge = (terrain.RIDGE_EAST_WEST if rng.uniform() < EAST_WEST_RIDGE_CHANCE
-                 else terrain.RIDGE_NORTH_SOUTH)
+        shown_w, shown_h = building.w * CELL_DISPLAY_ASPECT, building.h
+        if np.isclose(shown_w, shown_h):
+            east_west = rng.uniform() < 0.5
+        else:
+            east_west = shown_w > shown_h
+        ridge = terrain.RIDGE_EAST_WEST if east_west else terrain.RIDGE_NORTH_SOUTH
         hue = hues[rng.choice(len(hues), p=weights)]
         roofs.append(terrain.thatched_roof(building, rng, ridge=ridge, hue=hue))
     return roofs

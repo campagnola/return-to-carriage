@@ -3,6 +3,7 @@ import vispy.scene, vispy.app
 import vispy.util.ptime as ptime
 
 from carriage_return import config
+from carriage_return.units import CELL_DISPLAY_ASPECT
 from .grids import GridRenderer
 from .input import CanvasInputSource
 
@@ -32,7 +33,7 @@ class MainWindow:
         self.view = self.canvas.central_widget.add_view()
         self.view.camera = Camera(on_interact=self._camera_interacted)
         self.view.camera.rect = [0, -5, 120, 60]
-        self.view.camera.aspect = 0.6
+        self.view.camera.aspect = CELL_DISPLAY_ASPECT
         self.view.events.key_press.disconnect()
 
         self.camera_target = self.view.camera.rect
