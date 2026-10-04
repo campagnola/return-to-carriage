@@ -5,6 +5,7 @@ from .inventory import Inventory
 from .light import PointLight
 from .location import Location
 from .sprite import SingleCharSprite
+from .stats import Stats
 from .units import lm
 from .random.random_dist import RandomDist
 from .perception import AUTO_LOG_SALIENCE
@@ -27,7 +28,8 @@ class Player(Entity):
         Entity.__init__(self, entity_type='player', obj_name=obj_name)
         self.scene = scene
 
-        self.inventory = Inventory(self, slot_type=str, max_weight=40, max_length=100, allowed_slots=['right hand', 'left hand'])
+        self.stats = Stats(self)
+        self.inventory = Inventory(self, slot_type=str, max_length=100, allowed_slots=['right hand', 'left hand'])
         self.location = Location(self, None, None)
         # zval more negative than any other entity (monsters/items sit at -0.1)
         # so the player always draws on top when co-located.
