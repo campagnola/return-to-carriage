@@ -186,7 +186,7 @@ live together in `tone_mapping.py`. A terminal backend could threshold the
 same fields into visible/remembered/dark.
 
 Out of sight need not mean black. `Level.unseen_brightness` (0 by default;
-0.3 at home, which is open daylight) floors the reflected light of sprite
+0.2 at home, which is open daylight) floors the reflected light of sprite
 layers with `shows_unseen` set -- only `scenery`, the map itself -- at that
 fraction, so the ground behind a building reads as shade; roofs use the same
 floor. Layers without it (`items`, which holds portals too, and `actors`)

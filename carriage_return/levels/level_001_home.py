@@ -28,7 +28,7 @@ HOME_ADAPT_LUMINANCE = 5000.0
 #: How brightly home's ground and buildings out of the player's sight are drawn,
 #: as a fraction of their lit brightness (see Level.unseen_brightness): it is
 #: broad daylight, so what lies behind a building is in shade, not darkness.
-HOME_UNSEEN_BRIGHTNESS = 0.3
+HOME_UNSEEN_BRIGHTNESS = 0.2
 
 #: 'start', 'hole' and 'dungeon_stairs' all sit in the top-left corner (x<31,
 #: y<31); the town is kept well clear of that corner so it never overwrites them.
