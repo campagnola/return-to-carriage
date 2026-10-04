@@ -20,6 +20,9 @@ class Player(Entity):
     fg_color = (1.0, 1.0, 1.0, 1.0)
     fg_emission = (1.0, 1.0, 1.0)
 
+    #: the player occupies its cell, so a monster cannot step onto it
+    blocks_movement = True
+
     def __init__(self, scene, obj_name=None):
         Entity.__init__(self, entity_type='player', obj_name=obj_name)
         self.scene = scene

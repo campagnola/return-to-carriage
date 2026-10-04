@@ -9,6 +9,11 @@ class DungeonMaster:
 
     def request_player_move(self, player, newpos):
         """Attempt to move the player to newpos.
+
+        A blocked diagonal slides along whichever axis is open. The player
+        blocks movement, so its own cell is never walkable: walking straight
+        into a wall is refused outright, rather than "moving" in place -- which
+        would spend a turn and re-trigger whatever is underfoot.
         """
         newpos = newpos.astype(int)
         j, i = newpos
@@ -22,16 +27,20 @@ class DungeonMaster:
             newpos[0] = j0
             self.move_player(player, newpos)
 
-    def walkable(self, pos):
-        """True if a mover may stand on cell *pos* ``(x, y)`` of the current maze.
+    def walkable(self, pos, maze=None):
+        """True if a mover may stand on cell *pos* ``(x, y)`` of *maze*
+        (default: the current maze).
 
-        The terrain must be walkable *and* nothing standing on the cell may
-        block it: walkability is aggregated over the ground and every entity
-        there, so a shut door stops you on otherwise-open floor without the
-        terrain grid knowing anything about it.
+        The cell must lie inside the maze, its terrain must be walkable, *and*
+        nothing standing on it may block it: walkability is aggregated over the
+        ground and every entity there, so a shut door or a monster stops you on
+        otherwise-open floor without the terrain grid knowing anything about it.
         """
         x, y = pos
-        maze = self.scene.maze
+        maze = self.scene.maze if maze is None else maze
+        h, w = maze.shape
+        if not (0 <= x < w and 0 <= y < h):
+            return False
         if not maze.blocktype_at(y, x)['walkable']:
             return False
         return not any(e.blocks_movement for e in maze.inventory[(x, y)])
@@ -88,7 +97,28 @@ class DungeonMaster:
         mover.location.update(to_end.level.maze, to_end.pos)
         return True
 
+    def request_monster_move(self, monster, newpos):
+        """A monster's request to step to cell *newpos* ``(x, y)`` of its own maze.
+
+        Refused if the cell is not walkable (a wall, the map edge, the player,
+        another monster). Returns whether the monster moved.
+        """
+        maze = monster.location.container
+        pos = (int(newpos[0]), int(newpos[1]))
+        if maze is None or not self.walkable(pos, maze):
+            return False
+        monster.location.update(maze, pos)
+        return True
+
     def end_turn(self):
-        for mlist in list(self.scene.monsters.values()):
-            for m in mlist:
-                m.take_turn()
+        """The player's turn is over: every monster on the player's level acts
+        once, in the order the monsters were added. Monsters on other levels
+        wait, frozen, until the player is back with them.
+        """
+        player = self.scene.player
+        level = player.level if player is not None else None
+        if level is None:
+            return
+        for monster in list(self.scene.monsters):
+            if monster.level is level:
+                monster.take_turn(self)

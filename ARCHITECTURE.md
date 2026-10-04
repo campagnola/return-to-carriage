@@ -458,6 +458,30 @@ class Scroll(Item):
         return dialogs.open_pager(self.scene, self.description, self.pages)
 ```
 
+## Monsters (`carriage_return/monster/`, game-side)
+
+A `Monster` is an `Entity` (type `mob.monster.<name>`) with a `Location` in a
+maze's inventory and a `SingleCharSprite` on the `actors` layer, so it is lit,
+gated by line of sight and hidden off-level like any other glyph, and
+walkability and `on_walked_on` see it like anything else on its cell. It sets
+`blocks_movement`; so does the player. (Spells and `Heat` are `mob.*` too, but
+real-time and deliberately outside the maze inventory.)
+
+Turns are driven by the dungeon master. A successful player step ends with
+`dm.end_turn()`, which calls `monster.take_turn(dm)` once for each monster on
+the *player's* level, in `scene.monsters` order; monsters elsewhere stay
+frozen. A turn asks the monster's `behaviour` for a step and requests it:
+
+```python
+step = self.behaviour.choose_step(self, dm)      # (dx, dy) or None
+dm.request_monster_move(self, (x + dx, y + dy))  # refused unless dm.walkable
+```
+
+Behaviours (`Idle`, `Wander`) only choose; the dungeon master decides.
+`dm.walkable(pos, maze)` checks bounds, terrain, and every blocker on the cell.
+Because the player blocks its own cell, walking straight into a wall is refused
+rather than becoming an in-place move that spends a turn.
+
 ## HUD (`carriage_return/hud.py`, game-side)
 
 Every fixed text panel — console, stats bar, info box — is a screen-space

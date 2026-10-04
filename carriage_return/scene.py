@@ -134,8 +134,9 @@ class Scene(Entity):
         # track all items
         self.items = []
 
-        # track monsters by location
-        self.monsters = {}
+        # track all monsters, in the order they act (see DungeonMaster.end_turn);
+        # where each one stands is its own location, not a key here
+        self.monsters = []
 
         # the multi-level world, installed by set_world(). Until then the scene
         # runs on a single unnamed maze, which is what the tests and the
@@ -282,10 +283,8 @@ class Scene(Entity):
             for percept in item.percepts:
                 self.perceive(percept, self._player)
 
-    def monster_moved(self, mon, old_pos):
-        if old_pos is not None:
-            self.monsters[tuple(old_pos)].remove(mon)
-        self.monsters.setdefault(tuple(mon.position), []).append(mon)
+    def add_monster(self, monster):
+        self.monsters.append(monster)
 
     def add_item(self, item):
         self.items.append(item)
