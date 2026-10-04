@@ -185,6 +185,17 @@ losing sight of a wall never brightens it. `display_value` and its GLSL twin
 live together in `tone_mapping.py`. A terminal backend could threshold the
 same fields into visible/remembered/dark.
 
+Out of sight need not mean black. `Level.unseen_brightness` (0 by default;
+0.3 at home, which is open daylight) floors the reflected light of sprite
+layers with `shows_unseen` set -- only `scenery`, the map itself -- at that
+fraction, so the ground behind a building reads as shade; roofs use the same
+floor. Layers without it (`items`, which holds portals too, and `actors`)
+are not drawn at all out of sight, rather than drawn black, so nothing gives
+their position away. The vispy backend does this with two sprite visuals,
+one per kind of layer, each with its own `TextureMaskFilter`
+(`set_unseen_brightness` / `set_unseen_coverage`). Emission and memory are
+unaffected: a glow is still gated by line of sight alone.
+
 ### Roofs (`level.roofs`)
 
 A list of `terrain.roofs.Roof`, one per building (home only, for now): the

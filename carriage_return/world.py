@@ -144,6 +144,14 @@ class Level:
         self.min_adapt_luminance = None
         self.max_adapt_luminance = None
 
+        # How brightly the parts of the map out of the player's line of sight
+        # are still drawn, as a fraction of their lit brightness: 0 draws them
+        # black (only remembered walls show), a level open to the sky can set
+        # more so the ground behind a building reads as shade. Applies only to
+        # sprite layers that show unseen (the map, not what lies on it -- see
+        # SpriteLayer.shows_unseen) and to roofs.
+        self.unseen_brightness = 0.0
+
     def clear_line_of_sight(self):
         """Nothing on this level is in sight; the viewer has gone elsewhere.
 

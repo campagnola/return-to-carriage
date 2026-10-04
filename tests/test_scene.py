@@ -157,3 +157,13 @@ def test_game_model_is_headless():
         capture_output=True, text=True)
     assert result.returncode == 0, result.stdout + result.stderr
     assert 'OK' in result.stdout
+
+
+def test_only_the_map_shows_out_of_sight():
+    """Scenery stays visible, dimmed, out of sight; items, portals and actors
+    are hidden until seen."""
+    scene = Scene()
+    layers = scene.sprite_layers
+    assert layers['scenery'].shows_unseen
+    assert not layers['items'].shows_unseen
+    assert not layers['actors'].shows_unseen

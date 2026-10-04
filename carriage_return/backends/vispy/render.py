@@ -14,7 +14,8 @@ import time
 import numpy as np
 import vispy.scene, vispy.gloo
 
-from .graphics import CharAtlas, Roof, SpritesVisual, TextureMaskFilter, ShadowRenderer
+from .graphics import (_DEFAULT_EXPOSURE, CharAtlas, Roof, SpritesVisual, TextureMaskFilter,
+                       ShadowRenderer)
 
 
 #: Seconds a roof takes to fade fully out as the player walks in under it, or
@@ -53,9 +54,16 @@ LayerSprites = vispy.scene.visuals.create_visual_node(LayerSpritesVisual)
 
 
 class VispyLayerRenderer(object):
-    """Draws a GlyphRegistry + SpriteLayers using a single Sprites visual.
+    """Draws a GlyphRegistry + SpriteLayers using two Sprites visuals.
 
-    Each layer maps to one SpriteData region in the visual; regions are
+    Layers that show unseen (``layer.shows_unseen``, the map) go in one visual
+    and the rest in another, so each can carry its own sight filter: only the
+    first is drawn, dimmed, out of the player's sight. ``visuals`` lists them
+    in draw order as ``(visual, shows_unseen)``; the shows-unseen visual draws
+    first and its pre-draw syncs every layer, so both visuals draw one frame's
+    positions.
+
+    Each layer maps to one SpriteData region in its visual; regions are
     created lazily (a layer that never gains sprites is never uploaded) and
     resized when the layer's sprite count changes. Depth ordering between
     layers comes from the z coordinate of sprite positions, exactly as it did
@@ -69,9 +77,16 @@ class VispyLayerRenderer(object):
         self._glyphs_version = None
         self._n_chars_synced = 0
 
-        self.txt = LayerSprites(self.atlas, sprite_size=(1, 1), point_cs='visual',
-                                parent=ui.view.scene)
-        self.txt._layer_sync = self.sync
+        self.visuals = []
+        self._visual_for = {}
+        for order, shows_unseen in enumerate((True, False)):
+            visual = LayerSprites(self.atlas, sprite_size=(1, 1), point_cs='visual',
+                                  parent=ui.view.scene)
+            visual.order = order - 2   # in this order, and below the roofs (order 1)
+            self.visuals.append((visual, shows_unseen))
+            self._visual_for[shows_unseen] = visual
+        self.first_visual = self.visuals[0][0]
+        self.first_visual._layer_sync = self.sync
 
         self._regions = {layer.name: None for layer in self.layers}
         self._synced_versions = {layer.name: None for layer in self.layers}
@@ -118,7 +133,7 @@ class VispyLayerRenderer(object):
             if region is None:
                 if len(layer) == 0:
                     continue
-                region = self.txt.add_sprites((len(layer),))
+                region = self._visual_for[layer.shows_unseen].add_sprites((len(layer),))
                 self._regions[layer.name] = region
             elif len(region) != len(layer):
                 region.set_shape((len(layer),))
@@ -145,7 +160,9 @@ class VispySceneRenderer(object):
     - uploads the level's ``light`` and ``memory_overlay`` FieldLayers to two
       textures (each only when its version changed) and applies them to the
       sprites as a mask filter that gates reflection/emission by line of sight
-      and composites memory with ``max``
+      and composites memory with ``max``; the visual drawing the layers that
+      show unseen gets the level's ``unseen_brightness``, so the map stays
+      visible, dimmed, out of sight
     - draws the level's roofs over the sprites, easing each one's opacity
       toward transparent while the player is under it (see _sync_roofs)
 
@@ -167,7 +184,6 @@ class VispySceneRenderer(object):
         self.scene = scene
 
         self.layer_renderer = VispyLayerRenderer(ui, scene.glyphs, list(scene.sprite_layers.values()))
-        self.txt = self.layer_renderer.txt
 
         # the Level this renderer is currently set up for. Captured once by
         # _rebuild_for_level and read by every draw; the renderer never asks
@@ -177,7 +193,9 @@ class VispySceneRenderer(object):
 
         self.light_texture = None
         self.memory_texture = None
-        self.sight_filter = None
+        # (visual, its TextureMaskFilter), one per layer-renderer visual
+        self.sight_filters = []
+        self._exposure = None
         # [roof, its Roof node, the node's current opacity] for each of the
         # captured level's roofs
         self._roofs = []
@@ -202,7 +220,7 @@ class VispySceneRenderer(object):
         # drive the per-frame field update from the sprite visual's pre-draw,
         # immediately after the glyphs are latched (see _prepare_draw), so the
         # glyph and its light are always read for the same frame position.
-        self.txt._field_sync = self._sync_fields
+        self.layer_renderer.first_visual._field_sync = self._sync_fields
 
     def _rebuild_for_level(self):
         """Re-create the maze-sized GL resources for the scene's current level.
@@ -221,8 +239,9 @@ class VispySceneRenderer(object):
                                           supersample=level.supersample)
 
         # light and memory fields -> textures, masking the sprites visual
-        if self.sight_filter is not None:
-            self.txt.detach(self.sight_filter)
+        for visual, sight_filter in self.sight_filters:
+            visual.detach(sight_filter)
+        self.sight_filters = []
 
         ms = level.maze.shape
         # Light: RGBA float, rgb carry raw linear HDR illuminance (may exceed 1,
@@ -239,10 +258,20 @@ class VispySceneRenderer(object):
         # The tone map that turns these into displayable color, and the gating
         # of reflection/emission by line of sight, live in TextureMaskFilter
         # (per fragment).
-        tr = self.txt.transforms.get_transform('framebuffer', 'visual')
-        self.sight_filter = TextureMaskFilter(self.light_texture, self.memory_texture, tr,
-                                              scale=(1./ms[1], 1./ms[0]))
-        self.txt.attach(self.sight_filter)
+        for visual, shows_unseen in self.layer_renderer.visuals:
+            tr = visual.transforms.get_transform('framebuffer', 'visual')
+            sight_filter = TextureMaskFilter(self.light_texture, self.memory_texture, tr,
+                                             scale=(1./ms[1], 1./ms[0]))
+            if shows_unseen:
+                sight_filter.set_unseen_brightness(level.unseen_brightness)
+            else:
+                # out of sight these are not drawn at all, so the dimmed map
+                # shows through where they stand (see TextureMaskFilter)
+                sight_filter.set_unseen_coverage(0.0)
+            if self._exposure is not None:
+                sight_filter.set_exposure(self._exposure)
+            visual.attach(sight_filter)
+            self.sight_filters.append((visual, sight_filter))
 
         # roofs, lit from the new light texture; ordered after the sprites so
         # they draw over them
@@ -251,7 +280,8 @@ class VispySceneRenderer(object):
         self._roofs = []
         for roof in level.roofs:
             node = Roof(roof.building, roof.albedo, self.light_texture, ms,
-                        roof.albedo_luminance, parent=self.ui.view.scene)
+                        roof.albedo_luminance, level.unseen_brightness,
+                        parent=self.ui.view.scene)
             node.order = 1
             self._roofs.append([roof, node, 0.0 if roof.open else 1.0])
 
@@ -289,7 +319,9 @@ class VispySceneRenderer(object):
         # off on the GPU and only memory shows.
         player = self.scene.player
         if player is not None:
-            self.sight_filter.set_exposure(player.adaptation.exposure)
+            self._exposure = player.adaptation.exposure
+            for _, sight_filter in self.sight_filters:
+                sight_filter.set_exposure(self._exposure)
             # Adaptation is time-based, so it must keep advancing even when the
             # player stands still and nothing else marks the canvas dirty. While
             # the eye is still settling, ask for another frame; this self-limits
@@ -320,7 +352,7 @@ class VispySceneRenderer(object):
         fade is time-based, so while any roof is still fading this asks for
         another frame; once all have arrived the scene goes idle again.
         """
-        exposure = self.sight_filter.fshader['exposure'].value
+        exposure = self._exposure if self._exposure is not None else _DEFAULT_EXPOSURE
         step = dt / ROOF_FADE_TIME
         for entry in self._roofs:
             roof, node, opacity = entry

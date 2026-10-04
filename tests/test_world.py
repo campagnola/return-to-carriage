@@ -1,4 +1,6 @@
 """Levels, portals, and travelling between them."""
+import os
+
 import numpy as np
 import pytest
 
@@ -860,3 +862,16 @@ def test_flashes_of_light_from_a_fixed_spot_are_each_a_new_sighting():
         assert not mem.in_view.any()
     assert retentions[0] < retentions[1] < retentions[2]
 
+
+
+def test_only_home_shows_its_unseen_map():
+    """Home is open daylight, so what is out of sight is shade, not darkness;
+    the levels underground stay dark out of sight."""
+    os.chdir(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    scene = Scene()
+    world = build_world(scene)
+    assert world.levels['home'].unseen_brightness == level_001_home.HOME_UNSEEN_BRIGHTNESS
+    assert 0 < level_001_home.HOME_UNSEEN_BRIGHTNESS < 1
+    for name, level in world.levels.items():
+        if name != 'home':
+            assert level.unseen_brightness == 0, name

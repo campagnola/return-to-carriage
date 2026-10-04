@@ -96,7 +96,12 @@ class Scene(Entity):
 
         # game-owned render layers: the bridge between game state and renderers
         self.glyphs = GlyphRegistry()
-        self.sprite_layers = {name: SpriteLayer(name) for name in ('scenery', 'items', 'actors')}
+        # only the map itself shows, dimmed, out of sight (see SpriteLayer)
+        self.sprite_layers = {
+            'scenery': SpriteLayer('scenery', shows_unseen=True),
+            'items': SpriteLayer('items'),
+            'actors': SpriteLayer('actors'),
+        }
 
         # screen-space CharGridLayers (menus, pagers, console/HUD text); a
         # backend renders each entry generically, in list order

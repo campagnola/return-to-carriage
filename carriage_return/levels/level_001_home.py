@@ -25,6 +25,11 @@ from ..world import Level
 #: read brighter. Tunable in the visual pass.
 HOME_ADAPT_LUMINANCE = 5000.0
 
+#: How brightly home's ground and buildings out of the player's sight are drawn,
+#: as a fraction of their lit brightness (see Level.unseen_brightness): it is
+#: broad daylight, so what lies behind a building is in shade, not darkness.
+HOME_UNSEEN_BRIGHTNESS = 0.3
+
 #: 'start', 'hole' and 'dungeon_stairs' all sit in the top-left corner (x<31,
 #: y<31); the town is kept well clear of that corner so it never overwrites them.
 PATH_WIDTH = 2
@@ -216,6 +221,7 @@ def build_level(scene):
     # floor (see HOME_ADAPT_LUMINANCE). Equal bounds pin it; leaving the eye
     # daylight-adapted here is what makes the first moment down the hole dark.
     level.min_adapt_luminance = level.max_adapt_luminance = HOME_ADAPT_LUMINANCE
+    level.unseen_brightness = HOME_UNSEEN_BRIGHTNESS
 
     # The even wash of daylight through the roof. A map light: it belongs to the
     # room, not to anything that moves, and needs no scene -- it announces any
