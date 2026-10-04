@@ -3,6 +3,7 @@
 from ..entity import Entity
 from ..location import Location
 from ..sprite import SingleCharSprite
+from ..stats import Stats
 from .behaviour import Idle
 
 
@@ -37,6 +38,7 @@ class Monster(Entity):
         Entity.__init__(self, entity_type='mob.monster.' + self.name, obj_name=obj_name)
         self.scene = scene
         self.behaviour = behaviour if behaviour is not None else Idle()
+        self.stats = Stats(self)
 
         self.location = Location(self, None, None)
         # zval matches items (-0.1); the player (-0.2) draws on top of both

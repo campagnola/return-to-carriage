@@ -8,12 +8,15 @@ class Inventory(Component):
     - Items in maze
     - Monster inventory
     - Container contents
+
+    The weight limit is not the inventory's own: it is the owner's carry
+    capacity (see :class:`.stats.Stats`), so an owner without stats -- a
+    maze, an item -- has no weight limit.
     """
-    def __init__(self, entity, slot_type=None, max_weight=None, max_length=None, allowed_slots=None):
+    def __init__(self, entity, slot_type=None, max_length=None, allowed_slots=None):
         Component.__init__(self, entity, component_type='inventory')
         self.entity = entity
         self.slot_type = slot_type or (lambda x: x)
-        self.max_weight = max_weight
         self.max_length = max_length
         self.allowed_slots = allowed_slots
         self.slots = {}
@@ -66,6 +69,12 @@ class Inventory(Component):
         slot = self.slot_type(slot)
         assert self.has_slot(slot)
         return self.slots.get(slot, [])
+
+    @property
+    def max_weight(self):
+        """The owner's carry capacity, or None if the owner has no stats."""
+        stats = getattr(self.entity, 'stats', None)
+        return None if stats is None else stats.carry_capacity
 
     @property
     def weight(self):
