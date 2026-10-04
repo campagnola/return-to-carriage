@@ -3,7 +3,8 @@ import numpy as np
 from carriage_return.blocktypes import BlockTypes
 from carriage_return.levels import level_001_home
 from carriage_return.maze import Maze
-from carriage_return.terrain import Building, plain_roof, thatched_roof
+from carriage_return.terrain import (
+    RIDGE_EAST_WEST, STRAW_HUES, Building, plain_roof, straw_color, thatched_roof)
 from carriage_return.terrain.buildings import place_building
 from carriage_return.tone_mapping import LUMINANCE_WEIGHTS
 
@@ -111,3 +112,68 @@ def test_thatched_roof_is_seeded():
     a2 = thatched_roof(b, np.random.RandomState(3)).albedo
     a3 = thatched_roof(b, np.random.RandomState(4)).albedo
     assert (a1 == a2).all() and not (a1 == a3).all()
+
+
+def test_east_west_ridge_has_a_light_south_slope_and_strands_running_north_south():
+    b = Building(0, 0, 9, 7)
+    roof = thatched_roof(b, np.random.RandomState(2), ridge=RIDGE_EAST_WEST)
+    res = roof.texels_per_cell
+    assert roof.albedo.shape == (7 * res, 9 * res, 4)
+
+    lum = roof.albedo[..., :3] @ LUMINANCE_WEIGHTS
+    ridge = lum.shape[0] // 2
+    south, north = lum[:ridge], lum[ridge:]   # row 0 is the footprint's south edge
+    assert south.mean() > 1.2 * north.mean()
+
+    inner = south[1:-2, 1:-1]
+    along = np.abs(np.diff(inner, axis=0)).mean()   # down the slope
+    across = np.abs(np.diff(inner, axis=1)).mean()  # from strand to strand
+    assert across > 2 * along
+
+
+def test_unknown_ridge_is_rejected():
+    import pytest
+    with pytest.raises(ValueError):
+        thatched_roof(Building(0, 0, 8, 6), np.random.RandomState(0), ridge='diagonal')
+
+
+def test_straw_hues():
+    rgb = (1.15, 0.80, 0.26)
+    assert np.allclose(straw_color(rgb, 'tan'), rgb)
+
+    def saturation(c):
+        return c.max() - c.min()
+    assert saturation(straw_color(rgb, 'weathered')) < 0.6 * saturation(straw_color(rgb, 'tan'))
+    assert (straw_color(rgb, 'bleached') @ LUMINANCE_WEIGHTS
+            > straw_color(rgb, 'tan') @ LUMINANCE_WEIGHTS)
+
+    # every hue still thatches with straw: red over green over blue, both slopes
+    b = Building(0, 0, 8, 6)
+    means = {}
+    for hue in STRAW_HUES:
+        a = thatched_roof(b, np.random.RandomState(0), hue=hue).albedo[..., :3]
+        r, g, bl = a.reshape(-1, 3).mean(axis=0)
+        assert r > g > bl
+        means[hue] = a.mean(axis=(0, 1))
+    # and no two hues look alike
+    hues = list(means)
+    for i, h1 in enumerate(hues):
+        for h2 in hues[i + 1:]:
+            assert np.abs(means[h1] - means[h2]).max() > 0.03, (h1, h2)
+
+
+def test_home_ridges_some_roofs_east_west():
+    buildings = [Building(0, 0, 8, 6) for _ in range(60)]
+    roofs = level_001_home.thatch_roofs(buildings, np.random.RandomState(0))
+    east_west = sum(_ridge_is_east_west(r) for r in roofs)
+    assert 0.15 * len(roofs) < east_west < 0.6 * len(roofs)
+
+
+def _ridge_is_east_west(roof):
+    """True if the light/dark slopes split the roof south/north rather than
+    west/east."""
+    lum = roof.albedo[..., :3] @ LUMINANCE_WEIGHTS
+    rows, cols = lum.shape
+    by_rows = abs(lum[:rows // 2].mean() - lum[rows // 2:].mean())
+    by_cols = abs(lum[:, :cols // 2].mean() - lum[:, cols // 2:].mean())
+    return by_rows > by_cols

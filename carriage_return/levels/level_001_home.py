@@ -28,6 +28,14 @@ HOME_ADAPT_LUMINANCE = 5000.0
 #: y<31); the town is kept well clear of that corner so it never overwrites them.
 PATH_WIDTH = 2
 
+#: Chance each of the town's thatched roofs is ridged east-west rather than
+#: north-south.
+EAST_WEST_RIDGE_CHANCE = 0.35
+
+#: How often each straw hue (see terrain.STRAW_HUES) thatches a roof, as
+#: relative weights: mostly ordinary tan, with the rest for variety.
+ROOF_STRAW_HUES = {'tan': 3, 'golden': 2, 'wheat': 2, 'weathered': 2, 'bleached': 1}
+
 
 def paint_town(maze, bt, seed=None, start=True):
     """Paint a river, two dirt paths, a bridge, a handful of ruined buildings,
@@ -168,6 +176,22 @@ def paint_town(maze, bt, seed=None, start=True):
     return river, town_center, buildings
 
 
+def thatch_roofs(buildings, rng):
+    """A thatched roof for each of *buildings*: most ridged north-south, some
+    east-west (see EAST_WEST_RIDGE_CHANCE), each of a straw hue drawn from
+    ROOF_STRAW_HUES."""
+    hues = list(ROOF_STRAW_HUES)
+    weights = np.array(list(ROOF_STRAW_HUES.values()), dtype=float)
+    weights /= weights.sum()
+    roofs = []
+    for building in buildings:
+        ridge = (terrain.RIDGE_EAST_WEST if rng.uniform() < EAST_WEST_RIDGE_CHANCE
+                 else terrain.RIDGE_NORTH_SOUTH)
+        hue = hues[rng.choice(len(hues), p=weights)]
+        roofs.append(terrain.thatched_roof(building, rng, ridge=ridge, hue=hue))
+    return roofs
+
+
 def build_level(scene):
     """Build the home level and record its named cells."""
     bt = scene.world.blocktypes
@@ -183,8 +207,7 @@ def build_level(scene):
 
     # A thatched roof over every building, hiding its insides until the
     # player walks in.
-    roof_rng = np.random.RandomState()
-    level.roofs = [terrain.thatched_roof(b, roof_rng) for b in buildings]
+    level.roofs = thatch_roofs(buildings, np.random.RandomState())
 
     # Home holds the eye at a fixed daylight exposure rather than sampling its
     # floor (see HOME_ADAPT_LUMINANCE). Equal bounds pin it; leaving the eye

@@ -190,7 +190,8 @@ same fields into visible/remembered/dark.
 A list of `terrain.roofs.Roof`, one per building (home only, for now): the
 building's footprint plus an RGBA albedo texture (`ROOF_TEXELS_PER_CELL` = 8
 texels per cell; `thatched_roof` paints straw strands down each slope of a
-north-south ridge). `Level.update_sight` refreshes three per-roof facts each
+north-south or east-west ridge, in one of the `STRAW_HUES`; home picks both
+per building, see `level_001_home.thatch_roofs`). `Level.update_sight` refreshes three per-roof facts each
 frame: `open` (the player stands in the footprint), `seen` (max line of sight
 over the footprint -- walls in view mean the roof is in view) and
 `remembered` (max memory over it, so a roof fades from memory with its
