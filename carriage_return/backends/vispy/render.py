@@ -14,7 +14,13 @@ import time
 import numpy as np
 import vispy.scene, vispy.gloo
 
-from .graphics import CharAtlas, SpritesVisual, TextureMaskFilter, ShadowRenderer
+from .graphics import CharAtlas, Roof, SpritesVisual, TextureMaskFilter, ShadowRenderer
+
+
+#: Seconds a roof takes to fade fully out as the player walks in under it, or
+#: back in as they leave. Cosmetic, so it lives with the renderer: the game
+#: only says whether a roof is open (see terrain.roofs.Roof).
+ROOF_FADE_TIME = 0.4
 
 
 class LayerSpritesVisual(SpritesVisual):
@@ -140,6 +146,8 @@ class VispySceneRenderer(object):
       textures (each only when its version changed) and applies them to the
       sprites as a mask filter that gates reflection/emission by line of sight
       and composites memory with ``max``
+    - draws the level's roofs over the sprites, easing each one's opacity
+      toward transparent while the player is under it (see _sync_roofs)
 
     The sight update runs from the sprite visual's _prepare_draw, right after
     the glyph positions are latched, so a frame draws the glyph and the light
@@ -170,6 +178,9 @@ class VispySceneRenderer(object):
         self.light_texture = None
         self.memory_texture = None
         self.sight_filter = None
+        # [roof, its Roof node, the node's current opacity] for each of the
+        # captured level's roofs
+        self._roofs = []
         self._light_version = None
         self._memory_version = None
         self._last_update_time = None
@@ -233,6 +244,17 @@ class VispySceneRenderer(object):
                                               scale=(1./ms[1], 1./ms[0]))
         self.txt.attach(self.sight_filter)
 
+        # roofs, lit from the new light texture; ordered after the sprites so
+        # they draw over them
+        for _, node, _ in self._roofs:
+            node.parent = None
+        self._roofs = []
+        for roof in level.roofs:
+            node = Roof(roof.building, roof.albedo, self.light_texture, ms,
+                        roof.albedo_luminance, parent=self.ui.view.scene)
+            node.order = 1
+            self._roofs.append([roof, node, 0.0 if roof.open else 1.0])
+
         # force the next field sync to upload into the new textures
         self._light_version = None
         self._memory_version = None
@@ -287,3 +309,25 @@ class VispySceneRenderer(object):
         if memory.version != self._memory_version:
             self.memory_texture.set_data(memory.data[..., np.newaxis])
             self._memory_version = memory.version
+
+        self._sync_roofs(dt)
+
+    def _sync_roofs(self, dt):
+        """Push each roof's state, just refreshed by update_sight, to its node.
+
+        A roof the player is under (``roof.open``) fades out over
+        ROOF_FADE_TIME, and back in once they leave. Like eye adaptation, the
+        fade is time-based, so while any roof is still fading this asks for
+        another frame; once all have arrived the scene goes idle again.
+        """
+        exposure = self.sight_filter.fshader['exposure'].value
+        step = dt / ROOF_FADE_TIME
+        for entry in self._roofs:
+            roof, node, opacity = entry
+            target = 0.0 if roof.open else 1.0
+            if opacity != target:
+                opacity = min(opacity + step, target) if target > opacity else max(opacity - step, target)
+                entry[2] = opacity
+                if opacity != target:
+                    self.ui.mark_dirty()
+            node.set_state(exposure, roof.seen, roof.remembered, opacity)

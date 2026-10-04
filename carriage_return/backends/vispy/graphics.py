@@ -741,6 +741,101 @@ class TextureMaskFilter(object):
         self._visual = None
 
 
+class RoofVisual(vispy.visuals.Visual):
+    """One building's roof: a textured quad over the building's footprint,
+    drawn above the maze sprites.
+
+    The roof's albedo texture is lit by the level's illuminance and
+    tone-mapped exactly like a sprite (the light texture's rgb, the same
+    ``$display_value`` and exposure TextureMaskFilter uses), but gated by the
+    roof's own ``seen`` scalar rather than per-fragment line of sight: from
+    outside a building nothing under its roof is in sight, yet its roof is.
+    Memory composites as ``max(lit, remembered * tint * albedo / key)``, so a
+    roof out of view fades with its walls' memory and keeps its texture.
+    ``opacity`` scales the albedo's coverage; the renderer eases it to 0 while
+    the player is inside.
+
+    Coordinates are maze cells, cell *(x, y)* centred on the integer point,
+    the same as the sprites, so the quad spans ``x0 - 0.5 .. x0 + w - 0.5``.
+    """
+    vertex_shader = """
+        attribute vec2 a_position;
+        attribute vec2 a_texcoord;
+        varying vec2 v_texcoord;
+        varying vec2 v_light_coord;
+
+        void main() {
+            v_texcoord = a_texcoord;
+            v_light_coord = (a_position + 0.5) / $maze_size;
+            gl_Position = $transform(vec4(a_position, 0.0, 1.0));
+        }
+    """
+
+    fragment_shader = """
+        varying vec2 v_texcoord;
+        varying vec2 v_light_coord;
+
+        void main() {
+            vec4 albedo = texture2D($albedo, v_texcoord);
+            vec3 illuminance = texture2D($light, v_light_coord).rgb;
+            vec3 lit = $display_value(albedo.rgb * illuminance * $seen, vec3(0.0), $exposure);
+            vec3 mem = $remembered * $memory_tint * albedo.rgb / $albedo_key;
+            gl_FragColor = vec4(max(lit, mem), albedo.a * $opacity);
+        }
+    """
+
+    def __init__(self, building, albedo, light_texture, maze_shape, albedo_key):
+        vispy.visuals.Visual.__init__(self, vcode=self.vertex_shader,
+                                      fcode=self.fragment_shader)
+        x0, y0 = building.x0 - 0.5, building.y0 - 0.5
+        x1, y1 = x0 + building.w, y0 + building.h
+        # texture row 0 is the footprint's first maze row, so v runs with y
+        self.shared_program['a_position'] = vispy.gloo.VertexBuffer(np.array(
+            [(x0, y0), (x1, y0), (x0, y1), (x1, y1)], dtype='float32'))
+        self.shared_program['a_texcoord'] = vispy.gloo.VertexBuffer(np.array(
+            [(0, 0), (1, 0), (0, 1), (1, 1)], dtype='float32'))
+        self.shared_program.vert['maze_size'] = (float(maze_shape[1]), float(maze_shape[0]))
+
+        frag = self.shared_program.frag
+        frag['albedo'] = vispy.gloo.Texture2D(albedo, format='rgba', internalformat='rgba32f',
+                                              interpolation='linear')
+        frag['light'] = light_texture
+        frag['display_value'] = display_value_function()
+        frag['memory_tint'] = MEMORY_TINT
+        frag['albedo_key'] = float(albedo_key)
+        frag['exposure'] = _DEFAULT_EXPOSURE
+        frag['seen'] = 0.0
+        frag['remembered'] = 0.0
+        frag['opacity'] = 1.0
+        self._bounds = ((x0, x1), (y0, y1))
+
+        self._draw_mode = 'triangle_strip'
+        # drawn after the sprites (see the node's order) and over them
+        # regardless of their z
+        self.set_gl_state(depth_test=False, blend=True,
+                          blend_func=('src_alpha', 'one_minus_src_alpha'))
+
+    def set_state(self, exposure, seen, remembered, opacity):
+        """Push this frame's lighting and fade (cheap uniform sets)."""
+        frag = self.shared_program.frag
+        frag['exposure'] = float(exposure)
+        frag['seen'] = float(seen)
+        frag['remembered'] = float(remembered)
+        frag['opacity'] = float(opacity)
+
+    def _prepare_transforms(self, view):
+        view.view_program.vert['transform'] = view.get_transform()
+
+    def _prepare_draw(self, view):
+        return True
+
+    def _compute_bounds(self, axis, view):
+        return self._bounds[axis] if axis < 2 else (0, 0)
+
+
+Roof = vispy.scene.visuals.create_visual_node(RoofVisual)
+
+
 class ShadowRenderer(object):
     """For computing 2D shadows
     """
