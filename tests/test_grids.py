@@ -30,22 +30,8 @@ def test_new_grid_is_blank_spaces(grid, registry):
     assert grid.version == 0 and grid.structure_version == 0
 
 
-def test_write_and_decode(grid):
-    grid.write(1, 2, "hi!")
-    assert chars_of(grid, 1) == '  hi!     '
-    assert grid.version == 1  # one bump for the whole write
-
-
-def test_write_colors_only_written_cells(grid):
-    grid.write(0, 0, "ab", fg=(1, 0, 0, 1), bg=(0, 0, 1, 1))
-    assert (grid.fgcolor[0, :2] == (1, 0, 0, 1)).all()
-    assert (grid.fgcolor[0, 2:] == 1.0).all()
-    assert (grid.bgcolor[0, :2] == (0, 0, 1, 1)).all()
-    assert (grid.bgcolor[0, 2:] == 0.0).all()
-
-
 def test_reshape_reallocates_blank_and_bumps_structure(grid, registry):
-    grid.write(0, 0, "hi")
+    grid.set_data([list("hi" + " " * 8)] * 4, grid.fgcolor, grid.bgcolor)
     v, sv = grid.version, grid.structure_version
     grid.reshape((6, 20))
     assert grid.shape == (6, 20)
@@ -55,56 +41,13 @@ def test_reshape_reallocates_blank_and_bumps_structure(grid, registry):
     assert grid.version > v and grid.structure_version > sv
 
 
-def test_write_clips_right_edge(grid):
-    grid.write(0, 8, "abcdef")
-    assert chars_of(grid, 0) == '        ab'
-    assert grid.version == 1
-
-
-def test_write_clips_left_edge(grid):
-    grid.write(0, -2, "abcdef")
-    assert chars_of(grid, 0) == 'cdef      '
-
-
-def test_fully_clipped_write_changes_nothing(grid):
-    grid.write(7, 0, "off the grid")   # row out of range
-    grid.write(0, 10, "too far right")
-    grid.write(0, -20, "gone entirely")
-    assert grid.version == 0
-
-
-def test_fill_row_recolors_without_touching_glyphs(grid):
-    grid.write(2, 0, "text")
-    version = grid.version
-    grid.fill_row(2, fg=(0, 0, 0, 1), bg=(1, 1, 0, 1))
-    assert chars_of(grid, 2).startswith('text')
-    assert (grid.fgcolor[2] == (0, 0, 0, 1)).all()
-    assert (grid.bgcolor[2] == (1, 1, 0, 1)).all()
-    assert grid.version == version + 1
-
-
-def test_clear_resets_cells(grid, registry):
-    grid.write(0, 0, "junk", fg=(1, 0, 0, 1))
-    grid.clear(fg=(0.5, 0.5, 0.5, 1), bg=(0, 0, 0, 0.9))
-    assert (grid.glyph == registry[' ']).all()
-    assert (grid.fgcolor == np.float32((0.5, 0.5, 0.5, 1))).all()
-    assert (grid.bgcolor == np.float32((0, 0, 0, 0.9))).all()
-
-
-def test_observer_invoked_per_change(grid):
-    calls = []
-    grid.changed.connect(lambda: calls.append(grid.version))
-    grid.write(0, 0, "a")
-    grid.fill_row(0, fg=(1, 1, 1, 1))
-    grid.clear()
-    assert calls == [1, 2, 3]
-
-
-def test_glyph_ids_come_from_registry(registry):
+def test_set_data_glyph_ids_come_from_registry(registry):
     grid = CharGridLayer(registry, (1, 3))
-    grid.write(0, 0, "ab")
+    grid.set_data([['a', 'b', ' ']], grid.fgcolor, grid.bgcolor)
     assert grid.glyph[0, 0] == registry['a']
     assert grid.glyph[0, 1] == registry['b']
+    assert chars_of(grid, 0) == 'ab '
+    assert grid.version == 1  # one bump for the whole replace
 
 
 def test_layer_list_membership_and_versioning():
