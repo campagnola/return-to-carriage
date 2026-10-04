@@ -153,7 +153,7 @@ def test_set_level_fires_level_changed(scene):
 def test_game_model_is_headless():
     """The game model must run without importing any rendering library."""
     result = subprocess.run(
-        [sys.executable, os.path.join(PROJECT_ROOT, 'agent_helpers', 'check_headless.py')],
+        [sys.executable, os.path.join(PROJECT_ROOT, 'tests', 'headless_check.py')],
         capture_output=True, text=True)
     assert result.returncode == 0, result.stdout + result.stderr
     assert 'OK' in result.stdout

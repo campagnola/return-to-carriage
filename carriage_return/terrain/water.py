@@ -100,7 +100,7 @@ def water_bed_color(depth, bed_albedo=RIVER_BED_ALBEDO,
     bed_albedo = np.asarray(bed_albedo, dtype='float32')
     deep_water_color = np.asarray(deep_water_color, dtype='float32')
     transmission = np.exp(-absorption_rgb * depth[..., np.newaxis])
-    color = bed_albedo * transmission * (1.0 - surface_reflectance) + deep_water_color * (1.0 - transmission)
+    color = (bed_albedo * transmission + deep_water_color * (1.0 - transmission)) * (1.0 - surface_reflectance)
     return color
 
 
@@ -184,8 +184,11 @@ RIVER_CENTERLINE_DEPTH_M = 4.0
 
 #: Assumed physical depth (metres) at the river's edge (WaterBody.depth == 0)
 #: -- a real riverbank doesn't shelve all the way down to nothing, so the
-#: edge is floored at this depth rather than mapping to 0 m.
-RIVER_EDGE_DEPTH_M = 1.0
+#: edge is floored at this depth rather than mapping to 0 m. Kept shallow
+#: enough that the bed's sandy albedo still shows at the banks: red light is
+#: mostly absorbed within ~0.5 m (RIVER_ABSORPTION_RGB), so a deeper floor
+#: would turn even the edge cells blue.
+RIVER_EDGE_DEPTH_M = 0.1
 
 
 def create_river(maze, blocktype_id, rng, start, end, amplitude, wavelength=130, width=4,

@@ -43,7 +43,7 @@ maintaining a hand-written list — new modules are covered automatically),
 importing each one in a subprocess, and asserting no forbidden module ended
 up in `sys.modules`. `tests/test_scene.py::test_game_model_is_headless`
 additionally runs the game model end-to-end (via
-`agent_helpers/check_headless.py`) with a numpy-only visibility provider and
+`tests/headless_check.py`) with a numpy-only visibility provider and
 the real dialog pipeline (reading a scroll opens a pager) with no rendering
 library imported.
 
@@ -337,7 +337,7 @@ A dialog is entirely game state: its display is a screen-space
 dispatcher stack — the `DialogSession` *is* the top handler while it's open.
 Opening a dialog therefore needs no UI and works headless by construction —
 `open_menu(scene, ...)` runs the real pipeline with nothing attached to a
-display (see `tests/test_actions.py`, `agent_helpers/check_headless.py`).
+display (see `tests/test_actions.py`, `tests/headless_check.py`).
 
 ```
 carriage_return/dialogs/
