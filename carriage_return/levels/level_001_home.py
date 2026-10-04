@@ -120,7 +120,7 @@ def paint_town(maze, bt, seed=None, start=True):
 
     # Now that the bridge has drawn over its stretch of the river, the
     # animation can snapshot which cells are still actually showing as river.
-    # river.animate(maze, seed=seed, start=start)
+    river.animate(maze, seed=seed, start=start)
 
     # Town centre: the stretch of the east-west path between the path
     # intersection and the bridge. A handful of ruined buildings line it,
