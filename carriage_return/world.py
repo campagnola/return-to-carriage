@@ -70,6 +70,10 @@ class Level:
         # with the level that owns them, not in the code that wires them.
         self.locations = {}
 
+        # Building roofs drawn over this level (see :mod:`.terrain.roofs`);
+        # their per-frame state is kept current by update_sight.
+        self.roofs = []
+
         # let anything holding a maze find the level it belongs to; this is
         # the hop that lets an entity ask about *its own* level's sight
         maze.level = self
@@ -139,6 +143,14 @@ class Level:
         # does, being lit by the sky rather than the dim floor the window sees.
         self.min_adapt_luminance = None
         self.max_adapt_luminance = None
+
+        # How brightly the parts of the map out of the player's line of sight
+        # are still drawn, as a fraction of their lit brightness: 0 draws them
+        # black (only remembered walls show), a level open to the sky can set
+        # more so the ground behind a building reads as shade. Applies only to
+        # sprite layers that show unseen (the map, not what lies on it -- see
+        # SpriteLayer.shows_unseen) and to roofs.
+        self.unseen_brightness = 0.0
 
     def clear_line_of_sight(self):
         """Nothing on this level is in sight; the viewer has gone elsewhere.
@@ -308,6 +320,10 @@ class Level:
         ``memory_overlay`` is ``memory`` unmasked; the GPU draws
         ``max(lit, memory * tint)``.
 
+        Each of :attr:`roofs` is then told where the player stands and what
+        is in sight and remembered under it (see
+        :meth:`~.terrain.roofs.Roof.update_sight`).
+
         When *player* is not standing on this level the view is fully blocked:
         line of sight is zero, so reflection and emission are gated off on the
         GPU and only the memory shows. That is
@@ -381,6 +397,10 @@ class Level:
         self.light.set_data(light)
 
         self.memory_overlay.set_data(self.memory)
+
+        player_pos = player.location.global_location.slot if watched else None
+        for roof in self.roofs:
+            roof.update_sight(player_pos, los_scalar, self.memory, self.supersample)
 
     def _composite_illuminance(self):
         """Sum this level's light maps into one HDR illuminance field (lux, RGB).

@@ -10,6 +10,7 @@ import numpy as np
 from .. import terrain
 from ..light import AmbientLight
 from ..maze import Maze
+from ..units import CELL_DISPLAY_ASPECT
 from ..world import Level
 
 
@@ -24,19 +25,29 @@ from ..world import Level
 #: read brighter. Tunable in the visual pass.
 HOME_ADAPT_LUMINANCE = 5000.0
 
+#: How brightly home's ground and buildings out of the player's sight are drawn,
+#: as a fraction of their lit brightness (see Level.unseen_brightness): it is
+#: broad daylight, so what lies behind a building is in shade, not darkness.
+HOME_UNSEEN_BRIGHTNESS = 0.2
+
 #: 'start', 'hole' and 'dungeon_stairs' all sit in the top-left corner (x<31,
 #: y<31); the town is kept well clear of that corner so it never overwrites them.
 PATH_WIDTH = 2
+
+#: How often each straw hue (see terrain.STRAW_HUES) thatches a roof, as
+#: relative weights: mostly ordinary tan, with the rest for variety.
+ROOF_STRAW_HUES = {'tan': 3, 'golden': 2, 'wheat': 2, 'weathered': 2, 'bleached': 1}
 
 
 def paint_town(maze, bt, seed=None, start=True):
     """Paint a river, two dirt paths, a bridge, a handful of ruined buildings,
     sandy river banks, lush riverside greenery, and patchy grass colour into
-    home's interior. Returns ``(river, town_center)``: the river's
+    home's interior. Returns ``(river, town_center, buildings)``: the river's
     :class:`~..terrain.water.WaterBody` (with its banks attached as ``.banks``
     and greenery as ``.greenery``, see :func:`~..terrain.water.paint_river_banks`
-    and :func:`~..terrain.water.paint_river_greenery`), and the ``(x, y)`` cell
-    at the middle of the town.
+    and :func:`~..terrain.water.paint_river_greenery`), the ``(x, y)`` cell
+    at the middle of the town, and the :class:`~..terrain.Building` of each
+    building placed, for roofing.
 
     This is home's own placement logic -- where the river runs, where the
     paths run and where they meet, where the bridge crosses, where buildings
@@ -127,6 +138,7 @@ def paint_town(maze, bt, seed=None, start=True):
     # plus a couple more scattered nearby.
     town_x_lo, town_x_hi = sorted((path2_full.center_at(intersection_y), path1_west.hi))
     b_bounds = (x_lo, x_hi), (y_lo, y_hi)
+    buildings = []
     n_along = rng.randint(2, 5)
     for x in np.clip(
             np.linspace(town_x_lo, town_x_hi, n_along + 2)[1:-1]
@@ -134,7 +146,7 @@ def paint_town(maze, bt, seed=None, start=True):
             town_x_lo, town_x_hi).astype(int):
         side = rng.choice((-1, 1))
         cx, cy = path1_west.point_at(x, side * rng.randint(6, 11))
-        terrain.try_place_building(blocks, bt, rng, cx, cy, *b_bounds)
+        buildings.append(terrain.try_place_building(blocks, bt, rng, cx, cy, *b_bounds))
 
     town_cx = (town_x_lo + town_x_hi) // 2
     town_cy = path1_west.center_at(town_cx)
@@ -144,7 +156,8 @@ def paint_town(maze, bt, seed=None, start=True):
         angle = rng.uniform(0, 2 * np.pi)
         cx = town_cx + int(radius * np.cos(angle))
         cy = town_cy + int(radius * np.sin(angle))
-        terrain.try_place_building(blocks, bt, rng, cx, cy, *b_bounds)
+        buildings.append(terrain.try_place_building(blocks, bt, rng, cx, cy, *b_bounds))
+    buildings = [b for b in buildings if b is not None]
 
     # Sandy banks: 0-1 blocks of sand just outside the river's edges, over
     # whatever grass is still exposed now that paths, the bridge and
@@ -162,7 +175,29 @@ def paint_town(maze, bt, seed=None, start=True):
     # above (washes layer, see Maze.wash_bg_color) rather than replacing it.
     terrain.paint_grass_wash(maze, bt, rng)
 
-    return river, town_center
+    return river, town_center, buildings
+
+
+def thatch_roofs(buildings, rng):
+    """A thatched roof for each of *buildings*, its ridge running along the
+    building's longer side as it looks on screen -- cells are drawn
+    CELL_DISPLAY_ASPECT as wide as they are tall -- (either way, at random,
+    on a building that looks square), of a straw hue drawn from
+    ROOF_STRAW_HUES."""
+    hues = list(ROOF_STRAW_HUES)
+    weights = np.array(list(ROOF_STRAW_HUES.values()), dtype=float)
+    weights /= weights.sum()
+    roofs = []
+    for building in buildings:
+        shown_w, shown_h = building.w * CELL_DISPLAY_ASPECT, building.h
+        if np.isclose(shown_w, shown_h):
+            east_west = rng.uniform() < 0.5
+        else:
+            east_west = shown_w > shown_h
+        ridge = terrain.RIDGE_EAST_WEST if east_west else terrain.RIDGE_NORTH_SOUTH
+        hue = hues[rng.choice(len(hues), p=weights)]
+        roofs.append(terrain.thatched_roof(building, rng, ridge=ridge, hue=hue))
+    return roofs
 
 
 def build_level(scene):
@@ -170,7 +205,7 @@ def build_level(scene):
     bt = scene.world.blocktypes
     maze = Maze.filled((100, 300), bt, 'wall', obj_name='home')
     maze.blocks[1:-1, 1:-1] = bt.id_of('grass')
-    river, town_center = paint_town(maze, bt)
+    river, town_center, buildings = paint_town(maze, bt)
 
     level = Level('home', maze)
     level.locations['start'] = (3, 5)             # where the player begins
@@ -178,10 +213,15 @@ def build_level(scene):
     level.locations['dungeon_stairs'] = (30, 30)  # a shortcut down to the dungeon
     level.locations['town'] = town_center         # the town centre, by the bridge
 
+    # A thatched roof over every building, hiding its insides until the
+    # player walks in.
+    level.roofs = thatch_roofs(buildings, np.random.RandomState())
+
     # Home holds the eye at a fixed daylight exposure rather than sampling its
     # floor (see HOME_ADAPT_LUMINANCE). Equal bounds pin it; leaving the eye
     # daylight-adapted here is what makes the first moment down the hole dark.
     level.min_adapt_luminance = level.max_adapt_luminance = HOME_ADAPT_LUMINANCE
+    level.unseen_brightness = HOME_UNSEEN_BRIGHTNESS
 
     # The even wash of daylight through the roof. A map light: it belongs to the
     # room, not to anything that moves, and needs no scene -- it announces any
