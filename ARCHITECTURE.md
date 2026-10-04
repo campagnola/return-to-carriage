@@ -185,6 +185,21 @@ losing sight of a wall never brightens it. `display_value` and its GLSL twin
 live together in `tone_mapping.py`. A terminal backend could threshold the
 same fields into visible/remembered/dark.
 
+### Roofs (`level.roofs`)
+
+A list of `terrain.roofs.Roof`, one per building (home only, for now): the
+building's footprint plus an RGBA albedo texture (`ROOF_TEXELS_PER_CELL` = 8
+texels per cell; `thatched_roof` paints straw strands down each slope of a
+north-south ridge). `Level.update_sight` refreshes three per-roof facts each
+frame: `open` (the player stands in the footprint), `seen` (max line of sight
+over the footprint -- walls in view mean the roof is in view) and
+`remembered` (max memory over it, so a roof fades from memory with its
+walls). The vispy backend draws each roof as a quad (`graphics.RoofVisual`)
+over the sprites, lit by the light texture's illuminance and tone-mapped
+like a sprite but gated by `seen`, not per-fragment line of sight, and eases
+its opacity to 0 over `render.ROOF_FADE_TIME` while `open` -- the fade is
+cosmetic and lives in the renderer; the game only says open or covered.
+
 ## Visibility provider (`scene.visibility`, injected)
 
 The one service the game needs from outside:
