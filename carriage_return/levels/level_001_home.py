@@ -28,10 +28,6 @@ HOME_ADAPT_LUMINANCE = 5000.0
 #: y<31); the town is kept well clear of that corner so it never overwrites them.
 PATH_WIDTH = 2
 
-#: Albedo of the placeholder roofs: one solid colour, standing in until the
-#: roofs get real texture.
-ROOF_TEST_COLOR = (0.55, 0.16, 0.10)
-
 
 def paint_town(maze, bt, seed=None, start=True):
     """Paint a river, two dirt paths, a bridge, a handful of ruined buildings,
@@ -185,8 +181,10 @@ def build_level(scene):
     level.locations['dungeon_stairs'] = (30, 30)  # a shortcut down to the dungeon
     level.locations['town'] = town_center         # the town centre, by the bridge
 
-    # A roof over every building, hiding its insides until the player walks in.
-    level.roofs = [terrain.plain_roof(b, ROOF_TEST_COLOR) for b in buildings]
+    # A thatched roof over every building, hiding its insides until the
+    # player walks in.
+    roof_rng = np.random.RandomState()
+    level.roofs = [terrain.thatched_roof(b, roof_rng) for b in buildings]
 
     # Home holds the eye at a fixed daylight exposure rather than sampling its
     # floor (see HOME_ADAPT_LUMINANCE). Equal bounds pin it; leaving the eye

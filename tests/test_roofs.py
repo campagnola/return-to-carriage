@@ -3,8 +3,9 @@ import numpy as np
 from carriage_return.blocktypes import BlockTypes
 from carriage_return.levels import level_001_home
 from carriage_return.maze import Maze
-from carriage_return.terrain import Building, plain_roof
+from carriage_return.terrain import Building, plain_roof, thatched_roof
 from carriage_return.terrain.buildings import place_building
+from carriage_return.tone_mapping import LUMINANCE_WEIGHTS
 
 
 def test_place_building_returns_its_footprint():
@@ -73,3 +74,40 @@ def test_home_roofs_every_building():
     for b in buildings:
         footprint = maze.blocks[b.y0:b.y0 + b.h, b.x0:b.x0 + b.w]
         assert (footprint != bt.id_of('grass')).all()
+
+
+def test_thatched_roof_has_a_light_west_slope_and_darker_east_slope():
+    b = Building(10, 20, 9, 7)
+    roof = thatched_roof(b, np.random.RandomState(0))
+    res = roof.texels_per_cell
+    assert roof.albedo.shape == (7 * res, 9 * res, 4)
+    assert (roof.albedo[..., 3] == 1).all()
+
+    lum = roof.albedo[..., :3] @ LUMINANCE_WEIGHTS
+    ridge = roof.albedo.shape[1] // 2
+    west, east = lum[:, :ridge], lum[:, ridge:]
+    assert west.mean() > 1.2 * east.mean()
+    # both slopes are straw-coloured: red over green over blue
+    for side in (roof.albedo[:, :ridge, :3], roof.albedo[:, ridge:, :3]):
+        r, g, bl = side.reshape(-1, 3).mean(axis=0)
+        assert r > g > bl
+
+
+def test_thatch_strands_run_down_the_slopes():
+    """Strands run east-west, across the north-south ridge: brightness varies
+    far more from row to row than along a row."""
+    roof = thatched_roof(Building(0, 0, 9, 7), np.random.RandomState(1))
+    lum = roof.albedo[..., :3] @ LUMINANCE_WEIGHTS
+    west = lum[1:-1, 1:lum.shape[1] // 2 - 2]
+    along = np.abs(np.diff(west, axis=1)).mean()
+    across = np.abs(np.diff(west, axis=0)).mean()
+    assert across > 2 * along
+    assert west.std() > 0.03 * west.mean()   # strands vary in brightness
+
+
+def test_thatched_roof_is_seeded():
+    b = Building(0, 0, 8, 6)
+    a1 = thatched_roof(b, np.random.RandomState(3)).albedo
+    a2 = thatched_roof(b, np.random.RandomState(3)).albedo
+    a3 = thatched_roof(b, np.random.RandomState(4)).albedo
+    assert (a1 == a2).all() and not (a1 == a3).all()
