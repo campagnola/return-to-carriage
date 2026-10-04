@@ -9,6 +9,7 @@ from carriage_return.dm import DungeonMaster
 from carriage_return.hud import build_hud
 from carriage_return.game import new_game
 from carriage_return.interpreter import CommandInterpreter
+from carriage_return.monster import MonsterSpawner
 from carriage_return.input import (InputDispatcher, GameplayInputHandler,
                                    CommandInputHandler, start_gamepad)
 
@@ -63,6 +64,9 @@ if __name__ == '__main__':
     # application wiring -- deliberately not in game.py, since the screenshot
     # harness omits all of it
     ui.follow_entity(player)
+
+    # monsters appear as the player moves; random, so the harness leaves it out
+    MonsterSpawner(scene).attach(dm)
 
     interp = CommandInterpreter(scene)
     cmd_input_handler = CommandInputHandler(scene.log, interp)

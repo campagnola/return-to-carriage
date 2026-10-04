@@ -1,3 +1,4 @@
+from .events import Observable
 
 
 class DungeonMaster:
@@ -6,6 +7,9 @@ class DungeonMaster:
     """
     def __init__(self, scene):
         self.scene = scene
+        #: fired with this dungeon master after every player turn, once the
+        #: monsters have acted (see end_turn); a monster spawner listens here
+        self.turn_ended = Observable()
 
     def request_player_move(self, player, newpos):
         """Attempt to move the player to newpos.
@@ -112,8 +116,9 @@ class DungeonMaster:
 
     def end_turn(self):
         """The player's turn is over: every monster on the player's level acts
-        once, in the order the monsters were added. Monsters on other levels
-        wait, frozen, until the player is back with them.
+        once, in the order the monsters were added, then ``turn_ended`` fires.
+        Monsters on other levels wait, frozen, until the player is back with
+        them.
         """
         player = self.scene.player
         level = player.level if player is not None else None
@@ -122,3 +127,4 @@ class DungeonMaster:
         for monster in list(self.scene.monsters):
             if monster.level is level:
                 monster.take_turn(self)
+        self.turn_ended(self)

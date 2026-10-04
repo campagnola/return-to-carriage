@@ -10,3 +10,5 @@ Game-side package: no rendering library may be imported here.
 """
 from .base import Monster
 from .behaviour import Idle, Wander
+from .letter import LETTERS, Letter
+from .spawn import MonsterSpawner

@@ -482,6 +482,14 @@ Behaviours (`Idle`, `Wander`) only choose; the dungeon master decides.
 Because the player blocks its own cell, walking straight into a wall is refused
 rather than becoming an in-place move that spends a turn.
 
+After the monsters act, `end_turn` fires `dm.turn_ended(dm)`. The game
+(`return_to_carriage.py`, not the screenshot harness) attaches a
+`MonsterSpawner` there: every 50–80 turns (re-rolled per spawn) it puts a
+wandering `Letter` monster (a random A–Z/a–z glyph, less `t` and `O`) on the
+player's level, at a random floor cell with nothing on it that is reachable and
+at least 10 horizontal/vertical moves away (`spawn.move_distances`, a BFS over
+walkable terrain). If no cell qualifies, it retries each turn.
+
 ## HUD (`carriage_return/hud.py`, game-side)
 
 Every fixed text panel — console, stats bar, info box — is a screen-space
