@@ -78,13 +78,14 @@ class PagerWidget(Widget):
 
     def repaint(self):
         """Redraw the whole widget from current state (title, current page, footer)."""
-        self.clear(fg=FG, bg=BG)
-        self.write(0, 0, self.title, fg=TITLE_FG)
-        for i, line in enumerate(self.page_text.splitlines()):
-            if 2 + i >= self.nrows - 2:
-                break
-            self.write(2 + i, 0, line)
-        self.write(self.nrows - 1, 0, self._footer(), fg=HINT_FG)
+        with self.batched():
+            self.clear(fg=FG, bg=BG)
+            self.write(0, 0, self.title, fg=TITLE_FG)
+            for i, line in enumerate(self.page_text.splitlines()):
+                if 2 + i >= self.nrows - 2:
+                    break
+                self.write(2 + i, 0, line)
+            self.write(self.nrows - 1, 0, self._footer(), fg=HINT_FG)
 
 
 def run_pager(session, pager):

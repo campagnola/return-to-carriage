@@ -113,17 +113,18 @@ class CastWidget(Widget):
 
     def repaint(self):
         """Redraw the whole widget from current state (phase, text/message)."""
-        self.clear(fg=FG, bg=BG)
-        self.write(0, 0, "Cast a spell", fg=TITLE_FG)
-        if self.phase == 'name':
-            self.write(2, 0, "Spell: " + self.text + "_")
-            hint = "Type a name, Enter to cast, Esc to cancel"
-        else:
-            self.write(2, 0, "%s -- which way?" % self.spell_name.capitalize())
-            hint = "Press an arrow key  (Esc to cancel)"
-        if self.message:
-            self.write(3, 0, self.message, fg=HINT_FG)
-        self.write(self.nrows - 1, 0, hint, fg=HINT_FG)
+        with self.batched():
+            self.clear(fg=FG, bg=BG)
+            self.write(0, 0, "Cast a spell", fg=TITLE_FG)
+            if self.phase == 'name':
+                self.write(2, 0, "Spell: " + self.text + "_")
+                hint = "Type a name, Enter to cast, Esc to cancel"
+            else:
+                self.write(2, 0, "%s -- which way?" % self.spell_name.capitalize())
+                hint = "Press an arrow key  (Esc to cancel)"
+            if self.message:
+                self.write(3, 0, self.message, fg=HINT_FG)
+            self.write(self.nrows - 1, 0, hint, fg=HINT_FG)
 
 
 def run_cast(session, prompt):

@@ -22,9 +22,10 @@ class HeaderWidget(Widget):
         self.repaint()
 
     def repaint(self):
-        self.clear()
-        self.write(0, 0, TITLE, fg=TITLE_FG)
-        self.write(0, len(TITLE) + 3, HINT, fg=HINT_FG)
+        with self.batched():
+            self.clear()
+            self.write(0, 0, TITLE, fg=TITLE_FG)
+            self.write(0, len(TITLE) + 3, HINT, fg=HINT_FG)
 
 
 class LogDialog(object):

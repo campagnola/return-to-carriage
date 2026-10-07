@@ -5,8 +5,9 @@ composited zero-copy: a child's ``glyph``/``fgcolor``/``bgcolor`` arrays are
 numpy *views* into its parent's (and transitively the root's) arrays, so a
 child's ``write()`` lands directly in the backing array with no explicit
 copy-up step. Change notification bubbles the same way: each widget's
-``changed`` Observable fires after its own writes, and a parent relays its
-children's ``changed`` through its own (see ``add_child``).
+``changed`` Observable fires after its own writes (once per ``batched()``
+block, for multi-step repaints), and a parent relays its children's
+``changed`` through its own (see ``add_child``).
 
 ``GridLayout`` is a pure geometry helper (Qt ``QGridLayout``/HTML-table
 style) used by ``GridFrame``, the border/layout widget that places children
@@ -19,6 +20,8 @@ tree to one real ``CharGridLayer`` in ``scene.grids``, the only thing a
 rendering backend ever sees. Grids here are small (tens of rows), so a full
 ``set_data()`` replace per repaint is cheap -- no per-cell diffing.
 """
+from contextlib import contextmanager
+
 import numpy as np
 
 from .events import Observable
@@ -52,6 +55,7 @@ class Widget(object):
         self.col_offset = 0
         self.version = 0
         self.changed = Observable()
+        self._batch_depth = 0
         self._realloc(nrows, ncols)
 
     @property
@@ -94,7 +98,25 @@ class Widget(object):
     def _child_changed(self):
         self._changed()
 
+    @contextmanager
+    def batched(self):
+        """Publish a multi-step repaint as one change when the outermost batch exits.
+
+        Inside the block ``_changed()`` is suppressed, so no intermediate
+        (e.g. just-cleared) state is ever published. Batches nest. A block
+        that raises publishes nothing.
+        """
+        self._batch_depth += 1
+        try:
+            yield
+        finally:
+            self._batch_depth -= 1
+        if self._batch_depth == 0:
+            self._changed()
+
     def _changed(self):
+        if self._batch_depth > 0:
+            return
         self.version += 1
         self.changed()
 
@@ -111,7 +133,7 @@ class Widget(object):
         """Write *text* on *row* starting at *col*, clipped to the widget.
 
         *fg*/*bg*, when given, recolor the written cells. One version bump
-        per call; writes that are entirely clipped away change nothing and
+        per call outside a ``batched()`` block; writes that are entirely clipped away change nothing and
         do not bump.
         """
         rows, cols = self.nrows, self.ncols
@@ -357,14 +379,15 @@ class GridFrame(Widget):
 
     def _shape_changed(self):
         layout = self._build_layout()
-        for (widget, _row, _col, _rowspan, _colspan), rect in zip(self._cells, layout.cell_rects):
-            if widget.parent is self:
-                widget._move_to(*rect)
-            else:
-                self.add_child(widget, *rect)
-        self.clear(fg=self.fg, bg=self.bg)
-        for row, col, char in layout.border_cells():
-            self.write(row, col, char, fg=self.border_fg)
+        with self.batched():
+            for (widget, _row, _col, _rowspan, _colspan), rect in zip(self._cells, layout.cell_rects):
+                if widget.parent is self:
+                    widget._move_to(*rect)
+                else:
+                    self.add_child(widget, *rect)
+            self.clear(fg=self.fg, bg=self.bg)
+            for row, col, char in layout.border_cells():
+                self.write(row, col, char, fg=self.border_fg)
 
 
 class WidgetGridLayer(object):

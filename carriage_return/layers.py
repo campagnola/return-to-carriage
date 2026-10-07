@@ -456,10 +456,18 @@ class CharGridLayer(GlyphLayer):
         self._changed(structure=True)
 
     def set_data(self, chars, fgcolor, bgcolor):
-        """Replace the grid's entire contents (compositor use only)."""
-        self.glyph = np.array([[self.registry[c] for c in row] for row in chars], dtype='uint32')
-        self.fgcolor = np.asarray(fgcolor, dtype='float32')
-        self.bgcolor = np.asarray(bgcolor, dtype='float32')
+        """Replace the grid's entire contents (compositor use only).
+
+        *chars* is a 2D array of one-character strings.
+
+        Copies its inputs, so each version is a snapshot the caller's later
+        writes can't reach into.
+        """
+        unique, inverse = np.unique(chars, return_inverse=True)
+        ids = np.array([self.registry[c] for c in unique], dtype='uint32')
+        self.glyph = ids[inverse].reshape(chars.shape)
+        self.fgcolor = np.array(fgcolor, dtype='float32')
+        self.bgcolor = np.array(bgcolor, dtype='float32')
         self._changed()
 
 

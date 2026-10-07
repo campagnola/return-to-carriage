@@ -134,7 +134,7 @@ class ConsoleWidget(Widget):
 
     def repaint(self):
         """Repaint from the log (runs on whatever thread wrote the message)."""
-        with self._lock:
+        with self._lock, self.batched():
             self._repaint()
 
     def _repaint(self):
@@ -193,12 +193,13 @@ class TextWidget(Widget):
         self._paint()
 
     def _paint(self):
-        self.clear()
         lines = []
         for line in self._text.split('\n'):
             lines.extend(wrap(line, self.ncols))
-        for i, line in enumerate(lines[:self.nrows]):
-            self.write(i, 0, line)
+        with self.batched():
+            self.clear()
+            for i, line in enumerate(lines[:self.nrows]):
+                self.write(i, 0, line)
 
 
 class Hud(object):

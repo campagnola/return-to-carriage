@@ -137,14 +137,15 @@ class MenuWidget(Widget):
 
     def repaint(self):
         """Redraw the whole widget from current state (title, items, cursor, hint)."""
-        self.clear(fg=FG, bg=BG)
-        self.write(0, 0, self.title, fg=TITLE_FG)
-        for i, item in enumerate(self.items):
-            row = 2 + i
-            if i == self.cursor:
-                self.fill_row(row, fg=CURSOR_FG, bg=CURSOR_BG)
-            self.write(row, 0, self._item_text(item))
-        self.write(self.nrows - 1, 0, self._hint, fg=HINT_FG)
+        with self.batched():
+            self.clear(fg=FG, bg=BG)
+            self.write(0, 0, self.title, fg=TITLE_FG)
+            for i, item in enumerate(self.items):
+                row = 2 + i
+                if i == self.cursor:
+                    self.fill_row(row, fg=CURSOR_FG, bg=CURSOR_BG)
+                self.write(row, 0, self._item_text(item))
+            self.write(self.nrows - 1, 0, self._hint, fg=HINT_FG)
 
 
 def run_menu(session, menu):
