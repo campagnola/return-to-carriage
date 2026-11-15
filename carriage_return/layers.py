@@ -117,9 +117,17 @@ class SpriteLayer(GlyphLayer):
     Regions are allocated with add_sprites(), which returns a SpriteSlot
     handle used to write position/glyph/color data. All slots share one set
     of contiguous arrays so a backend can upload the layer in one call.
+
+    ``shows_unseen`` says whether the layer's sprites stay visible, dimmed to
+    the level's ``unseen_brightness``, where they are out of the player's line
+    of sight (see :class:`~.world.Level`). True for the map itself, so the
+    ground behind a building reads as shade rather than black; False for
+    anything whose whereabouts sight is meant to reveal -- items, portals,
+    monsters -- which stay hidden until seen.
     """
-    def __init__(self, name=None):
+    def __init__(self, name=None, shows_unseen=False):
         GlyphLayer.__init__(self, name=name)
+        self.shows_unseen = shows_unseen
         self.position = np.empty((0, 3), dtype='float32')
         self.glyph = np.empty((0,), dtype='uint32')
         self.fgcolor = np.empty((0, 4), dtype='float32')

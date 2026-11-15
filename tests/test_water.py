@@ -162,7 +162,7 @@ def test_flow_direction_is_unit_length_on_water_cells():
     bt = BlockTypes()
     maze = Maze.filled((100, 300), bt, 'wall', obj_name='home')
     maze.blocks[1:-1, 1:-1] = bt.id_of('grass')
-    river, _ = level_001_home.paint_town(maze, bt, seed=0, start=False)
+    river, _, _ = level_001_home.paint_town(maze, bt, seed=0, start=False)
 
     mags = np.linalg.norm(river.flow_dir[river.mask], axis=-1)
     assert np.allclose(mags, 1.0)
@@ -191,7 +191,7 @@ def test_bridge_cells_are_simulated_but_never_painted():
     bt = BlockTypes()
     maze = Maze.filled((100, 300), bt, 'wall', obj_name='home')
     maze.blocks[1:-1, 1:-1] = bt.id_of('grass')
-    river, _ = level_001_home.paint_town(maze, bt, seed=0, start=False)
+    river, _, _ = level_001_home.paint_town(maze, bt, seed=0, start=False)
     Level('home', maze)
 
     river_id = bt.id_of('river')
@@ -318,7 +318,7 @@ def test_mask_band_stays_contiguous_per_row_with_variable_width():
     bt = BlockTypes()
     maze = Maze.filled((100, 300), bt, 'wall', obj_name='home')
     maze.blocks[1:-1, 1:-1] = bt.id_of('grass')
-    river, _ = level_001_home.paint_town(maze, bt, seed=0, start=False)
+    river, _, _ = level_001_home.paint_town(maze, bt, seed=0, start=False)
     bridge_id = bt.id_of('bridge')
     assert (maze.blocks == bridge_id).any()
 
@@ -514,7 +514,7 @@ def test_homes_town_has_sandy_banks():
     bt = BlockTypes()
     maze = Maze.filled((100, 300), bt, 'wall', obj_name='home')
     maze.blocks[1:-1, 1:-1] = bt.id_of('grass')
-    river, _ = level_001_home.paint_town(maze, bt, seed=0, start=False)
+    river, _, _ = level_001_home.paint_town(maze, bt, seed=0, start=False)
 
     assert (maze.blocks == bt.id_of('sand')).any()
     assert isinstance(river.banks, RiverBanks)
@@ -648,7 +648,7 @@ def test_homes_town_has_lush_greenery_past_its_banks():
     bt = BlockTypes()
     maze = Maze.filled((100, 300), bt, 'wall', obj_name='home')
     maze.blocks[1:-1, 1:-1] = bt.id_of('grass')
-    river, _ = level_001_home.paint_town(maze, bt, seed=0, start=False)
+    river, _, _ = level_001_home.paint_town(maze, bt, seed=0, start=False)
 
     assert isinstance(river.greenery, RiverGreenery)
     assert len(river.greenery.left) == len(river.path.centerline)

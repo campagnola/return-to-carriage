@@ -6,7 +6,7 @@ map's content -- the scroll, the torches, and the monster.
 """
 from ..item import Scroll, Torch
 from ..maze import Maze
-from ..monster import Monster
+from ..monster import Monster, Wander
 from ..portal import StairsDown, StairsUp
 from ..units import lm
 from ..world import Level
@@ -67,6 +67,6 @@ def build_level(scene):
     # ~5x a standard torch so it throws a wider pool. Tunable in the visual pass.
     torches[0].light.color = (75 * lm, 37.5 * lm, 7.5 * lm)
 
-    Monster(position=(8, 40), scene=scene, maze=maze)
+    Monster(location=(maze, (8, 40)), scene=scene, behaviour=Wander())
 
     return level

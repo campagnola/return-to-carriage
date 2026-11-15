@@ -671,6 +671,20 @@ class TextureMaskFilter(object):
     Memory is composited as ``max(lit, memory * tint)``, so losing sight of a
     texel never brightens it.
 
+    Reflection is gated not by line of sight itself but by
+    ``mix(unseen_brightness, 1, los)``: with the default 0 that is line of
+    sight, and a level that shows its unseen map (see
+    ``Level.unseen_brightness``) sets it on the filter of the visual drawing
+    the layers that show unseen, so they stay visible, dimmed, out of sight.
+    Emission stays gated by line of sight alone -- a glow behind a wall does
+    not show.
+
+    Coverage (alpha) is likewise scaled by ``mix(unseen_coverage, 1, los)``.
+    The default 1 leaves it alone; the visual drawing the layers that do *not*
+    show unseen sets 0, so an item or monster out of sight is not drawn at
+    all rather than drawn black -- its opaque cell background would otherwise
+    blot out the dimmed ground beneath it and give its position away.
+
     Gating on line of sight rather than on local light is the point of the two
     textures: emission rides on the sprite as ``sprite_emission``
     (coverage-scaled linear radiance the sprite shader leaves in a shared
@@ -697,9 +711,12 @@ class TextureMaskFilter(object):
                 float los = lgt.a;
                 float mem = texture2D($memory, tex_pos.xy).r; // display-space memory
                 vec3 albedo = gl_FragColor.rgb;
-                // reflected + emitted, both gated by line of sight
-                vec3 lit = $display_value(albedo * lgt.rgb * los, sprite_emission * los, $exposure);
-                gl_FragColor = vec4(max(lit, mem * $memory_tint), gl_FragColor.a);
+                // reflected (floored at unseen_brightness) + emitted, both
+                // gated by line of sight
+                float shown = mix($unseen_brightness, 1.0, los);
+                vec3 lit = $display_value(albedo * lgt.rgb * shown, sprite_emission * los, $exposure);
+                float coverage = gl_FragColor.a * mix($unseen_coverage, 1.0, los);
+                gl_FragColor = vec4(max(lit, mem * $memory_tint), coverage);
             }
         """)
         self.fshader['light'] = light_texture
@@ -710,6 +727,8 @@ class TextureMaskFilter(object):
         # player's adaptation) is valid; see _DEFAULT_EXPOSURE.
         self.fshader['exposure'] = _DEFAULT_EXPOSURE
         self.fshader['memory_tint'] = MEMORY_TINT
+        self.fshader['unseen_brightness'] = 0.0
+        self.fshader['unseen_coverage'] = 1.0
         self.scale_tr = STTransform(scale=scale) * STTransform(translate=(0.5, 0.5))
         self.fshader['transform'] = self.scale_tr * transform
         
@@ -722,6 +741,14 @@ class TextureMaskFilter(object):
     def set_exposure(self, value):
         """Set the Reinhard exposure scalar (key / adaptation_luminance)."""
         self.fshader['exposure'] = float(value)
+
+    def set_unseen_brightness(self, value):
+        """Set how brightly out-of-sight texels still reflect (0..1)."""
+        self.fshader['unseen_brightness'] = float(value)
+
+    def set_unseen_coverage(self, value):
+        """Set how much of an out-of-sight texel's coverage is kept (0..1)."""
+        self.fshader['unseen_coverage'] = float(value)
 
     def _attach(self, visual):
         self._visual = visual
@@ -739,6 +766,105 @@ class TextureMaskFilter(object):
             visual._get_hook('frag', 'post').remove(self._fshader_expr)
             self._fshader_expr = None
         self._visual = None
+
+
+class RoofVisual(vispy.visuals.Visual):
+    """One building's roof: a textured quad over the building's footprint,
+    drawn above the maze sprites.
+
+    The roof's albedo texture is lit by the level's illuminance and
+    tone-mapped exactly like a sprite (the light texture's rgb, the same
+    ``$display_value`` and exposure TextureMaskFilter uses), but gated by the
+    roof's own ``seen`` scalar rather than per-fragment line of sight: from
+    outside a building nothing under its roof is in sight, yet its roof is.
+    Like the map, an unseen roof is still drawn at ``unseen_brightness``.
+    Memory composites as ``max(lit, remembered * tint * albedo / key)``, so a
+    roof out of view fades with its walls' memory and keeps its texture.
+    ``opacity`` scales the albedo's coverage; the renderer eases it to 0 while
+    the player is inside.
+
+    Coordinates are maze cells, cell *(x, y)* centred on the integer point,
+    the same as the sprites, so the quad spans ``x0 - 0.5 .. x0 + w - 0.5``.
+    """
+    vertex_shader = """
+        attribute vec2 a_position;
+        attribute vec2 a_texcoord;
+        varying vec2 v_texcoord;
+        varying vec2 v_light_coord;
+
+        void main() {
+            v_texcoord = a_texcoord;
+            v_light_coord = (a_position + 0.5) / $maze_size;
+            gl_Position = $transform(vec4(a_position, 0.0, 1.0));
+        }
+    """
+
+    fragment_shader = """
+        varying vec2 v_texcoord;
+        varying vec2 v_light_coord;
+
+        void main() {
+            vec4 albedo = texture2D($albedo, v_texcoord);
+            vec3 illuminance = texture2D($light, v_light_coord).rgb;
+            float shown = mix($unseen_brightness, 1.0, $seen);
+            vec3 lit = $display_value(albedo.rgb * illuminance * shown, vec3(0.0), $exposure);
+            vec3 mem = $remembered * $memory_tint * albedo.rgb / $albedo_key;
+            gl_FragColor = vec4(max(lit, mem), albedo.a * $opacity);
+        }
+    """
+
+    def __init__(self, building, albedo, light_texture, maze_shape, albedo_key,
+                 unseen_brightness=0.0):
+        vispy.visuals.Visual.__init__(self, vcode=self.vertex_shader,
+                                      fcode=self.fragment_shader)
+        x0, y0 = building.x0 - 0.5, building.y0 - 0.5
+        x1, y1 = x0 + building.w, y0 + building.h
+        # texture row 0 is the footprint's first maze row, so v runs with y
+        self.shared_program['a_position'] = vispy.gloo.VertexBuffer(np.array(
+            [(x0, y0), (x1, y0), (x0, y1), (x1, y1)], dtype='float32'))
+        self.shared_program['a_texcoord'] = vispy.gloo.VertexBuffer(np.array(
+            [(0, 0), (1, 0), (0, 1), (1, 1)], dtype='float32'))
+        self.shared_program.vert['maze_size'] = (float(maze_shape[1]), float(maze_shape[0]))
+
+        frag = self.shared_program.frag
+        frag['albedo'] = vispy.gloo.Texture2D(albedo, format='rgba', internalformat='rgba32f',
+                                              interpolation='linear')
+        frag['light'] = light_texture
+        frag['display_value'] = display_value_function()
+        frag['memory_tint'] = MEMORY_TINT
+        frag['albedo_key'] = float(albedo_key)
+        frag['exposure'] = _DEFAULT_EXPOSURE
+        frag['seen'] = 0.0
+        frag['unseen_brightness'] = float(unseen_brightness)
+        frag['remembered'] = 0.0
+        frag['opacity'] = 1.0
+        self._bounds = ((x0, x1), (y0, y1))
+
+        self._draw_mode = 'triangle_strip'
+        # drawn after the sprites (see the node's order) and over them
+        # regardless of their z
+        self.set_gl_state(depth_test=False, blend=True,
+                          blend_func=('src_alpha', 'one_minus_src_alpha'))
+
+    def set_state(self, exposure, seen, remembered, opacity):
+        """Push this frame's lighting and fade (cheap uniform sets)."""
+        frag = self.shared_program.frag
+        frag['exposure'] = float(exposure)
+        frag['seen'] = float(seen)
+        frag['remembered'] = float(remembered)
+        frag['opacity'] = float(opacity)
+
+    def _prepare_transforms(self, view):
+        view.view_program.vert['transform'] = view.get_transform()
+
+    def _prepare_draw(self, view):
+        return True
+
+    def _compute_bounds(self, axis, view):
+        return self._bounds[axis] if axis < 2 else (0, 0)
+
+
+Roof = vispy.scene.visuals.create_visual_node(RoofVisual)
 
 
 class ShadowRenderer(object):

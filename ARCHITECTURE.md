@@ -43,7 +43,7 @@ maintaining a hand-written list — new modules are covered automatically),
 importing each one in a subprocess, and asserting no forbidden module ended
 up in `sys.modules`. `tests/test_scene.py::test_game_model_is_headless`
 additionally runs the game model end-to-end (via
-`agent_helpers/check_headless.py`) with a numpy-only visibility provider and
+`tests/headless_check.py`) with a numpy-only visibility provider and
 the real dialog pipeline (reading a scroll opens a pager) with no rendering
 library imported.
 
@@ -165,13 +165,54 @@ per maze cell (`scene.field_shape` is authoritative). They live on the
   a = line of sight (0..1).
 - `memory_overlay`: a copy of the CPU-side `Level.memory` (display space),
   non-zero only on wall faces (`Level.wall_face_mask()`):
-  `memory = max(memory, min(seen, MEMORY_MAX) * wall_face_mask) * decay`,
+  `memory = sight_memory.update(now, min(seen, MEMORY_MAX_BRIGHTNESS))`,
   `seen = los * display_value(albedo * E, emission, exposure)`.
+
+Each wall-face texel fades linearly to nothing over its own decay time
+(`sight_memory.py`). A face is in view when `seen >= MEMORY_VISIBLE_THRESHOLD`
+(0.03): line of sight alone is not enough, it must be lit or glowing enough to
+make out. When a face comes back into view -- the rising edge; staying in view
+does not count, but dimming below the threshold and relighting does --
+`retention += 0.4 * age` (`age` is the elapsed fraction of its last decay time)
+and `decay_time = 16 s ** retention`, with retention capped at 4.1 (~24 h). So
+spaced revisits build long-term memory and crammed ones barely do. Fading is
+timestamp based on `World.time` (advanced once per frame by the drawn level):
+levels the player is not on do no work, but the time away still counts when
+they return.
 
 The vispy `TextureMaskFilter` draws `max(lit, memory * MEMORY_TINT)`, so
 losing sight of a wall never brightens it. `display_value` and its GLSL twin
 live together in `tone_mapping.py`. A terminal backend could threshold the
 same fields into visible/remembered/dark.
+
+Out of sight need not mean black. `Level.unseen_brightness` (0 by default;
+0.2 at home, which is open daylight) floors the reflected light of sprite
+layers with `shows_unseen` set -- only `scenery`, the map itself -- at that
+fraction, so the ground behind a building reads as shade; roofs use the same
+floor. Layers without it (`items`, which holds portals too, and `actors`)
+are not drawn at all out of sight, rather than drawn black, so nothing gives
+their position away. The vispy backend does this with two sprite visuals,
+one per kind of layer, each with its own `TextureMaskFilter`
+(`set_unseen_brightness` / `set_unseen_coverage`). Emission and memory are
+unaffected: a glow is still gated by line of sight alone.
+
+### Roofs (`level.roofs`)
+
+A list of `terrain.roofs.Roof`, one per building (home only, for now): the
+building's footprint plus an RGBA albedo texture (`ROOF_TEXELS_PER_CELL` = 8
+texels per cell; `thatched_roof` paints straw strands down each slope of a
+north-south or east-west ridge, in one of the `STRAW_HUES`; home runs each
+ridge along its building's longer side as displayed -- cells are drawn
+`units.CELL_DISPLAY_ASPECT` as wide as tall -- and draws a random hue, see
+`level_001_home.thatch_roofs`). `Level.update_sight` refreshes three per-roof facts each
+frame: `open` (the player stands in the footprint), `seen` (max line of sight
+over the footprint -- walls in view mean the roof is in view) and
+`remembered` (max memory over it, so a roof fades from memory with its
+walls). The vispy backend draws each roof as a quad (`graphics.RoofVisual`)
+over the sprites, lit by the light texture's illuminance and tone-mapped
+like a sprite but gated by `seen`, not per-fragment line of sight, and eases
+its opacity to 0 over `render.ROOF_FADE_TIME` while `open` -- the fade is
+cosmetic and lives in the renderer; the game only says open or covered.
 
 ## Visibility provider (`scene.visibility`, injected)
 
@@ -338,7 +379,7 @@ A dialog is entirely game state: its display is a screen-space
 dispatcher stack — the `DialogSession` *is* the top handler while it's open.
 Opening a dialog therefore needs no UI and works headless by construction —
 `open_menu(scene, ...)` runs the real pipeline with nothing attached to a
-display (see `tests/test_actions.py`, `agent_helpers/check_headless.py`).
+display (see `tests/test_actions.py`, `tests/headless_check.py`).
 
 ```
 carriage_return/dialogs/
@@ -460,6 +501,38 @@ class Scroll(Item):
         return dialogs.open_pager(self.scene, self.description, self.pages)
 ```
 
+## Monsters (`carriage_return/monster/`, game-side)
+
+A `Monster` is an `Entity` (type `mob.monster.<name>`) with a `Location` in a
+maze's inventory and a `SingleCharSprite` on the `actors` layer, so it is lit,
+gated by line of sight and hidden off-level like any other glyph, and
+walkability and `on_walked_on` see it like anything else on its cell. It sets
+`blocks_movement`; so does the player. (Spells and `Heat` are `mob.*` too, but
+real-time and deliberately outside the maze inventory.)
+
+Turns are driven by the dungeon master. A successful player step ends with
+`dm.end_turn()`, which calls `monster.take_turn(dm)` once for each monster on
+the *player's* level, in `scene.monsters` order; monsters elsewhere stay
+frozen. A turn asks the monster's `behaviour` for a step and requests it:
+
+```python
+step = self.behaviour.choose_step(self, dm)      # (dx, dy) or None
+dm.request_monster_move(self, (x + dx, y + dy))  # refused unless dm.walkable
+```
+
+Behaviours (`Idle`, `Wander`) only choose; the dungeon master decides.
+`dm.walkable(pos, maze)` checks bounds, terrain, and every blocker on the cell.
+Because the player blocks its own cell, walking straight into a wall is refused
+rather than becoming an in-place move that spends a turn.
+
+After the monsters act, `end_turn` fires `dm.turn_ended(dm)`. The game
+(`return_to_carriage.py`, not the screenshot harness) attaches a
+`MonsterSpawner` there: every 50–80 turns (re-rolled per spawn) it puts a
+wandering `Letter` monster (a random A–Z/a–z glyph, less `t` and `O`) on the
+player's level, at a random floor cell with nothing on it that is reachable and
+at least 10 horizontal/vertical moves away (`spawn.move_distances`, a BFS over
+walkable terrain). If no cell qualifies, it retries each turn.
+
 ## HUD (`carriage_return/hud.py`, game-side)
 
 Every fixed text panel — console, stats bar, info box — is a screen-space
@@ -558,9 +631,9 @@ ui.follow_entity(player)
 
 - The backend calls `scene.update_sight(dt)` once per rendered frame
   (dt in seconds), from `VispySceneRenderer._on_draw`. LOS recomputes only
-  when the player moved; lighting only when invalidated; memory decays by
-  `MEMORY_DECAY_RATE ** dt` (time-based, equivalent to the historical
-  0.999/frame at 60 fps).
+  when the player moved; lighting only when invalidated; the drawn level
+  advances `World.time` by dt, and memory fades by elapsed time since each
+  wall face was last seen (see `sight_memory.py`).
 - Sprite-layer sync (`VispyLayerRenderer.sync`) is version-gated and runs
   inside the sprites visual's `_prepare_draw`, so it also covers offscreen
   `SceneCanvas.render()` calls, which do not emit `canvas.events.draw`.

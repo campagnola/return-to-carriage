@@ -121,17 +121,18 @@ class Scene(Entity):
     for a light/viewer at a maze position.
     """
 
-    # sight memory decay now lives on the Level (which does the compositing);
-    # kept here as an alias for callers that reach for scene.MEMORY_DECAY_RATE
-    MEMORY_DECAY_RATE = Level.MEMORY_DECAY_RATE
-
     def __init__(self):
         Entity.__init__(self, entity_type='scene')
         self._player = None
 
         # game-owned render layers: the bridge between game state and renderers
         self.glyphs = GlyphRegistry()
-        self.sprite_layers = {name: SpriteLayer(name) for name in ('scenery', 'items', 'actors')}
+        # only the map itself shows, dimmed, out of sight (see SpriteLayer)
+        self.sprite_layers = {
+            'scenery': SpriteLayer('scenery', shows_unseen=True),
+            'items': SpriteLayer('items'),
+            'actors': SpriteLayer('actors'),
+        }
 
         # screen-space CharGridLayers (menus, pagers, console/HUD text); a
         # backend renders each entry generically, in list order
@@ -169,8 +170,9 @@ class Scene(Entity):
         # track all items
         self.items = []
 
-        # track monsters by location
-        self.monsters = {}
+        # track all monsters, in the order they act (see DungeonMaster.end_turn);
+        # where each one stands is its own location, not a key here
+        self.monsters = []
 
         # the multi-level world, installed by set_world(). Until then the scene
         # runs on a single unnamed maze, which is what the tests and the
@@ -317,10 +319,8 @@ class Scene(Entity):
             for percept in item.percepts:
                 self.perceive(percept, self._player)
 
-    def monster_moved(self, mon, old_pos):
-        if old_pos is not None:
-            self.monsters[tuple(old_pos)].remove(mon)
-        self.monsters.setdefault(tuple(mon.position), []).append(mon)
+    def add_monster(self, monster):
+        self.monsters.append(monster)
 
     def add_item(self, item):
         self.items.append(item)

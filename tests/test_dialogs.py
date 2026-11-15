@@ -4,7 +4,7 @@ import threading
 import pytest
 
 from carriage_return.dialogs import (DialogSession, DialogClosed, run_menu,
-                                     run_pager, Menu, MenuItem, Pager)
+                                     run_pager, MenuWidget, MenuItem, PagerWidget)
 from carriage_return.input import Close, KeyPress, KeyRelease
 
 JOIN_TIMEOUT = 10.0
@@ -14,6 +14,13 @@ def press(key):
     return KeyPress(key)
 
 
+def sized(widget):
+    """Size a standalone widget to its preferred shape, as dialogs._wrap_dialog
+    does when it frames one -- an unplaced widget has no cells to repaint."""
+    widget.resize(*widget.preferred_shape())
+    return widget
+
+
 def finish(session):
     session.join(timeout=JOIN_TIMEOUT)
     assert session.finished.is_set()
@@ -21,9 +28,10 @@ def finish(session):
 
 
 def test_run_menu_multi_select():
-    menu = Menu("take", [MenuItem('a sword', value=1),
-                         MenuItem('a shield', value=2),
-                         MenuItem('a torch', value=3)], multi_select=True)
+    menu = sized(MenuWidget("take", [MenuItem('a sword', value=1),
+                                     MenuItem('a shield', value=2),
+                                     MenuItem('a torch', value=3)],
+                            multi_select=True))
     session = DialogSession(lambda s: run_menu(s, menu)).start()
 
     for key in ['Down', 'Down', 'Space', 'Enter']:
@@ -37,7 +45,7 @@ def test_run_menu_multi_select():
 
 
 def test_run_menu_single_select_and_key_release_ignored():
-    menu = Menu("choose", ['x', 'y', 'z'])
+    menu = sized(MenuWidget("choose", ['x', 'y', 'z']))
     session = DialogSession(lambda s: run_menu(s, menu)).start()
 
     session.post(press('Down'))
@@ -50,7 +58,7 @@ def test_run_menu_single_select_and_key_release_ignored():
 
 
 def test_run_menu_escape_cancels():
-    menu = Menu("choose", ['x', 'y'])
+    menu = sized(MenuWidget("choose", ['x', 'y']))
     session = DialogSession(lambda s: run_menu(s, menu)).start()
 
     session.post(press('Down'))
@@ -64,7 +72,7 @@ def test_run_menu_escape_cancels():
 
 def test_close_unwinds_via_dialog_closed():
     seen = []
-    menu = Menu("choose", ['x', 'y'])
+    menu = sized(MenuWidget("choose", ['x', 'y']))
     session = DialogSession(lambda s: run_menu(s, menu))
     session.finished.connect(seen.append)
     session.start()
@@ -106,7 +114,7 @@ def test_finished_connect_before_and_after_runs_on_dialog_thread():
 
 
 def test_run_pager():
-    pager = Pager("book", ['page one', 'page two', 'page three'])
+    pager = sized(PagerWidget("book", ['page one', 'page two', 'page three']))
     session = DialogSession(lambda s: run_pager(s, pager)).start()
 
     for key in ['Right', 'Right', 'Right', 'Left', 'Escape']:

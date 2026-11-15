@@ -31,4 +31,11 @@ for unit in _units:
 #: floor, and the rectangular look is a display choice, not a world fact.
 CELL_SIZE_M = 1.0 * m
 
+#: The rectangular look: a cell's displayed width over its displayed height
+#: (glyph cells are taller than wide). A display choice, per the note above --
+#: the renderer's camera draws cells this shape, and the few world-building
+#: decisions made for how things *look* (a roof's ridge running along a
+#: building's visibly longer side) read it from here so the two cannot drift.
+CELL_DISPLAY_ASPECT = 0.6
+
 

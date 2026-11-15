@@ -12,7 +12,7 @@ import os
 import pytest
 
 from carriage_return.blocktypes import BlockTypes
-from carriage_return.dialogs import CastPrompt, DialogSession, open_cast, run_cast
+from carriage_return.dialogs import CastWidget, DialogSession, open_cast, run_cast
 from carriage_return.input import InputDispatcher, KeyPress
 from carriage_return.interpreter import CommandInterpreter
 from carriage_return.maze import Maze
@@ -165,20 +165,20 @@ def test_lightning_teardown_removes_lights_and_sprites(scene):
 # -- cast prompt model ------------------------------------------------------
 
 def test_cast_prompt_resolves_by_substring():
-    p = CastPrompt(spell.SPELLS)
+    p = CastWidget(spell.SPELLS)
     p.text = "bal"
     assert p.resolve() == "fireball"
     assert p.phase == "direction" and p.spell_name == "fireball"
 
 
 def test_cast_prompt_prefix_match():
-    p = CastPrompt(spell.SPELLS)
+    p = CastWidget(spell.SPELLS)
     p.text = "lit"
     assert p.resolve() == "lightning"
 
 
 def test_cast_prompt_unknown_name_fizzles():
-    p = CastPrompt(spell.SPELLS)
+    p = CastWidget(spell.SPELLS)
     p.text = "xyzzy"
     assert p.resolve() is None
     assert p.phase == "name"
@@ -186,14 +186,14 @@ def test_cast_prompt_unknown_name_fizzles():
 
 
 def test_cast_prompt_ambiguous_reports():
-    p = CastPrompt(spell.SPELLS)
+    p = CastWidget(spell.SPELLS)
     p.text = "l"                       # in both firebaLl and Lightning
     assert p.resolve() is None
     assert "mean" in p.message.lower()
 
 
 def test_cast_prompt_glo_skips_direction():
-    p = CastPrompt(spell.SPELLS)
+    p = CastWidget(spell.SPELLS)
     p.text = "glo"
     assert p.resolve() == "glo"
     assert p.phase == "name"            # self-cast: no direction phase
@@ -208,7 +208,7 @@ def _type(session, text):
 
 
 def test_run_cast_type_name_then_direction():
-    p = CastPrompt(spell.SPELLS)
+    p = CastWidget(spell.SPELLS)
     session = DialogSession(lambda s: run_cast(s, p)).start()
     _type(session, "bal")
     session.post(KeyPress('Enter'))
@@ -218,7 +218,7 @@ def test_run_cast_type_name_then_direction():
 
 
 def test_run_cast_glo_needs_no_direction():
-    p = CastPrompt(spell.SPELLS)
+    p = CastWidget(spell.SPELLS)
     session = DialogSession(lambda s: run_cast(s, p)).start()
     _type(session, "glo")
     session.post(KeyPress('Enter'))              # finishes without an arrow
@@ -227,7 +227,7 @@ def test_run_cast_glo_needs_no_direction():
 
 
 def test_run_cast_escape_cancels():
-    p = CastPrompt(spell.SPELLS)
+    p = CastWidget(spell.SPELLS)
     session = DialogSession(lambda s: run_cast(s, p)).start()
     session.post(KeyPress('Escape'))
     session.join(timeout=JOIN_TIMEOUT)
@@ -235,7 +235,7 @@ def test_run_cast_escape_cancels():
 
 
 def test_run_cast_bad_name_stays_open_then_recovers():
-    p = CastPrompt(spell.SPELLS)
+    p = CastWidget(spell.SPELLS)
     session = DialogSession(lambda s: run_cast(s, p)).start()
     _type(session, "zzz")
     session.post(KeyPress('Enter'))        # fizzles, prompt stays up
