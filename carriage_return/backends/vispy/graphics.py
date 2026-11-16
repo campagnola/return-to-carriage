@@ -19,6 +19,39 @@ vispy.gloo.gl.use_gl('gl+')
 _DEFAULT_EXPOSURE = 0.002
 
 
+#: Atlas uniforms and the glyph-coverage function shared by SpritesVisual's
+#: fragment shaders (spliced in after each shader's own declarations).
+_GLSL_GLYPH_COVERAGE = """
+        uniform sampler2D atlas;
+        uniform sampler1D atlas_map;
+        uniform float n_sprites;
+        uniform vec2 atlas_size;  // texels, (width, height)
+
+        // Coverage of one pixel by glyph *sprite*: the mean of ss x ss samples
+        // over the pixel. pt is the pixel centre in glyph coordinates (0..1),
+        // glyph_px the glyph's size in pixels. Samples are clamped to the
+        // centres of the glyph's edge texels: cell edges are not
+        // pixel-aligned, so an edge pixel's samples would otherwise read the
+        // neighbouring atlas slot.
+        float glyph_coverage(float sprite, vec2 pt, vec2 glyph_px, int ss) {
+            vec4 atlas_coords = texture1D(atlas_map, (sprite + 0.5) / n_sprites);
+            vec2 half_texel = 0.5 / atlas_size;
+            vec2 glyph_min = atlas_coords.yx + half_texel;
+            vec2 glyph_max = atlas_coords.yx + atlas_coords.wz - half_texel;
+            float alpha = 0.0;
+            for (int i=0; i<ss; i++) {
+                for (int j=0; j<ss; j++) {
+                    vec2 dx = ((vec2(i, j) + 0.5) / float(ss) - 0.5) / glyph_px;
+                    vec2 tex_coords = clamp(atlas_coords.yx + (pt + dx) * atlas_coords.wz,
+                                            glyph_min, glyph_max);
+                    alpha += texture2D(atlas, tex_coords).g;
+                }
+            }
+            return alpha / float(ss * ss);
+        }
+"""
+
+
 class SpritesVisual(vispy.visuals.Visual):
     """
     2 basic ways we might want to draw sprites:
@@ -95,30 +128,15 @@ class SpritesVisual(vispy.visuals.Visual):
         varying vec2 v_point_coord_scale;
         varying vec2 v_point_size;
 
-        uniform sampler2D atlas;
-        uniform sampler1D atlas_map;
-        uniform float n_sprites;
-
+    """ + _GLSL_GLYPH_COVERAGE + """
         void main()
         {
             gl_FragColor = vec4(0, 0, 0, 0);
-            vec4 atlas_coords = texture1D(atlas_map, (v_sprite + 0.5) / n_sprites);
             vec2 pt = gl_PointCoord.xy * v_point_coord_scale;
             if( pt.x < 0 || pt.y < 0 || pt.x > 1 || pt.y > 1 ) {
                 discard;
             }
-            
-            // supersample sprite value
-            const float ss = 4;
-            float alpha = 0;
-            for (int i=0; i<ss; i++) {
-                for (int j=0; j<ss; j++) {
-                    vec2 dx = vec2(i/ss, j/ss) / v_point_size;
-                    vec2 tex_coords = atlas_coords.yx + (pt + dx) * atlas_coords.wz;
-                    vec4 tex = texture2D(atlas, tex_coords);
-                    alpha += tex.g / (ss*ss);
-                }
-            }
+            float alpha = glyph_coverage(v_sprite, pt, v_point_size, 4);
             
             gl_FragColor = v_fgcolor * alpha + v_bgcolor * (1-alpha);
             //EMISSION_WRITE
@@ -234,28 +252,11 @@ class SpritesVisual(vispy.visuals.Visual):
         in vec2 point_coord;
         in vec2 point_size;
 
-        uniform sampler2D atlas;
-        uniform sampler1D atlas_map;
-        uniform float n_sprites;
-
+    """ + _GLSL_GLYPH_COVERAGE + """
         void main()
         {
             gl_FragColor = vec4(0, 0, 0, 0);
-            vec4 atlas_coords = texture1D(atlas_map, (f_sprite + 0.5) / n_sprites);
-            vec2 pt = point_coord;
-            vec2 tex_coords;
-            
-            // supersample sprite value
-            const int ss = 3;
-            float alpha = 0;
-            for (int i=0; i<ss; i++) {
-                for (int j=0; j<ss; j++) {
-                    vec2 dx = vec2(i, j) / (point_size*ss);
-                    tex_coords = vec2(0.00001, 0.00001) + atlas_coords.yx + (pt + dx) * atlas_coords.wz;
-                    vec4 tex = texture2D(atlas, tex_coords);
-                    alpha += tex.g / (ss*ss);
-                }
-            }
+            float alpha = glyph_coverage(f_sprite, point_coord, point_size, 3);
             
             gl_FragColor = f_fgcolor * alpha + f_bgcolor * (1-alpha);
             //EMISSION_WRITE
@@ -401,6 +402,7 @@ class SpritesVisual(vispy.visuals.Visual):
         self._atlas_map_tex.set_data(self.atlas.sprite_coords)
         self.shared_program['atlas_map'] = self._atlas_map_tex
         self.shared_program['n_sprites'] = self._atlas_map_tex.shape[0]
+        self.shared_program['atlas_size'] = self._atlas_tex.shape[1::-1]
         self._need_atlas_upload = False
     
     def _prepare_transforms(self, view):
@@ -627,8 +629,11 @@ class CharAtlas(object):
         else:
             columns = self.columns
             
-        self.atlas = np.empty((atlas_rows * gs[1], columns*gs[2], 3), dtype=self.glyphs.dtype)
-        
+        # glyph slots are separated by a blank 1-texel gutter, so sampling
+        # that rounds onto a glyph's edge never picks up a neighbour's ink
+        pitch = gs[1] + 1, gs[2] + 1
+        self.atlas = np.zeros((atlas_rows * pitch[0], columns * pitch[1], 3), dtype=self.glyphs.dtype)
+
         self.sprite_coords = np.empty((n_glyphs, 4), dtype='float32')
         self.sprite_coords[:,2] = gs[1]
         self.sprite_coords[:,3] = gs[2]
@@ -637,8 +642,8 @@ class CharAtlas(object):
                 glyph = i * columns + j
                 if glyph >= n_glyphs:
                     break
-                x = i * gs[1]
-                y = j * gs[2]
+                x = i * pitch[0]
+                y = j * pitch[1]
                 self.sprite_coords[glyph, 0:2] = x, y
                 self.atlas[x:x+gs[1], y:y+gs[2]] = self.glyphs[glyph]
         
